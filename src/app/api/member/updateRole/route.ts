@@ -1,5 +1,3 @@
-// src/app/api/member/updateRole/route.ts
-
 import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { z } from "zod";

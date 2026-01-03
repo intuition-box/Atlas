@@ -1,5 +1,3 @@
-// src/app/api/upload/sign/route.ts
-
 import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
