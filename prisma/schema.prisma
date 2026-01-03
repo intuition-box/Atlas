@@ -47,6 +47,7 @@ enum AttestationType {
 }
 
 enum ActivityType {
+  COMMUNITY_CREATED
   JOINED
   APPLIED
   APPROVED
@@ -102,6 +103,7 @@ model User {
 
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+  onboardedAt   DateTime?
 
   // Profile
   headline      String?
@@ -184,7 +186,7 @@ model Handle {
   id            String         @id @default(cuid())
 
   /// Normalized (lowercase) handle used in routes (e.g., "saulo", "orbit-love").
-  handle        String         @unique
+  handle        String         @unique @db.VarChar(32)
 
   status        HandleStatus   @default(ACTIVE)
 
@@ -210,6 +212,7 @@ model Handle {
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
+  @@unique([ownerType, ownerId])
   @@index([status, availableAt])
   @@index([ownerType, ownerId, status])
   @@index([lastOwnerType, lastOwnerId])
