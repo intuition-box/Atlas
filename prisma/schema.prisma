@@ -86,6 +86,10 @@ enum HandleStatus {
 model User {
   id            String   @id @default(cuid())
 
+  /// Public handle used for pretty URLs (e.g., /u/[handle]).
+  /// NOTE: Handle lifecycle (release/reclaim/retire) is tracked in the `Handle` table.
+  handle        String?  @unique @db.VarChar(32)
+
   // Auth.js core fields
   name          String?
   email         String?  @unique
@@ -122,6 +126,7 @@ model User {
   activitySubjects      ActivityEvent[] @relation("ActivitySubject")
 
   @@index([createdAt])
+  @@index([handle])
 }
 
 model Account {
@@ -216,6 +221,11 @@ model Handle {
 
 model Community {
   id          String   @id @default(cuid())
+
+  /// Public handle used for pretty URLs (e.g., /c/[handle]).
+  /// NOTE: Handle lifecycle (release/reclaim/retire) is tracked in the `Handle` table.
+  handle      String   @unique @db.VarChar(32)
+
   name        String
   description String?
   avatarUrl   String?
@@ -239,6 +249,7 @@ model Community {
 
   @@index([ownerId])
   @@index([createdAt])
+  @@index([handle])
 }
 
 model Membership {
