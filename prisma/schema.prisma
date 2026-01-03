@@ -1,0 +1,342 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// -----------------------------
+/// Enums
+/// -----------------------------
+
+enum MembershipRole {
+  OWNER
+  ADMIN
+  MODERATOR
+  MEMBER
+}
+
+enum MembershipStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  BANNED
+}
+
+enum OrbitLevel {
+  EXPLORER
+  PARTICIPANT
+  CONTRIBUTOR
+  ADVOCATE
+}
+
+enum ApplicationStatus {
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+enum AttestationType {
+  WORKED_TOGETHER
+  KNOWS_IRL
+  ROLE_DEV
+  ROLE_ARTIST
+  ROLE_DESIGN
+  OTHER
+}
+
+enum ActivityType {
+  JOINED
+  APPLIED
+  APPROVED
+  REJECTED
+  BANNED
+  UNBANNED
+  ATTESTED
+  PROFILE_UPDATED
+  COMMUNITY_UPDATED
+  ROLE_UPDATED
+  ORBIT_OVERRIDE
+}
+
+enum HandleOwnerType {
+  USER
+  COMMUNITY
+}
+
+enum HandleStatus {
+  /// Currently assigned and resolvable in routes.
+  ACTIVE
+
+  /// Not assigned (routes should 404).
+  /// Can be reclaimed by the last owner until `reclaimUntil`.
+  /// After `availableAt`, anyone can claim it.
+  RELEASED
+
+  /// Permanently unavailable (routes should 404 forever).
+  /// Used when a user/community is deleted.
+  RETIRED
+}
+
+/// -----------------------------
+/// Core: People & Accounts
+/// -----------------------------
+
+model User {
+  id            String   @id @default(cuid())
+
+  // Auth.js core fields
+  name          String?
+  email         String?  @unique
+  emailVerified DateTime?
+  image         String?  // Auth.js user image (you can store the same URL as avatarUrl here)
+
+  // App-specific identity
+  discordId     String?  @unique
+  avatarUrl     String?  // preferred profile image URL (e.g., Cloudflare R2)
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Profile
+  headline      String?
+  bio           String?
+  location      String?
+  links         String[] @default([]) // ex: ["https://github.com/x", "https://x.com/y"]
+  skills        String[] @default([]) // ex: ["TypeScript", "Design Systems"]
+  tags          String[] @default([]) // ex: ["open-source", "dao", "mentor"]
+
+  // Auth.js relations
+  accounts      Account[]
+  sessions      Session[]
+
+  // App relations
+  ownedCommunities      Community[] @relation("CommunityOwner")
+  memberships           Membership[]
+  applications          Application[] @relation("ApplicationApplicant")
+  applicationsReviewed  Application[] @relation("ApplicationReviewer")
+  attestationsGiven     Attestation[] @relation("attestationsGiven")
+  attestationsReceived  Attestation[] @relation("attestationsReceived")
+  activityEvents        ActivityEvent[] @relation("activityActor")
+  activitySubjects      ActivityEvent[] @relation("ActivitySubject")
+
+  @@index([createdAt])
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+/// Global handle registry used for pretty URLs and UI display.
+///
+/// Routing rule of thumb:
+/// - Only rows with status = ACTIVE should resolve.
+/// - RELEASED and RETIRED must return 404.
+///
+/// Reuse policy (enforced in application logic):
+/// - On handle change: set previous handle to RELEASED, clear ownerType/ownerId,
+///   set lastOwnerType/lastOwnerId, set releasedAt=now, reclaimUntil=now+7d, availableAt=now+30d.
+/// - Reclaim: only allowed for the last owner while now <= reclaimUntil.
+/// - Public claim: only allowed when now >= availableAt.
+/// - Deletion: set status=RETIRED and set retiredAt=now; never becomes available.
+model Handle {
+  id            String         @id @default(cuid())
+
+  /// Normalized (lowercase) handle used in routes (e.g., "saulo", "orbit-love").
+  handle        String         @unique
+
+  status        HandleStatus   @default(ACTIVE)
+
+  /// Current owner when ACTIVE. Must be NULL when status != ACTIVE.
+  ownerType     HandleOwnerType?
+  ownerId       String?
+
+  /// Last owner info to support short reclaim windows.
+  lastOwnerType HandleOwnerType?
+  lastOwnerId   String?
+
+  claimedAt     DateTime       @default(now())
+  releasedAt    DateTime?
+
+  /// Last-owner reclaim cutoff (e.g., releasedAt + 7 days).
+  reclaimUntil  DateTime?
+
+  /// Public availability time (e.g., releasedAt + 30 days).
+  availableAt   DateTime?
+
+  retiredAt     DateTime?
+
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([status, availableAt])
+  @@index([ownerType, ownerId, status])
+  @@index([lastOwnerType, lastOwnerId])
+}
+
+/// -----------------------------
+/// Communtiies and members
+/// -----------------------------
+
+model Community {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  avatarUrl   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  ownerId     String
+  owner       User     @relation("CommunityOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+
+  // Settings (keep flexible)
+  isPublicDirectory Boolean @default(false)
+
+  // JSON settings so you can evolve without migrations every week
+  applicationFormSchema Json?
+  orbitConfig           Json? // thresholds, weights, etc.
+
+  memberships Membership[]
+  applications Application[]
+  attestations Attestation[]
+  activityEvents ActivityEvent[]
+
+  @@index([ownerId])
+  @@index([createdAt])
+}
+
+model Membership {
+  id          String   @id @default(cuid())
+  userId      String
+  communityId String
+
+  role        MembershipRole   @default(MEMBER)
+  status      MembershipStatus @default(PENDING)
+
+  // Orbit + scoring
+  orbitLevel        OrbitLevel @default(EXPLORER)
+  orbitLevelOverride OrbitLevel?
+  loveScore         Int        @default(0)
+  reachScore        Int        @default(0)
+  gravityScore      Int        @default(0)
+
+  lastActiveAt DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  approvedAt   DateTime?
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, communityId])
+  @@index([communityId, status])
+  @@index([communityId, role])
+  @@index([communityId, gravityScore])
+}
+
+model Application {
+  id          String   @id @default(cuid())
+  userId      String
+  communityId String
+
+  status      ApplicationStatus @default(SUBMITTED)
+  answers     Json              // store RHF output here (validated server-side)
+
+  reviewerId  String?
+  reviewedAt  DateTime?
+  reviewer  User?     @relation("ApplicationReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user      User      @relation("ApplicationApplicant", fields: [userId], references: [id], onDelete: Cascade)
+  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+
+  // One “active” application per user/community for MVP simplicity
+  @@unique([userId, communityId])
+  @@index([communityId, status, createdAt])
+}
+
+/// -----------------------------
+/// Attestations and facts
+/// -----------------------------
+
+model Attestation {
+  id          String   @id @default(cuid())
+  fromUserId  String
+  toUserId    String
+  communityId String
+
+  type        AttestationType
+  note        String?
+  confidence  Float?  // optional 0..1
+  createdAt   DateTime @default(now())
+
+  fromUser  User      @relation("attestationsGiven", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUser    User      @relation("attestationsReceived", fields: [toUserId], references: [id], onDelete: Cascade)
+  community  Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+
+  @@index([communityId, createdAt])
+  @@index([communityId, toUserId, createdAt])
+  @@index([communityId, fromUserId, createdAt])
+}
+
+/// -----------------------------
+/// Activities and XP
+/// -----------------------------
+
+model ActivityEvent {
+  id          String   @id @default(cuid())
+  communityId String
+  actorId     String
+  subjectUserId String?
+
+  type        ActivityType
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  actor     User      @relation("activityActor", fields: [actorId], references: [id], onDelete: Cascade)
+  subjectUser User? @relation("ActivitySubject", fields: [subjectUserId], references: [id], onDelete: SetNull)
+
+  @@index([communityId, createdAt])
+  @@index([communityId, actorId, createdAt])
+  @@index([communityId, type, createdAt])
+  @@index([communityId, subjectUserId, createdAt])
+}
