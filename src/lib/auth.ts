@@ -3,6 +3,7 @@ import "server-only";
 import NextAuth from "next-auth";
 import Discord from "next-auth/providers/discord";
 import { PrismaAdapter } from "@auth/prisma-adapter";
+
 import { db } from "@/lib/db";
 
 const isDev = process.env.NODE_ENV !== "production";
@@ -17,34 +18,46 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: PrismaAdapter(db),
   providers: [
     Discord({
-      clientId: requiredEnv("DISCORD_CLIENT_ID"),
-      clientSecret: requiredEnv("DISCORD_CLIENT_SECRET"),
+      clientId: requiredEnv("AUTH_DISCORD_ID"),
+      clientSecret: requiredEnv("AUTH_DISCORD_SECRET"),
       // default scope includes identify + email; add more scopes later if needed
     }),
   ],
   session: { strategy: "database" },
-  secret: process.env.AUTH_SECRET,
+  secret: requiredEnv("AUTH_SECRET"),
   trustHost: true,
   debug: isDev,
   callbacks: {
     async signIn({ user, account, profile }) {
-      // Keep our app-specific identity fields in sync.
-      if (account?.provider === "discord") {
-        const discordId = account.providerAccountId;
-        const imageUrl = (profile as any)?.image_url ?? user.image ?? null;
+      if (account?.provider !== "discord") return true;
 
-        // Avoid unnecessary writes.
+      const discordId = account.providerAccountId;
+
+      // Best-effort provider avatar URL.
+      // Note: Discord profile shapes can vary across versions; keep it defensive.
+      const imageUrl =
+        (profile as any)?.image_url ??
+        (profile as any)?.avatar_url ??
+        (profile as any)?.picture ??
+        user.image ??
+        null;
+
+      // Keep app-specific identity fields in sync (avoid crashing sign-in on a bad write).
+      try {
         await db.user.update({
           where: { id: user.id },
           data: {
             discordId,
-            // For now, store the provider image URL; later we can mirror to R2 and overwrite.
+            // For now store provider image URL; later we can mirror to R2 and overwrite.
             avatarUrl: imageUrl,
             image: imageUrl,
           },
           select: { id: true },
         });
+      } catch {
+        // If this fails, we still allow sign-in; the profile can be completed later.
       }
+
       return true;
     },
     async session({ session, user }) {
