@@ -1,48 +1,55 @@
-import Link from "next/link";
-import { auth, signIn } from "@/lib/auth";
 import { redirect } from "next/navigation";
+
+import { auth, signIn } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
-export default async function SignInPage({ searchParams }: { searchParams?: { provider?: string; returnTo?: string } }) {
+type SearchParams = {
+  returnTo?: string;
+};
+
+function sanitizeReturnTo(value: string | undefined) {
+  if (!value) return "/welcome";
+  // Only allow in-app relative redirects.
+  if (!value.startsWith("/")) return "/welcome";
+  // Prevent protocol-relative redirects (//evil.com).
+  if (value.startsWith("//")) return "/welcome";
+  return value;
+}
+
+export default async function SignInPage({
+  searchParams,
+}: {
+  searchParams?: SearchParams;
+}) {
   const session = await auth();
   const authed = !!(session?.user as any)?.id;
-  const returnTo = searchParams?.returnTo || "/welcome";
+  const returnTo = sanitizeReturnTo(searchParams?.returnTo);
+
   if (authed) redirect(returnTo);
 
   async function signinDiscord() {
     "use server";
     await signIn("discord", { redirectTo: returnTo });
   }
-  async function signinGithub() {
-    "use server";
-    await signIn("github", { redirectTo: returnTo });
-  }
-  async function signinTwitter() {
-    "use server";
-    await signIn("twitter", { redirectTo: returnTo });
-  }
 
   return (
-    <div className="mx-auto max-w-sm py-24 text-center">
-      <h1 className="text-xl text-white mb-6">Sign in</h1>
-      <div className="space-y-3">
-        <form action={signinDiscord}>
-          <button className="w-full rounded-full border border-white/15 px-4 py-2 text-white/90 hover:border-white/30 hover:bg-white/5">
-            Continue with Discord
-          </button>
-        </form>
-        <form action={signinGithub}>
-          <button className="w-full rounded-full border border-white/15 px-4 py-2 text-white/90 hover:border-white/30 hover:bg-white/5">
-            Continue with GitHub
-          </button>
-        </form>
-        <form action={signinTwitter}>
-          <button className="w-full rounded-full border border-white/15 px-4 py-2 text-white/90 hover:border-white/30 hover:bg-white/5">
-            Continue with X (Twitter)
-          </button>
-        </form>
-      </div>
+    <div className="mx-auto max-w-sm px-6 py-24 text-center">
+      <h1 className="mb-2 text-xl font-semibold tracking-tight text-foreground">
+        Sign in
+      </h1>
+      <p className="mb-8 text-sm text-foreground/70">
+        Continue with Discord to join communities.
+      </p>
+
+      <form action={signinDiscord} className="space-y-3">
+        <button
+          type="submit"
+          className="w-full rounded-full border border-border bg-background px-4 py-2 text-sm text-foreground hover:bg-muted"
+        >
+          Continue with Discord
+        </button>
+      </form>
     </div>
   );
 }
