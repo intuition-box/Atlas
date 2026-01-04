@@ -67,6 +67,9 @@ enum HandleOwnerType {
 }
 
 enum HandleStatus {
+  /// Currently available handle to be registered.
+  AVAILABLE
+
   /// Currently assigned and resolvable in routes.
   ACTIVE
 
@@ -88,7 +91,13 @@ model User {
   id            String   @id @default(cuid())
 
   /// Public handle used for pretty URLs (e.g., /u/[handle]).
-  /// NOTE: Handle lifecycle (release/reclaim/retire) is tracked in the `Handle` table.
+  ///
+  /// IMPORTANT:
+  /// - The DB row is created by Auth.js on first sign-in, before the user completes onboarding.
+  /// - Therefore this field is nullable until onboarding assigns it.
+  /// - Routes are still handle-only; users without a handle are redirected to /welcome.
+  ///
+  /// Handle lifecycle (release/reclaim/retire) is tracked in the `Handle` table.
   handle        String?  @unique @db.VarChar(32)
 
   // Auth.js core fields
@@ -103,7 +112,6 @@ model User {
 
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
-  onboardedAt   DateTime?
 
   // Profile
   headline      String?
