@@ -1,9 +1,8 @@
 import { redirect } from "next/navigation";
 
+import ProfileOnboardingForm from "@/components/onboarding/profile-onboarding-form";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-
-import ProfileOnboardingForm from "@/components/onboarding/profile-onboarding-form";
 
 export const dynamic = "force-dynamic";
 
@@ -27,14 +26,13 @@ export default async function WelcomePage() {
       links: true,
       skills: true,
       tags: true,
-      onboardedAt: true,
     },
   });
 
   if (!user) redirect("/signin?returnTo=/welcome");
 
-  // “Exists” === “finished onboarding”
-  if (user.onboardedAt && user.handle) redirect("/");
+  // Onboarding is complete once a handle is set.
+  if (user.handle) redirect(`/u/${user.handle}`);
 
   return (
     <div className="mx-auto max-w-lg px-6 py-16">
@@ -50,7 +48,7 @@ export default async function WelcomePage() {
       <ProfileOnboardingForm
         initial={{
           name: user.name ?? "",
-          handle: user.handle ?? "",
+          handle: "",
           avatarUrl: user.avatarUrl ?? user.image ?? "",
           headline: user.headline ?? "",
           bio: user.bio ?? "",
