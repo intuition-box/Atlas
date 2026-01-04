@@ -2,17 +2,14 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
+import { makeHandle } from "@/lib/handle";
 import { requireUser } from "@/lib/permissions";
 
 export const runtime = "nodejs";
 
 const Body = z.object({
   name: z.string().min(1).max(80),
-  handle: z
-    .string()
-    .min(3)
-    .max(32)
-    .regex(/^[a-z0-9][a-z0-9_]{1,30}[a-z0-9]$/i, "Invalid handle"),
+  handle: z.string().min(3).max(64),
   avatarUrl: z.string().url().optional().or(z.literal("")),
   headline: z.string().max(120).optional().or(z.literal("")),
   bio: z.string().max(2000).optional().or(z.literal("")),
@@ -29,7 +26,10 @@ export async function POST(req: Request) {
   try {
     json = await req.json();
   } catch {
-    return NextResponse.json({ ok: false, error: "Invalid JSON body" }, { status: 400 });
+    return NextResponse.json(
+      { ok: false, error: "Invalid JSON body" },
+      { status: 400 }
+    );
   }
 
   const parsed = Body.safeParse(json);
@@ -41,55 +41,35 @@ export async function POST(req: Request) {
   }
 
   const body = parsed.data;
-  const now = new Date();
 
   try {
-    const user = await db.$transaction(async (tx) => {
-      // 1) Check if handle is already taken by ACTIVE handle record
-      const existing = await tx.handle.findFirst({
-        where: { value: body.handle.toLowerCase(), state: "ACTIVE" },
-        select: { id: true },
-      });
-
-      if (existing) {
-        throw new Error("Handle is already taken.");
-      }
-
-      // 2) Create ACTIVE handle record for this user
-      await tx.handle.create({
-        data: {
-          value: body.handle.toLowerCase(),
-          subjectType: "USER",
-          subjectId: userId,
-          state: "ACTIVE",
-          activatedAt: now,
-        },
-      });
-
-      // 3) Update user profile + mark onboarded
-      return tx.user.update({
-        where: { id: userId },
-        data: {
-          name: body.name,
-          handle: body.handle.toLowerCase(),
-          avatarUrl: body.avatarUrl || null,
-          headline: body.headline || null,
-          bio: body.bio || null,
-          location: body.location || null,
-          links: body.links ?? [],
-          skills: body.skills ?? [],
-          tags: body.tags ?? [],
-          onboardedAt: now,
-        },
-        select: { id: true, handle: true, onboardedAt: true },
-      });
+    // 1) Claim the handle (transactional: ledger + canonical User.handle)
+    const handle = await makeHandle({
+      ownerType: "USER",
+      ownerId: userId,
+      desired: body.handle,
     });
 
-    return NextResponse.json({ ok: true, user });
+    // 2) Update the rest of the profile fields
+    await db.user.update({
+      where: { id: userId },
+      data: {
+        name: body.name,
+        avatarUrl: body.avatarUrl ? body.avatarUrl : null,
+        headline: body.headline ? body.headline : null,
+        bio: body.bio ? body.bio : null,
+        location: body.location ? body.location : null,
+        links: body.links ?? [],
+        skills: body.skills ?? [],
+        tags: body.tags ?? [],
+      },
+      select: { id: true },
+    });
+
+    return NextResponse.json({ ok: true, handle });
   } catch (e: any) {
-    return NextResponse.json(
-      { ok: false, error: e?.message ?? "Failed to onboard" },
-      { status: 400 }
-    );
+    const message = e?.message ?? "Failed to onboard";
+    const status = /taken|reserved|available|cooling/i.test(message) ? 409 : 400;
+    return NextResponse.json({ ok: false, error: message }, { status });
   }
 }
