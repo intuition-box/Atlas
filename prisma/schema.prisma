@@ -54,7 +54,11 @@ enum ActivityType {
   REJECTED
   BANNED
   UNBANNED
+
   ATTESTED
+  ATTESTATION_RETRACTED
+  ATTESTATION_SUPERSEDED
+
   PROFILE_UPDATED
   COMMUNITY_UPDATED
   ROLE_UPDATED
@@ -132,8 +136,13 @@ model User {
   applicationsReviewed  Application[] @relation("ApplicationReviewer")
   attestationsGiven     Attestation[] @relation("attestationsGiven")
   attestationsReceived  Attestation[] @relation("attestationsReceived")
+  attestationsRevoked   Attestation[] @relation("attestationsRevokedBy")
   activityEvents        ActivityEvent[] @relation("activityActor")
   activitySubjects      ActivityEvent[] @relation("ActivitySubject")
+
+  // Security
+  securityPrefs   UserSecurityPrefs? @relation("UserSecurityPrefs")
+  securityEvents  SecurityEvent[]    @relation("UserSecurityEvents")
 
   @@index([createdAt])
   @@index([handle])
@@ -193,8 +202,8 @@ model VerificationToken {
 model Handle {
   id            String         @id @default(cuid())
 
-  /// Normalized (lowercase) handle used in routes (e.g., "saulo", "orbit-love").
-  handle        String         @unique @db.VarChar(32)
+  /// Normalized (lowercase) name used in routes (e.g., "saulo", "orbit-love").
+  name          String         @unique @db.VarChar(32)
 
   status        HandleStatus   @default(ACTIVE)
 
@@ -327,16 +336,37 @@ model Attestation {
 
   type        AttestationType
   note        String?
-  confidence  Float?  // optional 0..1
-  createdAt   DateTime @default(now())
+  confidence  Float?   // optional 0..1
 
-  fromUser  User      @relation("attestationsGiven", fields: [fromUserId], references: [id], onDelete: Cascade)
-  toUser    User      @relation("attestationsReceived", fields: [toUserId], references: [id], onDelete: Cascade)
-  community  Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  /// Soft-delete (retract) support.
+  /// When revokedAt is set, this attestation should be treated as inactive.
+  revokedAt       DateTime?
+  revokedByUserId String?
+  revokedReason   String?
+
+  /// Append-only "update" support.
+  /// When supersededById is set, this attestation has been replaced by a newer one.
+  supersededById  String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  fromUser  User       @relation("attestationsGiven", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUser    User       @relation("attestationsReceived", fields: [toUserId], references: [id], onDelete: Cascade)
+  community Community  @relation(fields: [communityId], references: [id], onDelete: Cascade)
+
+  /// Who revoked it (optional; can be the author or a community admin/mod).
+  revokedBy User? @relation("attestationsRevokedBy", fields: [revokedByUserId], references: [id], onDelete: SetNull)
+
+  /// Self relation for supersede chain.
+  supersededBy Attestation? @relation("AttestationSupersede", fields: [supersededById], references: [id], onDelete: SetNull)
+  supersedes   Attestation[] @relation("AttestationSupersede")
 
   @@index([communityId, createdAt])
   @@index([communityId, toUserId, createdAt])
   @@index([communityId, fromUserId, createdAt])
+  @@index([communityId, revokedAt, createdAt])
+  @@index([supersededById])
 }
 
 /// -----------------------------
@@ -380,7 +410,7 @@ model UserSecurityPrefs {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  user             User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user             User    @relation("UserSecurityPrefs", fields: [userId], references: [id], onDelete: Cascade)
 }
 
 /// Append-only audit log for high-signal security actions.
@@ -397,7 +427,7 @@ model SecurityEvent {
 
   createdAt DateTime @default(now())
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User     @relation("UserSecurityEvents", fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
   @@index([type, createdAt])
