@@ -1,6 +1,7 @@
 import { z } from "zod";
 
-import { Handle, NonEmptyString, OptionalUrl, Url } from "./common";
+import { NonEmptyString, OptionalUrl, Url } from "./common";
+import { HandleSchema } from "@/lib/handle";
 
 const Skill = z.string().trim().min(1).max(32);
 const Tag = z.string().trim().min(1).max(32);
@@ -30,5 +31,5 @@ export const ProfileUpdateSchema = z.object({
  * If you don't want handles during onboarding yet, you can ignore this.
  */
 export const ProfileOnboardingSchema = ProfileUpdateSchema.extend({
-  handle: Handle,
+  handle: HandleSchema,
 });
