@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { db } from "@/lib/database";
-import { HandleSchema, makeHandle } from "@/lib/handle";
+import { HandleSchema } from "@/lib/handle";
+import { makeHandle } from "@/lib/handle-registry";
 import { requireUser } from "@/lib/permissions";
 
 export const runtime = "nodejs";
@@ -51,14 +52,19 @@ export async function POST(req: Request) {
 
   const body = parsed.data;
 
+  let handle: string;
   try {
-    // 1) Claim the handle (transactional: Handle ledger + canonical User.handle)
-    const handle = await makeHandle({
+    // 1) Claim the handle (writes Handle ledger + canonical User.handle)
+    handle = await makeHandle({
       ownerType: "USER",
       ownerId: userId,
       desired: body.handle,
     });
+  } catch (e: any) {
+    return jsonFail(409, e?.message ?? "Handle not available");
+  }
 
+  try {
     // 2) Update the rest of the profile fields
     await db.user.update({
       where: { id: userId },
@@ -74,14 +80,9 @@ export async function POST(req: Request) {
       },
       select: { id: true },
     });
-
-    return jsonOk({ handle });
-  } catch (e: any) {
-    const message = e?.message ?? "Failed to onboard";
-
-    // Prefer an explicit numeric status from upstream helpers (e.g. makeHandle).
-    const status = typeof e?.code === "number" ? e.code : 400;
-
-    return jsonFail(status, message);
+  } catch {
+    return jsonFail(500, "Failed to onboard");
   }
+
+  return jsonOk({ handle });
 }
