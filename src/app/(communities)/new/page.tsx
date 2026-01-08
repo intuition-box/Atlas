@@ -1,118 +1,68 @@
 import { redirect } from "next/navigation";
 
-import { auth } from "@/lib/auth";
-import { db } from "@/lib/db";
-import { HANDLE_POLICY, normalizeHandleKey } from "@/lib/handle";
-
-function isValidHandle(h: string) {
-  // MVP rule: a-z, 0-9, underscore, hyphen. 3–24 chars.
-  return /^[a-z0-9_-]{3,24}$/.test(h);
-}
-
+import { db } from "@/lib/database";
+import { requireOnboarded } from "@/lib/guards";
+import { HANDLE_POLICY, makeHandle, validateHandle } from "@/lib/handle";
+const NEW_COMMUNITY_PATH = "/new";
 export default async function NewCommunityPage() {
-  const session = await auth();
-  const userId = session?.user?.id;
-
-  if (!userId) {
-    redirect("/api/auth/signin");
-  }
+  // Creating a community requires an onboarded user.
+  await requireOnboarded(NEW_COMMUNITY_PATH);
 
   async function createCommunity(formData: FormData) {
     "use server";
 
-    const session = await auth();
-    const userId = session?.user?.id;
-    if (!userId) redirect("/api/auth/signin");
+    const { userId } = await requireOnboarded(NEW_COMMUNITY_PATH);
 
     const name = String(formData.get("name") ?? "").trim();
     const descriptionRaw = String(formData.get("description") ?? "").trim();
     const isPublicDirectory = formData.get("isPublicDirectory") === "on";
 
     const handleInput = String(formData.get("handle") ?? "");
-    const handle = normalizeHandleKey(handleInput);
+    const v = validateHandle(handleInput);
 
-    if (name.length < 2) redirect("/community/new?error=name");
-    if (!isValidHandle(handle)) redirect("/community/new?error=handle");
-
-    const now = new Date();
+    if (name.length < 2) redirect(`${NEW_COMMUNITY_PATH}?error=name`);
+    if (!v.ok) redirect(`${NEW_COMMUNITY_PATH}?error=handle`);
 
     try {
-      await db.$transaction(async (tx) => {
-        // 1) Check handle availability / claim rules.
-        const existing = await tx.handle.findUnique({
-          where: { handle },
-          select: {
-            id: true,
-            status: true,
-            ownerType: true,
-            ownerId: true,
-            lastOwnerType: true,
-            lastOwnerId: true,
-            reclaimUntil: true,
-            availableAt: true,
-          },
-        });
+      const community = await db.community.create({
+        data: {
+          name,
+          handle: v.normalized,
+          description: descriptionRaw || null,
+          isPublicDirectory,
+          ownerId: userId,
+        },
+        select: { id: true },
+      });
 
-        if (existing) {
-          if (existing.status === "ACTIVE") throw new Error("HANDLE_TAKEN");
-          if (existing.status === "RETIRED") throw new Error("HANDLE_RETIRED");
-
-          // RELEASED
-          const isPubliclyAvailable = existing.availableAt
-            ? now >= existing.availableAt
-            : true;
-          if (!isPubliclyAvailable) throw new Error("HANDLE_NOT_AVAILABLE");
-        }
-
-        // 2) Create community.
-        const created = await tx.community.create({
-          data: {
-            name,
-            description: descriptionRaw || null,
-            isPublicDirectory,
-            ownerId: userId,
-          },
-          select: { id: true },
-        });
-
-        // 3) Claim handle for the new community.
-        if (existing) {
-          await tx.handle.update({
-            where: { id: existing.id },
-            data: {
-              status: "ACTIVE",
-              ownerType: "COMMUNITY",
-              ownerId: created.id,
-              claimedAt: now,
-              releasedAt: null,
-              reclaimUntil: null,
-              availableAt: null,
-            },
-            select: { id: true },
-          });
-        } else {
-          await tx.handle.create({
-            data: {
-              handle,
-              status: "ACTIVE",
-              ownerType: "COMMUNITY",
-              ownerId: created.id,
-              claimedAt: now,
-            },
-            select: { id: true },
-          });
-        }
-
-        return created;
+      // Claim handle ledger entry (idempotent if already correct).
+      const handle = await makeHandle({
+        ownerType: "COMMUNITY",
+        ownerId: community.id,
+        desired: v.normalized,
       });
 
       redirect(`/c/${handle}`);
     } catch (e: any) {
+      // IMPORTANT: Next.js `redirect()`/`notFound()` throw internal errors.
+      // Never swallow those inside server actions.
+      const digest = (e as any)?.digest;
+      if (typeof digest === "string") {
+        if (digest.startsWith("NEXT_REDIRECT")) throw e;
+        if (digest.startsWith("NEXT_NOT_FOUND")) throw e;
+      }
+
+      console.error("createCommunity failed", e);
+      if (process.env.NODE_ENV !== "production") {
+        throw e;
+      }
+
       const msg = typeof e?.message === "string" ? e.message : "UNKNOWN";
-      if (msg === "HANDLE_TAKEN") redirect("/community/new?error=handle_taken");
-      if (msg === "HANDLE_RETIRED") redirect("/community/new?error=handle_retired");
-      if (msg === "HANDLE_NOT_AVAILABLE") redirect("/community/new?error=handle_not_available");
-      redirect("/community/new?error=unknown");
+      if (/taken/i.test(msg)) redirect(`${NEW_COMMUNITY_PATH}?error=handle_taken`);
+      if (/retired/i.test(msg)) redirect(`${NEW_COMMUNITY_PATH}?error=handle_retired`);
+      if (/available|cooling/i.test(msg)) redirect(`${NEW_COMMUNITY_PATH}?error=handle_not_available`);
+
+      redirect(`${NEW_COMMUNITY_PATH}?error=unknown`);
     }
   }
 
@@ -153,9 +103,7 @@ export default async function NewCommunityPage() {
               required
             />
           </div>
-          <p className="text-xs opacity-60">
-            Allowed: a-z, 0-9, underscore, hyphen. 3–24 chars.
-          </p>
+          <p className="text-xs opacity-60">Allowed: a-z, 0-9, hyphen. 3–32 chars.</p>
           <p className="text-xs opacity-60">
             Released handles 404 immediately. They become public after {HANDLE_POLICY.publicReuseAfterDays} days.
           </p>
