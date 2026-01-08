@@ -1,4 +1,5 @@
 import "server-only";
+import { randomBytes } from "node:crypto";
 
 import { db } from "@/lib/database";
 import { assertValidHandle, makeHandleCandidate, validateHandle } from "@/lib/handle";
@@ -34,10 +35,6 @@ function addDays(d: Date, days: number) {
   return out;
 }
 
-function ownerModel(ownerType: HandleOwnerType) {
-  return ownerType === "USER" ? "user" : "community";
-}
-
 function isSameOwner(a: { ownerType: HandleOwnerType; ownerId: string }, b?: {
   ownerType: HandleOwnerType | null;
   ownerId: string | null;
@@ -47,19 +44,9 @@ function isSameOwner(a: { ownerType: HandleOwnerType; ownerId: string }, b?: {
 
 function randomSuffix(len = 6): string {
   const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
+  const buf = randomBytes(len);
   let out = "";
-  try {
-    // Node 18+ / modern runtimes
-    if (typeof crypto !== "undefined" && typeof (crypto as any).getRandomValues === "function") {
-      const buf = new Uint8Array(len);
-      (crypto as any).getRandomValues(buf);
-      for (let i = 0; i < len; i++) out += alphabet[buf[i] % alphabet.length];
-      return out;
-    }
-  } catch {
-    // ignore
-  }
-  for (let i = 0; i < len; i++) out += alphabet[Math.floor(Math.random() * alphabet.length)];
+  for (let i = 0; i < len; i++) out += alphabet[buf[i] % alphabet.length];
   return out;
 }
 
@@ -118,8 +105,15 @@ export async function getActiveHandleForOwner(args: {
   ownerType: HandleOwnerType;
   ownerId: string;
 }): Promise<string | null> {
-  const model = ownerModel(args.ownerType);
-  const row = await (db as any)[model].findUnique({
+  if (args.ownerType === "USER") {
+    const row = await db.user.findUnique({
+      where: { id: args.ownerId },
+      select: { handle: true },
+    });
+    return row?.handle ?? null;
+  }
+
+  const row = await db.community.findUnique({
     where: { id: args.ownerId },
     select: { handle: true },
   });
@@ -188,12 +182,16 @@ export async function makeHandle(args: MakeHandleArgs): Promise<string> {
   const now = new Date();
 
   return db.$transaction(async (tx) => {
-    const model = ownerModel(args.ownerType);
-
-    const current = await (tx as any)[model].findUnique({
-      where: { id: args.ownerId },
-      select: { handle: true },
-    });
+    const current =
+      args.ownerType === "USER"
+        ? await tx.user.findUnique({
+            where: { id: args.ownerId },
+            select: { handle: true },
+          })
+        : await tx.community.findUnique({
+            where: { id: args.ownerId },
+            select: { handle: true },
+          });
 
     const currentHandle: string | null = current?.handle ?? null;
     if (currentHandle === desiredKey) return desiredKey;
@@ -309,11 +307,19 @@ export async function makeHandle(args: MakeHandleArgs): Promise<string> {
     });
 
     // Set canonical handle on the owner.
-    await (tx as any)[model].update({
-      where: { id: args.ownerId },
-      data: { handle: desiredKey },
-      select: { id: true },
-    });
+    if (args.ownerType === "USER") {
+      await tx.user.update({
+        where: { id: args.ownerId },
+        data: { handle: desiredKey },
+        select: { id: true },
+      });
+    } else {
+      await tx.community.update({
+        where: { id: args.ownerId },
+        data: { handle: desiredKey },
+        select: { id: true },
+      });
+    }
 
     return desiredKey;
   });
