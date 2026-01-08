@@ -4,7 +4,7 @@ import { PrismaAdapter } from "@auth/prisma-adapter";
 import NextAuth from "next-auth";
 import Discord from "next-auth/providers/discord";
 
-import { db } from "@/lib/db";
+import { db } from "@/lib/database";
 
 const isDev = process.env.NODE_ENV !== "production";
 
@@ -12,6 +12,11 @@ function requiredEnv(name: string) {
   const v = process.env[name];
   if (!v || v.length === 0) throw new Error(`${name} is required`);
   return v;
+}
+
+function optionalEnv(name: string) {
+  const v = process.env[name];
+  return v && v.length > 0 ? v : null;
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -24,7 +29,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   ],
   session: { strategy: "database" },
   secret: requiredEnv("AUTH_SECRET"),
-  trustHost: true,
+  pages: {
+    signIn: "/signin",
+  },
+  trustHost: isDev || optionalEnv("AUTH_TRUST_HOST") === "true",
   debug: isDev,
   callbacks: {
     async signIn({ user, account, profile }) {
@@ -50,8 +58,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           },
           select: { id: true },
         });
-      } catch {
+      } catch (err) {
         // Don't block sign-in if this write fails.
+        if (isDev) console.warn("[auth] failed to persist discord profile fields", err);
       }
 
       return true;
@@ -62,6 +71,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         (session.user as any).avatarUrl =
           (user as any).avatarUrl ?? user.image ?? null;
         (session.user as any).handle = (user as any).handle ?? null;
+        (session.user as any).onboarded = Boolean((user as any).handle);
       }
       return session;
     },
