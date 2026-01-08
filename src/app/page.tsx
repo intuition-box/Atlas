@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import { db } from "@/lib/db";
+import { db } from "@/lib/database";
 
 export default async function Home() {
   const communities = await db.community.findMany({
@@ -34,7 +34,7 @@ export default async function Home() {
         </div>
 
         <Link
-          href="/community/new"
+          href="/new"
           className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground hover:bg-muted"
         >
           Create community

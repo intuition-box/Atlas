@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { db } from "@/lib/db";
+import { db } from "@/lib/database";
 import { auth } from "@/lib/auth";
 
 export default async function CommunitiesIndexPage() {

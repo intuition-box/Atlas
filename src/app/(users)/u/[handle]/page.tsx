@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { db } from "@/lib/db";
+import { db } from "@/lib/database";
 import { resolveUserIdFromHandle } from "@/lib/handle";
 
 export const dynamic = "force-dynamic";

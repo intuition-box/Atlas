@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { db } from "@/lib/db";
+import { db } from "@/lib/database";
 import { makeHandle } from "@/lib/handle";
 import { requireUser } from "@/lib/permissions";
 

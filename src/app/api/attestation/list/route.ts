@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { db } from "@/lib/db";
+import { db } from "@/lib/database";
 import { AttestationListSchema } from "@/lib/validation/attestation";
 
 export const runtime = "nodejs";

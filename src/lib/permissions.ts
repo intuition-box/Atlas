@@ -1,7 +1,7 @@
 import "server-only";
 
 import { auth } from "@/lib/auth";
-import { db } from "@/lib/db";
+import { db } from "@/lib/database";
 import { AppError } from "@/lib/http";
 import { MembershipRole, MembershipStatus } from "@prisma/client";
 

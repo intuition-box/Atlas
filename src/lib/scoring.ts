@@ -1,6 +1,6 @@
 import "server-only";
 
-import { db } from "@/lib/db";
+import { db } from "@/lib/database";
 import { MembershipStatus, OrbitLevel } from "@prisma/client";
 
 function clamp(n: number, min: number, max: number) {

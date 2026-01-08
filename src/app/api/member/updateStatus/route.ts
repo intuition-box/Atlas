@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { db } from "@/lib/db";
+import { db } from "@/lib/database";
 import { requireCommunityRole, requireUser } from "@/lib/permissions";
 
 export const runtime = "nodejs";

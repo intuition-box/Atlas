@@ -3,16 +3,16 @@ import { notFound } from "next/navigation";
 
 import OrbitView from "@/components/orbit/orbit-view";
 import { auth } from "@/lib/auth";
-import { db } from "@/lib/db";
+import { db } from "@/lib/database";
 import {
   getActiveHandleForOwner,
-  normalizeHandleKey,
+  normalizeHandle,
   resolveCommunityIdFromHandle,
 } from "@/lib/handle";
 
 export default async function CommunityPage(props: { params: Promise<{ handle: string }> }) {
   const { handle: raw } = await props.params;
-  const routeHandle = normalizeHandleKey(raw);
+  const routeHandle = normalizeHandle(raw);
 
   const communityId = await resolveCommunityIdFromHandle(routeHandle);
   if (!communityId) return notFound();

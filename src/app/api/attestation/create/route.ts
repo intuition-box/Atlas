@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 
-import { db } from "@/lib/db";
+import { db } from "@/lib/database";
 import { requireApprovedMember, requireUser } from "@/lib/permissions";
 import { recomputeMemberScores } from "@/lib/scoring";
 import { AttestationCreateSchema } from "@/lib/validation/attestation";
