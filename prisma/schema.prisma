@@ -227,7 +227,7 @@ model Handle {
 }
 
 /// -----------------------------
-/// Communtiies and members
+/// Communities and members
 /// -----------------------------
 
 model Community {
@@ -361,6 +361,46 @@ model ActivityEvent {
   @@index([communityId, actorId, createdAt])
   @@index([communityId, type, createdAt])
   @@index([communityId, subjectUserId, createdAt])
+}
+
+/// -----------------------------
+/// Security: preferences + events
+/// -----------------------------
+
+/// Per-user notification preferences for security-related emails.
+/// Defaults are intentionally "on".
+model UserSecurityPrefs {
+  userId           String  @id
+
+  emailOnLogin       Boolean @default(true)
+  emailOnNewDevice   Boolean @default(true)
+  emailOnMfaChange   Boolean @default(true)
+  emailOnBackupCodes Boolean @default(true)
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user             User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/// Append-only audit log for high-signal security actions.
+model SecurityEvent {
+  id        String   @id @default(cuid())
+  userId    String
+
+  /// Event type string, e.g. "mfa.totp.enabled".
+  type      String   @db.VarChar(64)
+
+  ip        String?
+  userAgent String?
+  metadata  Json?
+
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([type, createdAt])
 }
 
 /// -----------------------------
