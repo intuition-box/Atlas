@@ -1,17 +1,11 @@
 import "server-only";
 
-import { loadEnvConfig } from "@next/env";
 import { PrismaClient, type Prisma } from "@prisma/client";
-import { neonConfig } from "@neondatabase/serverless";
 import { PrismaNeon } from "@prisma/adapter-neon";
+import { neonConfig } from "@neondatabase/serverless";
 import ws from "ws";
 
 const isDev = process.env.NODE_ENV !== "production";
-
-// Ensure env vars are loaded when running in dev/Turbopack before Next processes them.
-if (!process.env.__NEXT_PROCESSED_ENV) {
-  loadEnvConfig(process.cwd());
-}
 
 // Neon serverless driver uses WebSockets in Node.js.
 neonConfig.webSocketConstructor = ws;
@@ -20,10 +14,12 @@ neonConfig.webSocketConstructor = ws;
 const globalForPrisma = globalThis as unknown as { __prisma?: PrismaClient };
 
 function makeClient() {
+  // Runtime uses the pooled Neon connection string.
+  // For migrations, prefer the unpooled URL via prisma.config.ts (e.g. DATABASE_URL_UNPOOLED).
   const url = process.env.DATABASE_URL;
   if (!url) {
     throw new Error(
-      "DATABASE_URL is not set. Prisma v7 runtime needs an adapter; for Neon set DATABASE_URL to your pooler connection string."
+      "DATABASE_URL is not set. Set DATABASE_URL to your Neon pooled (pooler) connection string."
     );
   }
 
