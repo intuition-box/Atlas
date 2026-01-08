@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 
 import ProfileOnboardingForm from "@/components/onboarding/profile-onboarding-form";
 import { auth } from "@/lib/auth";
-import { db } from "@/lib/db";
+import { db } from "@/lib/database";
 
 export const dynamic = "force-dynamic";
 
