@@ -39,6 +39,46 @@ export function normalizeHandle(input: string): string {
   return s;
 }
 
+/**
+ * Create a best-effort handle *candidate* from an arbitrary seed (name/email/etc.).
+ *
+ * Notes:
+ * - Client-safe (no DB checks). Uniqueness/availability is enforced server-side.
+ * - This is intentionally a bit more permissive than `normalizeHandle`:
+ *   it strips diacritics and drops unsupported characters.
+ */
+export function makeHandleCandidate(seed: string): string {
+  let s = normalizeHandle(seed);
+
+  // Normalize Unicode dashes to ASCII hyphen-minus
+  try {
+    s = s.replace(/[\p{Pd}]+/gu, "-");
+  } catch {
+    s = s.replace(/[\u2010-\u2015]/g, "-");
+  }
+
+  // Strip accents/diacritics
+  try {
+    s = s.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
+  } catch {
+    // ignore
+  }
+
+  // Keep only a–z, 0–9, hyphen
+  s = s
+    .replace(/[^a-z0-9-]/g, "")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  if (!s) s = "user";
+
+  if (s.length > MAX_HANDLE_LEN) {
+    s = s.slice(0, MAX_HANDLE_LEN).replace(/-+$/g, "");
+  }
+
+  return s;
+}
+
 export function validateHandle(input: string): {
   ok: boolean;
   normalized: string;
@@ -60,7 +100,7 @@ export function assertValidHandle(input: string): string {
 
   // One friendly message is enough for MVP.
   throw new Error(
-    "Invalid handle. Use 3–40 lowercase letters/numbers separated by hyphens (e.g. 'saulo' or 'saulo-pt')."
+    "Invalid handle. Use 3–32 lowercase letters/numbers separated by hyphens (e.g. 'saulo' or 'saulo-pt')."
   );
 }
 

@@ -1,7 +1,7 @@
 import "server-only";
 
 import { db } from "@/lib/database";
-import { assertValidHandle, validateHandle } from "@/lib/handle";
+import { assertValidHandle, makeHandleCandidate, validateHandle } from "@/lib/handle";
 
 /**
  * Server-only handle lifecycle helpers.
@@ -43,6 +43,47 @@ function isSameOwner(a: { ownerType: HandleOwnerType; ownerId: string }, b?: {
   ownerId: string | null;
 }) {
   return !!b && b.ownerType === a.ownerType && b.ownerId === a.ownerId;
+}
+
+function randomSuffix(len = 6): string {
+  const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
+  let out = "";
+  try {
+    // Node 18+ / modern runtimes
+    if (typeof crypto !== "undefined" && typeof (crypto as any).getRandomValues === "function") {
+      const buf = new Uint8Array(len);
+      (crypto as any).getRandomValues(buf);
+      for (let i = 0; i < len; i++) out += alphabet[buf[i] % alphabet.length];
+      return out;
+    }
+  } catch {
+    // ignore
+  }
+  for (let i = 0; i < len; i++) out += alphabet[Math.floor(Math.random() * alphabet.length)];
+  return out;
+}
+
+
+/**
+ * True if a canonical handle is currently in use or blocked.
+ * - Checks canonical ownership (User.handle / Community.handle)
+ * - Also treats Handle rows as blocking when status is ACTIVE or RETIRED
+ * - RELEASED is not considered "taken" (it may still be unclaimable depending on timing)
+ */
+export async function isHandleTaken(raw: string): Promise<boolean> {
+  const v = validateHandle(raw);
+  if (!v.ok) return false;
+  const key = v.normalized;
+
+  const [u, c, h] = await Promise.all([
+    db.user.findFirst({ where: { handle: key }, select: { id: true } }),
+    db.community.findFirst({ where: { handle: key }, select: { id: true } }),
+    db.handle.findUnique({ where: { name: key }, select: { status: true } }),
+  ]);
+
+  if (u || c) return true;
+  if (!h) return false;
+  return h.status === "ACTIVE" || h.status === "RETIRED";
 }
 
 /**
@@ -306,4 +347,49 @@ export async function retireHandle(name: string): Promise<void> {
       ownerId: null,
     },
   });
+}
+
+/**
+ * Generate a globally-unique, currently-claimable handle suggestion.
+ *
+ * Notes:
+ * - This is best-effort and still race-prone; callers must handle unique conflicts on write.
+ * - A suggestion will avoid handles that are cooling down or still in the exclusive reclaim window.
+ */
+export async function ensureUniqueGlobalHandle(base: string): Promise<string> {
+  const root = makeHandleCandidate(base);
+
+  // If the root isn't valid per our rules, fall back to a safe default.
+  const vRoot = validateHandle(root);
+  const rootKey = vRoot.ok ? vRoot.normalized : "member";
+
+  // Try the root first.
+  try {
+    return await assertHandleAvailable(rootKey);
+  } catch {
+    // continue
+  }
+
+  // Try numeric suffixes.
+  for (let i = 2; i < 10_000; i++) {
+    const candidate = `${rootKey}-${i}`;
+    try {
+      return await assertHandleAvailable(candidate);
+    } catch {
+      // continue
+    }
+  }
+
+  // Final fallback.
+  for (let tries = 0; tries < 25; tries++) {
+    const candidate = `${rootKey}-${randomSuffix(6)}`;
+    try {
+      return await assertHandleAvailable(candidate);
+    } catch {
+      // continue
+    }
+  }
+
+  // Extremely unlikely; last-resort always returns a syntactically valid handle.
+  return assertValidHandle(`user-${randomSuffix(8)}`);
 }
