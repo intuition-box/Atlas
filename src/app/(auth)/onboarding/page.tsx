@@ -6,7 +6,7 @@ import { db } from "@/lib/database";
 
 export const dynamic = "force-dynamic";
 
-export default async function WelcomePage() {
+export default async function OnboardingPage() {
   const session = await auth();
   const userId = (session?.user as any)?.id as string | undefined;
 
