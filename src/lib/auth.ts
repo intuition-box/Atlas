@@ -5,6 +5,7 @@ import NextAuth from "next-auth";
 import Discord from "next-auth/providers/discord";
 
 import { db } from "@/lib/database";
+import { ROUTES } from "@/lib/routes";
 
 const isDev = process.env.NODE_ENV !== "production";
 
@@ -30,7 +31,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   session: { strategy: "database" },
   secret: requiredEnv("AUTH_SECRET"),
   pages: {
-    signIn: "/signin",
+    signIn: ROUTES.signIn,
   },
   trustHost: isDev || optionalEnv("AUTH_TRUST_HOST") === "true",
   debug: isDev,
