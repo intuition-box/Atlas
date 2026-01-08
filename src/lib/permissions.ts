@@ -2,7 +2,6 @@ import "server-only";
 
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/database";
-import { AppError } from "@/lib/http";
 import { MembershipRole, MembershipStatus } from "@prisma/client";
 
 // Lower index = more privileges.
@@ -10,6 +9,15 @@ import { MembershipRole, MembershipStatus } from "@prisma/client";
 const ROLE_ORDER = ["OWNER", "ADMIN", "MODERATOR", "MEMBER"] as const;
 
 type AnyRole = MembershipRole | "MODERATOR";
+
+type HttpError = Error & { status: number };
+
+function fail(status: number, message: string): never {
+  const err = new Error(message) as HttpError;
+  err.name = "PermissionError";
+  err.status = status;
+  throw err;
+}
 
 function roleIndex(role: AnyRole): number {
   const idx = ROLE_ORDER.indexOf(role as (typeof ROLE_ORDER)[number]);
@@ -25,7 +33,7 @@ export async function requireUser() {
   const userId = session?.user?.id;
 
   if (!userId) {
-    throw new AppError("UNAUTHENTICATED", "Please sign in.", 401);
+    fail(401, "Please sign in.");
   }
 
   return { userId, session };
@@ -33,7 +41,12 @@ export async function requireUser() {
 
 async function getMembership(params: { userId: string; communityId: string }) {
   return db.membership.findUnique({
-    where: { userId_communityId: { userId: params.userId, communityId: params.communityId } },
+    where: {
+      userId_communityId: {
+        userId: params.userId,
+        communityId: params.communityId,
+      },
+    },
     select: {
       id: true,
       role: true,
@@ -51,11 +64,11 @@ export async function requireApprovedMember(params: {
   const membership = await getMembership(params);
 
   if (!membership) {
-    throw new AppError("NOT_A_MEMBER", "Not a member.", 403);
+    fail(403, "Not a member.");
   }
 
   if (membership.status !== MembershipStatus.APPROVED) {
-    throw new AppError("NOT_APPROVED", "Not approved.", 403);
+    fail(403, "Not approved.");
   }
 
   return membership;
@@ -72,7 +85,7 @@ export async function requireCommunityRole(params: {
   });
 
   if (!hasAtLeastRole(membership.role, params.minRole)) {
-    throw new AppError("FORBIDDEN", "You don't have access.", 403);
+    fail(403, "You don't have access.");
   }
 
   return membership;
