@@ -9,11 +9,11 @@ type SearchParams = {
 };
 
 function sanitizeReturnTo(value: string | undefined) {
-  if (!value) return "/welcome";
+  if (!value) return "/onboarding";
   // Only allow in-app relative redirects.
-  if (!value.startsWith("/")) return "/welcome";
+  if (!value.startsWith("/")) return "/onboarding";
   // Prevent protocol-relative redirects (//evil.com).
-  if (value.startsWith("//")) return "/welcome";
+  if (value.startsWith("//")) return "/onboarding";
   return value;
 }
 
