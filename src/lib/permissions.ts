@@ -1,7 +1,7 @@
 import "server-only";
 
-import { auth } from "@/lib/auth";
 import { db } from "@/lib/database";
+import { requireAuth } from "@/lib/guards";
 import { MembershipRole, MembershipStatus } from "@prisma/client";
 
 // Lower index = more privileges.
@@ -29,13 +29,7 @@ export function hasAtLeastRole(current: AnyRole, min: AnyRole): boolean {
 }
 
 export async function requireUser() {
-  const session = await auth();
-  const userId = session?.user?.id;
-
-  if (!userId) {
-    fail(401, "Please sign in.");
-  }
-
+  const { userId, session } = await requireAuth();
   return { userId, session };
 }
 
