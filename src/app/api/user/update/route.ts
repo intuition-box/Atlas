@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { db } from "@/lib/database";
 import { requireUser } from "@/lib/permissions";
-import { ProfileUpdateSchema } from "@/lib/validation/profile";
+import { UserUpdateSchema } from "@/lib/validation/user";
 
 export const runtime = "nodejs";
 
@@ -19,7 +19,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const parsed = ProfileUpdateSchema.safeParse(json);
+  const parsed = UserUpdateSchema.safeParse(json);
   if (!parsed.success) {
     return NextResponse.json(
       { ok: false, error: "Invalid request", details: parsed.error.flatten() },

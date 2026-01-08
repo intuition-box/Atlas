@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 
 import { db } from "@/lib/database";
 import { requireCommunityRole, requireUser } from "@/lib/permissions";
@@ -6,25 +7,40 @@ import { CommunityUpdateSchema } from "@/lib/validation/community";
 
 export const runtime = "nodejs";
 
-async function handler(req: Request) {
+type ApiError = {
+  code: number;
+  message: string;
+  details?: unknown;
+};
+
+function jsonOk<T>(data: T, init?: ResponseInit) {
+  return NextResponse.json({ ok: true, data }, init);
+}
+
+function jsonFail(status: number, message: string, details?: unknown, init?: ResponseInit) {
+  const error: ApiError = { code: status, message, ...(details !== undefined ? { details } : {}) };
+  return NextResponse.json({ ok: false, error }, { status, ...init });
+}
+
+function toNullableJson(value: unknown | null | undefined): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return Prisma.DbNull;
+  return value as Prisma.InputJsonValue;
+}
+
+export async function PATCH(req: Request) {
   const { userId } = await requireUser();
 
   let json: unknown;
   try {
     json = await req.json();
   } catch {
-    return NextResponse.json(
-      { ok: false, error: "Invalid JSON body" },
-      { status: 400 }
-    );
+    return jsonFail(400, "Invalid JSON body");
   }
 
   const parsed = CommunityUpdateSchema.safeParse(json);
   if (!parsed.success) {
-    return NextResponse.json(
-      { ok: false, error: "Invalid request", details: parsed.error.flatten() },
-      { status: 400 }
-    );
+    return jsonFail(400, "Invalid request", parsed.error.flatten());
   }
 
   const body = parsed.data;
@@ -41,13 +57,11 @@ async function handler(req: Request) {
       ...(body.name !== undefined ? { name: body.name } : {}),
       ...(body.description !== undefined ? { description: body.description } : {}),
       ...(body.avatarUrl !== undefined ? { avatarUrl: body.avatarUrl } : {}),
-      ...(body.isPublicDirectory !== undefined
-        ? { isPublicDirectory: body.isPublicDirectory }
-        : {}),
+      ...(body.isPublicDirectory !== undefined ? { isPublicDirectory: body.isPublicDirectory } : {}),
       ...(body.applicationFormSchema !== undefined
-        ? { applicationFormSchema: body.applicationFormSchema }
+        ? { applicationFormSchema: toNullableJson(body.applicationFormSchema) }
         : {}),
-      ...(body.orbitConfig !== undefined ? { orbitConfig: body.orbitConfig } : {}),
+      ...(body.orbitConfig !== undefined ? { orbitConfig: toNullableJson(body.orbitConfig) } : {}),
       activityEvents: { create: { actorId: userId, type: "COMMUNITY_UPDATED" } },
     },
     select: {
@@ -62,14 +76,5 @@ async function handler(req: Request) {
     },
   });
 
-  return NextResponse.json({ ok: true, community });
-}
-
-export async function PATCH(req: Request) {
-  return handler(req);
-}
-
-// Back-compat with any existing clients still POSTing
-export async function POST(req: Request) {
-  return handler(req);
+  return jsonOk({ community });
 }
