@@ -10,6 +10,8 @@
  * - Standard ApiResponse<T> response contract
  */
 
+import "server-only";
+
 import type { Session } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
@@ -17,7 +19,7 @@ import { auth } from '@/lib/auth';
 import { requireCsrf } from '@/lib/security/csrf';
 import { rateLimit, buildRateLimitHeaders, getRateLimitKey } from '@/lib/rate-limit';
 import { requireIdempotencyKey } from '@/lib/idempotency';
-import type { ApiErrorCode, ApiResponse } from '@/types/api';
+import type { ApiResponse } from '@/types/api';
 
 export type Method = 'GET' | 'POST' | 'HEAD';
 export type AuthMode = 'required' | 'optional' | 'none';
@@ -31,18 +33,12 @@ export type RpcHandler<T> = (ctx: {
 }) => Promise<NextResponse>;
 
 /** Error helper: returns a consistent ApiResponse error envelope. */
-export function fail(
-  status: number,
-  code: ApiErrorCode,
-  message: string,
-  details?: unknown,
-  init?: ResponseInit,
-) {
+export function fail(status: number, message: string, details?: unknown, init?: ResponseInit) {
   const headers = new Headers(init?.headers);
   if (!headers.has('Cache-Control')) headers.set('Cache-Control', 'no-store');
 
   return NextResponse.json<ApiResponse<never>>(
-    { success: false, error: { code, message, details } },
+    { success: false, error: { code: status, message, details } },
     { ...(init ?? {}), status, headers },
   );
 }
@@ -82,7 +78,7 @@ function defaultAllowedOrigins(req: NextRequest, explicit?: string[]): string[] 
   return [envOrigin || req.nextUrl.origin].filter(Boolean) as string[];
 }
 
-export type WithRpcOpts<T> = {
+export type WithRpcOpts = {
   /** Allowed HTTP methods (default: ['POST']) */
   methods?: Method[];
   /** Authentication mode (default: 'required') */
@@ -112,20 +108,20 @@ export type WithRpcOpts<T> = {
 export async function withRpc<S extends z.ZodTypeAny>(
   req: NextRequest,
   schema: S,
-  opts: WithRpcOpts<z.infer<S>> = {},
+  opts: WithRpcOpts = {},
 ): Promise<
   | NextResponse
   | {
-      session: Session | null;
-      viewerId: string | null;
-      json: z.infer<S>;
-      idempotencyKey: string | null;
-    }
+    session: Session | null;
+    viewerId: string | null;
+    json: z.infer<S>;
+    idempotencyKey: string | null;
+  }
 > {
   // Methods
   const methods = opts.methods ?? ['POST'];
   if (!methods.includes(req.method as Method)) {
-    return fail(405, 'BAD_REQUEST', 'Method Not Allowed');
+    return fail(405, 'Method Not Allowed');
   }
 
   // Auth
@@ -133,7 +129,7 @@ export async function withRpc<S extends z.ZodTypeAny>(
   const session = await auth();
   const viewerId = session?.user?.id ?? null;
   if (authMode === 'required' && !viewerId) {
-    return fail(401, 'UNAUTHENTICATED', 'Unauthorized');
+    return fail(401, 'Unauthorized');
   }
 
   // Same-origin (browser POSTs)
@@ -143,7 +139,7 @@ export async function withRpc<S extends z.ZodTypeAny>(
     if (seenOrigin) {
       const allow = defaultAllowedOrigins(req, opts.allowOrigins);
       if (!sameOrigin(seenOrigin, allow)) {
-        return fail(403, 'FORBIDDEN', 'Cross-site request blocked');
+        return fail(403, 'Cross-site request blocked');
       }
     }
   }
@@ -156,7 +152,7 @@ export async function withRpc<S extends z.ZodTypeAny>(
     } catch (err: any) {
       const status = typeof err?.status === 'number' ? err.status : 403;
       const message = typeof err?.message === 'string' ? err.message : 'CSRF verification failed';
-      return fail(status, 'FORBIDDEN', message, undefined, { headers: { 'Cache-Control': 'no-store' } });
+      return fail(status, message, undefined, { headers: { 'Cache-Control': 'no-store' } });
     }
   }
 
@@ -165,7 +161,7 @@ export async function withRpc<S extends z.ZodTypeAny>(
   if (requireJson && req.method === 'POST') {
     const ct = (req.headers.get('content-type') || '').toLowerCase();
     if (!ct.includes('application/json')) {
-      return fail(415, 'BAD_REQUEST', 'Expected application/json');
+      return fail(415, 'Expected application/json');
     }
   }
 
@@ -174,7 +170,7 @@ export async function withRpc<S extends z.ZodTypeAny>(
     const max = opts.maxJsonBytes ?? 262_144; // 256 KiB
     const cl = Number(req.headers.get('content-length') || '0');
     if (cl && cl > max) {
-      return fail(413, 'BAD_REQUEST', 'Payload too large');
+      return fail(413, 'Payload too large');
     }
   }
 
@@ -187,14 +183,14 @@ export async function withRpc<S extends z.ZodTypeAny>(
       payload = await req.json();
     }
   } catch {
-    return fail(400, 'BAD_REQUEST', 'Invalid JSON');
+    return fail(400, 'Invalid JSON');
   }
 
   // Zod validation (async-safe)
   const parsed = await schema.safeParseAsync(payload);
   if (!parsed.success) {
     const details = parsed.error.issues?.map((i) => ({ path: i.path, code: i.code, message: i.message }));
-    return fail(400, 'VALIDATION', 'Invalid request', details);
+    return fail(400, 'Invalid request', details);
   }
   const data = parsed.data as z.infer<S>;
 
@@ -203,7 +199,7 @@ export async function withRpc<S extends z.ZodTypeAny>(
   const key = opts.rateKey ? opts.rateKey(viewerId, req) : getRateLimitKey(req, viewerId ?? undefined);
   const rl = await rateLimit({ key, policyId });
   if (!rl.allowed) {
-    return fail(429, 'RATE_LIMITED', 'Too many requests', undefined, {
+    return fail(429, 'Too many requests', undefined, {
       headers: {
         ...buildRateLimitHeaders(rl),
         'Cache-Control': 'no-store',
@@ -219,7 +215,7 @@ export async function withRpc<S extends z.ZodTypeAny>(
     } catch (err: any) {
       const status = typeof err?.status === 'number' ? err.status : 400;
       const message = typeof err?.message === 'string' ? err.message : 'Idempotency-Key required';
-      return fail(status, 'BAD_REQUEST', message, undefined, { headers: { 'Cache-Control': 'no-store' } });
+      return fail(status, message, undefined, { headers: { 'Cache-Control': 'no-store' } });
     }
   }
 
@@ -234,7 +230,7 @@ export async function withRpc<S extends z.ZodTypeAny>(
 export function rpc<S extends z.ZodTypeAny>(
   schema: S,
   handler: RpcHandler<z.infer<S>>,
-  opts?: WithRpcOpts<z.infer<S>>,
+  opts?: WithRpcOpts,
 ) {
   return async (req: NextRequest) => {
     const ctx = await withRpc(req, schema, opts);

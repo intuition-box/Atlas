@@ -1,9 +1,9 @@
 /**
- * Helpers to turn API errors (including Zod issues) into field + form errors.
+ * Helpers to turn API errors (including Zod issues) into field + form errors, V3-only.
  * Works with our ApiResponse<T> error envelope and the RpcError thrown by rpc-client.
  */
 
-import { isApiResponse } from '@/types/api';
+import { isApiResponse, type ApiResponse } from "@/types/api";
 
 /**
  * We intentionally avoid importing RpcError from the client module to prevent
@@ -15,13 +15,15 @@ export type RpcErrorLike = Error & {
   details?: unknown;
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
 function isRpcErrorLike(err: unknown): err is RpcErrorLike {
-  return (
-    !!err &&
-    typeof err === 'object' &&
-    typeof (err as any).message === 'string' &&
-    ('status' in err || 'code' in err || 'details' in err)
-  );
+  if (!isRecord(err)) return false;
+  const message = err["message"];
+  if (typeof message !== "string") return false;
+  return "status" in err || "code" in err || "details" in err;
 }
 
 export type ParsedApiError = {
@@ -45,20 +47,22 @@ type ApiIssue = {
   code?: string;
 };
 
+type IssuesLike = ApiIssue[] | { issues?: ApiIssue[] } | null | undefined;
+
 function extractIssues(details: unknown): ApiIssue[] | undefined {
   if (!details) return undefined;
   if (Array.isArray(details)) return details as ApiIssue[];
-  if (typeof details === 'object') {
-    const maybe = (details as { issues?: unknown }).issues;
+  if (isRecord(details)) {
+    const maybe = details.issues;
     if (Array.isArray(maybe)) return maybe as ApiIssue[];
   }
   return undefined;
 }
 
 function pathToKey(path: ApiIssue['path']): string {
-  if (Array.isArray(path)) return path.map(String).join('.');
-  if (typeof path === 'string') return path;
-  return '';
+  if (Array.isArray(path)) return path.map(String).join(".");
+  if (typeof path === "string") return path;
+  return "";
 }
 
 function applyIssues(
@@ -70,7 +74,7 @@ function applyIssues(
   for (const issue of issues) {
     const raw = pathToKey(issue?.path);
     const field = fieldMap[raw] ?? raw;
-    const message = String(issue?.message ?? 'Invalid value');
+    const message = String(issue?.message ?? "Invalid value");
     if (field && !out.fieldErrors[field]) {
       out.fieldErrors[field] = message;
     }
@@ -78,27 +82,20 @@ function applyIssues(
 }
 
 /**
- * Parse a failing API payload using the canonical envelope from `@/types/api`.
- * (This is the server standard returned by our route handlers.)
+ * Parse an ApiResponse<T> error payload (server standard).
+ * Shape: { success: false, error: { code, message, details?: ApiIssue[] } }
  */
-export function parseApiErrorPayload(payload: unknown, opts: ParseOptions = {}): ParsedApiError {
+export function parseApiErrorPayload(payload: ApiResponse<unknown>, opts: ParseOptions = {}): ParsedApiError {
   const { fieldMap = {} } = opts;
   const out: ParsedApiError = { fieldErrors: {} };
 
-  if (!isApiResponse(payload) || payload.success !== false) {
-    out.formError = 'Unexpected server response';
+  if (payload.success !== false || typeof payload.error?.message !== "string") {
+    out.formError = "Unexpected server response";
     return out;
   }
 
-  // Canonical failure shape: { success: false, error: { code, message, details? } }
-  const message = (payload as any).error?.message;
-  if (typeof message !== 'string' || message.length === 0) {
-    out.formError = 'Unexpected server response';
-    return out;
-  }
-
-  out.formError = message;
-  applyIssues(out, extractIssues((payload as any).error?.details), fieldMap);
+  out.formError = payload.error.message;
+  applyIssues(out, extractIssues(payload.error.details), fieldMap);
   return out;
 }
 
@@ -118,6 +115,11 @@ export async function parseApiError(res: Response, opts: ParseOptions = {}): Pro
     return out;
   }
 
+  if (!isApiResponse(payload)) {
+    out.formError = "Unexpected server response";
+    return out;
+  }
+
   const parsed = parseApiErrorPayload(payload, opts);
   return { ...parsed, status: res.status };
 }
@@ -130,18 +132,18 @@ export function parseRpcError(err: unknown, opts: ParseOptions = {}): ParsedApiE
   const out: ParsedApiError = { fieldErrors: {} };
 
   if (isRpcErrorLike(err)) {
-    const numericCode = typeof err.code === 'number' ? err.code : undefined;
+    const numericCode = typeof err.code === "number" ? err.code : undefined;
     out.code = numericCode;
-    out.status = typeof err.status === 'number' ? err.status : numericCode;
-    out.formError = err.message || 'Request failed';
-    applyIssues(out, extractIssues((err as any).details), fieldMap);
+    out.status = typeof err.status === "number" ? err.status : numericCode;
+    out.formError = err.message || "Request failed";
+    applyIssues(out, extractIssues(err.details), fieldMap);
     return out;
   }
 
-  if (isApiResponse(err)) {
+  if (isRecord(err) && err["success"] === false && isApiResponse(err)) {
     return parseApiErrorPayload(err, opts);
   }
 
-  out.formError = (err as any)?.message || 'Request failed';
+  out.formError = isRecord(err) && typeof err["message"] === "string" ? err["message"] : "Request failed";
   return out;
 }

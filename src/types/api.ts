@@ -27,15 +27,25 @@ export type ApiResponse<T> =
  * Prefer this when consuming untyped JSON at runtime.
  */
 export function isApiResponse<T>(value: unknown): value is ApiResponse<T> {
-  if (typeof value !== 'object' || value === null) return false;
+  if (typeof value !== "object" || value === null) return false;
   const v = value as Record<string, unknown>;
-  if (typeof v.success !== 'boolean') return false;
+
+  if (typeof v.success !== "boolean") return false;
+
   if (v.success === true) {
-    return 'data' in v;
+    // Success branch must have data and must not have an error payload.
+    if (!("data" in v)) return false;
+    if ("error" in v) return false;
+    return true;
   }
-  if (v.success === false) {
-    const err = v.error as Record<string, unknown> | undefined;
-    return !!err && typeof err.message === 'string' && typeof err.code === 'number';
-  }
-  return false;
+
+  // Failure branch must have error and must not have data.
+  if (!("error" in v)) return false;
+  if ("data" in v) return false;
+
+  const err = v.error;
+  if (typeof err !== "object" || err === null) return false;
+  const e = err as Record<string, unknown>;
+
+  return typeof e.code === "number" && typeof e.message === "string";
 }
