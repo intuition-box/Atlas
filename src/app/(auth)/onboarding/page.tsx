@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import ProfileOnboardingForm from "@/components/onboarding/profile-onboarding-form";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/database";
+import { ROUTES } from "@/lib/routes";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +11,9 @@ export default async function OnboardingPage() {
   const session = await auth();
   const userId = (session?.user as any)?.id as string | undefined;
 
-  if (!userId) redirect("/signin?returnTo=/welcome");
+  if (!userId) {
+    redirect(`${ROUTES.signIn}?returnToUrl=${encodeURIComponent(ROUTES.onboarding)}`);
+  }
 
   const user = await db.user.findUnique({
     where: { id: userId },
@@ -29,10 +32,12 @@ export default async function OnboardingPage() {
     },
   });
 
-  if (!user) redirect("/signin?returnTo=/welcome");
+  if (!user) {
+    redirect(`${ROUTES.signIn}?returnToUrl=${encodeURIComponent(ROUTES.onboarding)}`);
+  }
 
   // Onboarding is complete once a handle is set.
-  if (user.handle) redirect(`/u/${user.handle}`);
+  if (user.handle) redirect(ROUTES.user(user.handle));
 
   return (
     <div className="mx-auto max-w-lg px-6 py-16">
@@ -40,7 +45,7 @@ export default async function OnboardingPage() {
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">
           Welcome
         </h1>
-        <p className="mt-1 text-sm text-foreground/70">
+        <p className="mt-1 text-sm text-muted-foreground">
           Set up your profile to start joining communities.
         </p>
       </div>
