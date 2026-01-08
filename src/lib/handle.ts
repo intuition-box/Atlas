@@ -16,6 +16,7 @@ import { isReservedHandle } from "@/config/reserved-handles";
  *   `src/lib/handle-registry.ts`.
  */
 export const MIN_HANDLE_LEN = 3;
+// Keep in sync with `Handle.name` (and any other `*.handle`) length in `prisma/schema.prisma`.
 export const MAX_HANDLE_LEN = 32;
 
 // Canonical: lowercase, hyphen-separated segments. (We accept '_' in input but normalize to '-')
@@ -70,10 +71,21 @@ export function makeHandleCandidate(seed: string): string {
     .replace(/-+/g, "-")
     .replace(/^-+|-+$/g, "");
 
-  if (!s) s = "user";
+  if (!s) s = "member";
+
+  // Prefer returning a non-reserved candidate so onboarding/community creation
+  // doesn't immediately fail (uniqueness is still enforced server-side).
+  if (isReservedHandle(s)) {
+    s = `${s}-1`;
+  }
 
   if (s.length > MAX_HANDLE_LEN) {
     s = s.slice(0, MAX_HANDLE_LEN).replace(/-+$/g, "");
+  }
+
+  // If trimming reintroduced a reserved value (edge-case), nudge it.
+  if (isReservedHandle(s)) {
+    s = `${s}-1`.slice(0, MAX_HANDLE_LEN).replace(/-+$/g, "");
   }
 
   return s;
