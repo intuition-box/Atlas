@@ -2,6 +2,9 @@ import type { Metadata, Viewport } from "next";
 import Link from "next/link";
 import { Noto_Sans, Noto_Serif, Noto_Sans_Mono } from "next/font/google";
 import "./globals.css";
+import { Separator } from "@/components/ui/separator";
+import UserMenu from "@/components/layout/user-menu";
+import Logo from "@/components/logo";
 
 const serif = Noto_Serif({
   variable: "--font-serif",
@@ -34,6 +37,8 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
   themeColor: "#000000",
   colorScheme: "dark",
 };
@@ -48,7 +53,20 @@ export default function RootLayout({
       <body
         className={`${serif.variable} ${sans.variable} ${mono.variable} dark h-full min-h-dvh antialiased selection:bg-foreground/30`}
       >
-        {children}
+        <div className="mx-auto flex min-h-dvh max-w-5xl flex-col px-4">
+          <header className="flex gap-4 items-center py-6 text-sm text-white/60">
+            <div className="group flex gap-4 items-center">
+              <Logo />
+              <div className="flex gap-2 opacity-0 blur-sm -translate-y-1 will-change-[opacity,filter,transform] transition-all duration-300 ease-in-out group-hover:opacity-100 group-hover:blur-none group-hover:translate-y-0 hover:opacity-100 hover:blur-none hover:translate-y-0">
+                <Separator orientation="vertical" />
+                <Link href="/about" className="hover:text-white/90">About</Link>
+              </div>
+            </div>
+
+            <UserMenu />
+          </header>
+          <main className="flex flex-1 items-center justify-center">{children}</main>
+        </div>
       </body>
     </html>
   );
