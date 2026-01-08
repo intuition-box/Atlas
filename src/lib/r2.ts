@@ -9,6 +9,15 @@ function requireEnv(name: string) {
   return value;
 }
 
+function assertSafeHeaderValue(name: string, value: string) {
+  const v = value.trim();
+  if (!v) throw new Error(`Invalid ${name}: empty`);
+  // Prevent header injection
+  if (/\r|\n/.test(v)) throw new Error(`Invalid ${name}`);
+  // Prevent other ASCII control chars
+  if (/[\u0000-\u001F\u007F]/.test(v)) throw new Error(`Invalid ${name}`);
+}
+
 function assertSafeKey(key: string) {
   const k = key.trim();
   if (!k) throw new Error("Invalid key: empty");
@@ -24,10 +33,19 @@ function assertSafeKey(key: string) {
 }
 
 function assertSafeContentType(contentType: string) {
-  const ct = contentType.trim();
-  if (!ct) throw new Error("Invalid contentType: empty");
-  // Prevent header injection
-  if (/\r|\n/.test(ct)) throw new Error("Invalid contentType");
+  assertSafeHeaderValue("contentType", contentType);
+}
+
+function assertSafeCacheControl(cacheControl: string) {
+  assertSafeHeaderValue("cacheControl", cacheControl);
+}
+
+function assertSafeExpiresIn(expiresInSeconds: number) {
+  if (!Number.isFinite(expiresInSeconds)) throw new Error("Invalid expiresInSeconds");
+  // Keep presigned URLs short-lived; R2/S3 allow longer, but we standardize.
+  if (expiresInSeconds < 10 || expiresInSeconds > 900) {
+    throw new Error("Invalid expiresInSeconds: must be between 10 and 900");
+  }
 }
 
 // Turbopack-safe singleton
@@ -54,8 +72,9 @@ function r2Client() {
 
 export function buildPublicUrl(key: string) {
   assertSafeKey(key);
+  const k = key.trim().replace(/^\/+/, "");
   const base = requireEnv("R2_PUBLIC_BASE_URL").replace(/\/+$/, "");
-  return `${base}/${key.replace(/^\/+/, "")}`;
+  return `${base}/${k}`;
 }
 
 export async function signR2Upload(params: {
@@ -66,6 +85,9 @@ export async function signR2Upload(params: {
 }) {
   assertSafeKey(params.key);
   assertSafeContentType(params.contentType);
+  if (params.cacheControl) assertSafeCacheControl(params.cacheControl);
+  const expiresIn = params.expiresInSeconds ?? 60;
+  assertSafeExpiresIn(expiresIn);
 
   const bucket = requireEnv("R2_BUCKET");
   const client = r2Client();
@@ -77,9 +99,7 @@ export async function signR2Upload(params: {
     CacheControl: params.cacheControl ?? "public, max-age=31536000, immutable",
   });
 
-  const uploadUrl = await getSignedUrl(client, cmd, {
-    expiresIn: params.expiresInSeconds ?? 60,
-  });
+  const uploadUrl = await getSignedUrl(client, cmd, { expiresIn });
 
   const publicUrl = buildPublicUrl(params.key);
   return { uploadUrl, publicUrl };
