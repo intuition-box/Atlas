@@ -362,3 +362,42 @@ model ActivityEvent {
   @@index([communityId, type, createdAt])
   @@index([communityId, subjectUserId, createdAt])
 }
+
+/// -----------------------------
+/// API Idempotency
+/// -----------------------------
+
+model ApiIdempotency {
+  id         String   @id @default(cuid())
+
+  /// Idempotency key provided by the client.
+  key        String
+
+  /// Stable route identifier (usually request pathname).
+  route      String
+
+  /// Scope idempotency per user or globally.
+  /// Use a stable sentinel like "global" when not scoped.
+  userId     String
+
+  /// Optional hash of request body to detect key reuse with different payloads.
+  bodyHash   String?
+
+  /// HTTP status to replay.
+  statusCode Int
+
+  /// Stored ApiResponse envelope for replay.
+  response   Json?
+
+  /// Non-null while a handler is processing the first request.
+  lockedAt   DateTime?
+
+  /// Expiration for this idempotency record.
+  expiresAt  DateTime
+
+  createdAt  DateTime @default(now())
+
+  @@unique([key, route, userId])
+  @@index([expiresAt])
+  @@index([userId])
+}
