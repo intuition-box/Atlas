@@ -1,4 +1,5 @@
 import "server-only";
+
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "node:crypto";
 import type { ApiResponse } from "@/types/api";
@@ -26,11 +27,11 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 /** CSRF cookie/header naming */
-export const CSRF_COOKIE = "__Host-atlas.csrf"; // __Host- prefix requires Secure + Path=/ and no Domain
+export const CSRF_COOKIE = "__Host-orbyt.csrf"; // __Host- prefix requires Secure + Path=/ and no Domain
 export const CSRF_HEADER = "x-csrf-token"; // case-insensitive
 
 /** Dev fallback cookie name used only when NEXT_DEV_INSECURE_COOKIES=true (non-production) */
-export const CSRF_COOKIE_DEV = "atlas.csrf";
+export const CSRF_COOKIE_DEV = "orbyt.csrf";
 
 /** Resolve the active cookie name depending on environment flags */
 export function getCsrfCookieName(): string {
@@ -160,7 +161,7 @@ function throwCsrf(message = "CSRF verification failed"): never {
 
 /**
  * Verify CSRF for non-GET requests using double-submit (cookie + header) and same-origin check.
- * - Header `X-CSRF-Token` must equal cookie `__Host-atlas.csrf`.
+ * - Header `X-CSRF-Token` must equal cookie `__Host-orbyt.csrf`.
  * - Origin must match Host when `Origin` header is present.
  *
  * Returns the token value on success (for logging if needed).
