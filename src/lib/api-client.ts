@@ -1,6 +1,6 @@
 'use client';
 
-import { isApiResponse, type ApiResponse } from "@/types/api";
+import { isApiResponse } from "@/types/api";
 
 /**
  * Tiny browser RPC client (V3)
@@ -16,8 +16,8 @@ let csrfInitialized = false; // false until first attempt; then true (even if no
 
 export type RpcOptions = {
   method?: 'GET' | 'POST';
-  ifMatch?: string;                // pass ETag when editing/deleting
-  idempotencyKey?: string;         // for create/mutate flows
+  ifMatch?: string; // pass ETag when editing/deleting
+  idempotencyKey?: string; // for create/mutate flows
   signal?: AbortSignal;
   headers?: Record<string, string>;
   // You can opt-in to force a fresh CSRF fetch (rarely needed)
@@ -63,7 +63,7 @@ async function getCsrf(): Promise<string> {
       throw new RpcError(r.status, 'CSRF bootstrap failed');
     }
     const json = await r.json().catch(() => null);
-    const token = typeof json?.data?.token === 'string' ? json.data.token : '';
+    const token = typeof (json as any)?.data?.token === 'string' ? (json as any).data.token : '';
     csrfCache = token;
     csrfInitialized = true;
     return csrfCache;
@@ -91,24 +91,54 @@ function buildQuery(params: Record<string, unknown> | URLSearchParams | undefine
 }
 
 async function parseApiResponse<T>(r: Response): Promise<T> {
-  const ct = r.headers.get("content-type") || "";
-  if (!ct.includes("application/json")) {
-    throw new RpcError(r.status, "Invalid server response (expected JSON ApiResponse)");
+  const fallbackMessage = (status: number) => {
+    if (status === 401) return 'Please sign in to continue.';
+    if (status === 403) return 'You don’t have permission to do that.';
+    if (status === 404) return 'Not found.';
+    if (status === 409) return 'Conflict. Please refresh and try again.';
+    if (status === 412) return 'Out of date. Please refresh and try again.';
+    if (status === 419) return 'Security check expired. Please refresh and try again.';
+    if (status === 429) return 'Too many requests. Please try again soon.';
+    if (status >= 500) return 'Server error. Please try again.';
+    return 'Request failed. Please try again.';
+  };
+
+  const ct = r.headers.get('content-type') || '';
+
+  // If the server didn't return our JSON envelope, prefer a friendly, user-safe message.
+  if (!ct.includes('application/json')) {
+    // Try to consume the body to avoid leaking raw HTML/stack traces into the UI.
+    try {
+      await r.text();
+    } catch {
+      // ignore
+    }
+    throw new RpcError(r.status, fallbackMessage(r.status));
   }
+
   let json: unknown;
   try {
     json = await r.json();
   } catch {
-    throw new RpcError(r.status, "Invalid server response (expected JSON ApiResponse)");
+    throw new RpcError(r.status, fallbackMessage(r.status));
   }
+
   if (!isApiResponse<T>(json)) {
-    throw new RpcError(r.status, "Invalid server response (ApiResponse shape mismatch)", json);
+    throw new RpcError(r.status, 'Invalid server response', json);
   }
+
   if (json.success === true) {
     return json.data as T;
   }
+
   const code = typeof json.error?.code === 'number' ? json.error.code : undefined;
-  const message = typeof json.error?.message === 'string' ? json.error.message : 'RPC error';
+  const rawMessage = typeof json.error?.message === 'string' ? json.error.message : '';
+
+  // If the server didn't provide a meaningful message, use a friendly status-based fallback.
+  const message = rawMessage && !/^Request failed \(\d+\)$/.test(rawMessage)
+    ? rawMessage
+    : fallbackMessage(r.status);
+
   throw new RpcError(r.status, message, json.error?.details, code);
 }
 
