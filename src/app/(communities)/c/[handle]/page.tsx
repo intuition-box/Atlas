@@ -4,23 +4,17 @@ import { notFound } from "next/navigation";
 import OrbitView from "@/components/orbit/orbit-view";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/database";
-import {
-  getActiveHandleForOwner,
-  normalizeHandle,
-  resolveCommunityIdFromHandle,
-} from "@/lib/handle";
+import { normalizeHandle } from "@/lib/handle";
 
 export default async function CommunityPage(props: { params: Promise<{ handle: string }> }) {
   const { handle: raw } = await props.params;
   const routeHandle = normalizeHandle(raw);
 
-  const communityId = await resolveCommunityIdFromHandle(routeHandle);
-  if (!communityId) return notFound();
-
-  const community = await db.community.findUnique({
-    where: { id: communityId },
+  const community = await db.community.findFirst({
+    where: { handle: routeHandle },
     select: {
       id: true,
+      handle: true,
       name: true,
       description: true,
       avatarUrl: true,
@@ -30,14 +24,6 @@ export default async function CommunityPage(props: { params: Promise<{ handle: s
   });
 
   if (!community) return notFound();
-
-  const activeHandle = await getActiveHandleForOwner({
-    ownerType: "COMMUNITY",
-    ownerId: community.id,
-  });
-
-  // With handle-only routing, this should normally match `routeHandle`.
-  const canonicalHandle = activeHandle ?? routeHandle;
 
   const session = await auth();
   const viewerId = (session?.user as any)?.id as string | undefined;
@@ -56,7 +42,7 @@ export default async function CommunityPage(props: { params: Promise<{ handle: s
       viewerMembership?.role === "ADMIN");
 
   const canViewDirectory =
-    community.isPublicDirectory || viewerMembership?.status === "APPROVED";
+    community.isPublicDirectory || isAdmin || viewerMembership?.status === "APPROVED";
   const members = canViewDirectory
     ? await db.membership.findMany({
         where: { communityId: community.id, status: "APPROVED" },
@@ -93,7 +79,7 @@ export default async function CommunityPage(props: { params: Promise<{ handle: s
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
               <h1 className="truncate text-2xl font-semibold tracking-tight">{community.name}</h1>
-              <p className="mt-1 text-sm opacity-60">@{canonicalHandle}</p>
+              <p className="mt-1 text-sm opacity-60">@{routeHandle}</p>
             </div>
 
             <div className="flex items-center gap-2">
@@ -105,7 +91,7 @@ export default async function CommunityPage(props: { params: Promise<{ handle: s
 
               {isAdmin ? (
                 <Link
-                  href={`/c/${canonicalHandle}/dashboard`}
+                  href={`/c/${routeHandle}/dashboard`}
                   className="rounded-lg border px-3 py-2 text-sm hover:bg-black/5 dark:hover:bg-white/10"
                 >
                   Dashboard
@@ -130,7 +116,7 @@ export default async function CommunityPage(props: { params: Promise<{ handle: s
           </p>
           <div className="mt-4 flex gap-2">
             <Link
-              href={`/c/${canonicalHandle}/apply`}
+              href={`/c/${routeHandle}/apply`}
               className="rounded-lg border px-3 py-2 text-sm hover:bg-black/5 dark:hover:bg-white/10"
             >
               Apply
