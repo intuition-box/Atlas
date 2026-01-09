@@ -246,6 +246,9 @@ model Community {
   /// NOTE: Handle lifecycle (release/reclaim/retire) is tracked in the `Handle` table.
   handle      String   @unique @db.VarChar(32)
 
+  /// Small visual identifier for the community (e.g., an emoji like "🪐").
+  icon        String?  @db.VarChar(16)
+
   name        String
   description String?
   avatarUrl   String?
@@ -257,6 +260,9 @@ model Community {
 
   // Settings (keep flexible)
   isPublicDirectory Boolean @default(false)
+
+  /// If false, users cannot submit new applications to join this community.
+  applicationsOpen Boolean @default(true)
 
   // JSON settings so you can evolve without migrations every week
   applicationFormSchema Json?
