@@ -1,8 +1,54 @@
 import "server-only";
+
 import { randomBytes } from "node:crypto";
 
 import { db } from "@/lib/database";
 import { assertValidHandle, makeHandleCandidate, validateHandle } from "@/lib/handle";
+
+export type HandleErrorCode =
+  | "HANDLE_INVALID"
+  | "HANDLE_TAKEN"
+  | "HANDLE_RETIRED"
+  | "HANDLE_COOLDOWN"
+  | "HANDLE_NOT_AVAILABLE"
+  | "HANDLE_NOT_PUBLIC_YET"
+  | "HANDLE_RESERVED_FOR_PREVIOUS_OWNER";
+
+export class HandleRegistryError extends Error {
+  readonly code: HandleErrorCode;
+  readonly reclaimUntil?: Date;
+  readonly availableAt?: Date;
+
+  constructor(
+    code: HandleErrorCode,
+    message: string,
+    meta?: {
+      reclaimUntil?: Date | null;
+      availableAt?: Date | null;
+    },
+  ) {
+    super(message);
+    this.name = "HandleRegistryError";
+    this.code = code;
+    this.reclaimUntil = meta?.reclaimUntil ?? undefined;
+    this.availableAt = meta?.availableAt ?? undefined;
+  }
+}
+
+export function isHandleRegistryError(e: unknown): e is HandleRegistryError {
+  return e instanceof HandleRegistryError;
+}
+
+function throwHandleError(
+  code: HandleErrorCode,
+  message: string,
+  meta?: {
+    reclaimUntil?: Date | null;
+    availableAt?: Date | null;
+  },
+): never {
+  throw new HandleRegistryError(code, message, meta);
+}
 
 /**
  * Server-only handle lifecycle helpers.
@@ -121,7 +167,7 @@ export async function getActiveHandleForOwner(args: {
 }
 
 /**
- * Returns the canonical (normalized) handle when claimable by *someone* right now.
+ * Returns the canonical (normalized) handle when publicly claimable right now (i.e., by a new owner).
  * Throws for common failure cases.
  */
 export async function assertHandleAvailable(raw: string): Promise<string> {
@@ -132,7 +178,7 @@ export async function assertHandleAvailable(raw: string): Promise<string> {
     db.user.findFirst({ where: { handle: key }, select: { id: true } }),
     db.community.findFirst({ where: { handle: key }, select: { id: true } }),
   ]);
-  if (u || c) throw new Error("Handle is already taken");
+  if (u || c) throwHandleError("HANDLE_TAKEN", "Handle is already taken");
 
   const row = await db.handle.findUnique({
     where: { name: key },
@@ -144,8 +190,8 @@ export async function assertHandleAvailable(raw: string): Promise<string> {
   });
 
   if (!row) return key;
-  if (row.status === "RETIRED") throw new Error("That handle is not available");
-  if (row.status === "ACTIVE") throw new Error("Handle is already taken");
+  if (row.status === "RETIRED") throwHandleError("HANDLE_RETIRED", "That handle is not available");
+  if (row.status === "ACTIVE") throwHandleError("HANDLE_TAKEN", "Handle is already taken");
 
   // RELEASED rules
   const now = new Date();
@@ -153,16 +199,110 @@ export async function assertHandleAvailable(raw: string): Promise<string> {
   const availableAt = row.availableAt;
 
   // Defensive: if windows are missing, treat as not available.
-  if (!reclaimUntil || !availableAt) throw new Error("That handle is not available");
+  if (!reclaimUntil || !availableAt) {
+    throwHandleError("HANDLE_NOT_AVAILABLE", "That handle is not available");
+  }
 
   // Cooldown: nobody can claim.
-  if (now < reclaimUntil) throw new Error("That handle is cooling down");
+  if (now < reclaimUntil) {
+    throwHandleError("HANDLE_COOLDOWN", "That handle is cooling down", { reclaimUntil, availableAt });
+  }
 
   // Exclusive reclaim window: only previous owner can claim.
   // From a general availability perspective, it's not public yet.
-  if (now < availableAt) throw new Error("That handle is not available yet");
+  if (now < availableAt) {
+    throwHandleError("HANDLE_NOT_PUBLIC_YET", "That handle is not available yet", {
+      reclaimUntil,
+      availableAt,
+    });
+  }
 
   // Public reuse.
+  return key;
+}
+
+/**
+ * Returns the canonical (normalized) handle when claimable by the given owner right now.
+ *
+ * Differences vs `assertHandleAvailable`:
+ * - During the exclusive reclaim window, only the previous owner may claim.
+ * - If the handle is already ACTIVE and owned by the caller, this is a no-op.
+ */
+export async function assertHandleClaimableByOwner(args: {
+  ownerType: HandleOwnerType;
+  ownerId: string;
+  raw: string;
+}): Promise<string> {
+  const key = assertValidHandle(args.raw);
+
+  // Hard collision check against canonical fields.
+  const [u, c] = await Promise.all([
+    db.user.findFirst({ where: { handle: key }, select: { id: true } }),
+    db.community.findFirst({ where: { handle: key }, select: { id: true } }),
+  ]);
+
+  if (u && !(args.ownerType === "USER" && u.id === args.ownerId)) {
+    throwHandleError("HANDLE_TAKEN", "Handle is already taken");
+  }
+  if (c && !(args.ownerType === "COMMUNITY" && c.id === args.ownerId)) {
+    throwHandleError("HANDLE_TAKEN", "Handle is already taken");
+  }
+
+  const row = await db.handle.findUnique({
+    where: { name: key },
+    select: {
+      status: true,
+      ownerType: true,
+      ownerId: true,
+      lastOwnerType: true,
+      lastOwnerId: true,
+      reclaimUntil: true,
+      availableAt: true,
+    },
+  });
+
+  if (!row) return key;
+
+  if (row.status === "RETIRED") {
+    throwHandleError("HANDLE_RETIRED", "That handle is not available");
+  }
+
+  if (row.status === "ACTIVE") {
+    if (!isSameOwner({ ownerType: args.ownerType, ownerId: args.ownerId }, { ownerType: row.ownerType, ownerId: row.ownerId })) {
+      throwHandleError("HANDLE_TAKEN", "Handle is already taken");
+    }
+    return key;
+  }
+
+  // RELEASED rules
+  const now = new Date();
+  const reclaimUntil = row.reclaimUntil;
+  const availableAt = row.availableAt;
+
+  // Defensive: if windows are missing, treat as not available.
+  if (!reclaimUntil || !availableAt) {
+    throwHandleError("HANDLE_NOT_AVAILABLE", "That handle is not available");
+  }
+
+  // Cooldown: nobody can claim.
+  if (now < reclaimUntil) {
+    throwHandleError("HANDLE_COOLDOWN", "That handle is cooling down", { reclaimUntil, availableAt });
+  }
+
+  // Exclusive reclaim window: only previous owner can claim.
+  if (now < availableAt) {
+    const isPreviousOwner = isSameOwner(
+      { ownerType: args.ownerType, ownerId: args.ownerId },
+      { ownerType: row.lastOwnerType, ownerId: row.lastOwnerId },
+    );
+    if (!isPreviousOwner) {
+      throwHandleError("HANDLE_RESERVED_FOR_PREVIOUS_OWNER", "That handle is not available yet", {
+        reclaimUntil,
+        availableAt,
+      });
+    }
+  }
+
   return key;
 }
 
@@ -203,10 +343,10 @@ export async function makeHandle(args: MakeHandleArgs): Promise<string> {
     ]);
 
     if (u && !(args.ownerType === "USER" && u.id === args.ownerId)) {
-      throw new Error("Handle is already taken");
+      throwHandleError("HANDLE_TAKEN", "Handle is already taken");
     }
     if (c && !(args.ownerType === "COMMUNITY" && c.id === args.ownerId)) {
-      throw new Error("Handle is already taken");
+      throwHandleError("HANDLE_TAKEN", "Handle is already taken");
     }
 
     const desiredRow = await tx.handle.findUnique({
@@ -222,11 +362,13 @@ export async function makeHandle(args: MakeHandleArgs): Promise<string> {
       },
     });
 
-    if (desiredRow?.status === "RETIRED") throw new Error("That handle is not available");
+    if (desiredRow?.status === "RETIRED") {
+      throwHandleError("HANDLE_RETIRED", "That handle is not available");
+    }
 
     if (desiredRow?.status === "ACTIVE") {
       if (!isSameOwner(args, { ownerType: desiredRow.ownerType, ownerId: desiredRow.ownerId })) {
-        throw new Error("Handle is already taken");
+        throwHandleError("HANDLE_TAKEN", "Handle is already taken");
       }
       // Already owned by caller: continue (no-op at Handle table level).
     }
@@ -235,10 +377,14 @@ export async function makeHandle(args: MakeHandleArgs): Promise<string> {
       const reclaimUntil = desiredRow.reclaimUntil;
       const availableAt = desiredRow.availableAt;
 
-      if (!reclaimUntil || !availableAt) throw new Error("That handle is not available");
+      if (!reclaimUntil || !availableAt) {
+        throwHandleError("HANDLE_NOT_AVAILABLE", "That handle is not available");
+      }
 
       // Cooldown: nobody can claim.
-      if (now < reclaimUntil) throw new Error("That handle is cooling down");
+      if (now < reclaimUntil) {
+        throwHandleError("HANDLE_COOLDOWN", "That handle is cooling down", { reclaimUntil, availableAt });
+      }
 
       // Exclusive reclaim window: only previous owner.
       if (now < availableAt) {
@@ -246,7 +392,12 @@ export async function makeHandle(args: MakeHandleArgs): Promise<string> {
           ownerType: desiredRow.lastOwnerType,
           ownerId: desiredRow.lastOwnerId,
         });
-        if (!isPreviousOwner) throw new Error("That handle is not available yet");
+        if (!isPreviousOwner) {
+          throwHandleError("HANDLE_RESERVED_FOR_PREVIOUS_OWNER", "That handle is not available yet", {
+            reclaimUntil,
+            availableAt,
+          });
+        }
       }
 
       // else: public reuse, allowed.
