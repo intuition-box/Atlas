@@ -31,6 +31,13 @@ export type HandleValidationReason =
 export function normalizeHandle(input: string): string {
   let s = (input ?? "").toString().trim().toLowerCase();
 
+  // Normalize Unicode dashes to ASCII hyphen-minus (common on mobile copy/paste).
+  try {
+    s = s.replace(/[\p{Pd}]+/gu, "-");
+  } catch {
+    s = s.replace(/[\u2010-\u2015]/g, "-");
+  }
+
   // Convert underscores to hyphens so users can't bypass reserved handles.
   s = s.replace(/_+/g, "-");
 
@@ -50,13 +57,6 @@ export function normalizeHandle(input: string): string {
  */
 export function makeHandleCandidate(seed: string): string {
   let s = normalizeHandle(seed);
-
-  // Normalize Unicode dashes to ASCII hyphen-minus
-  try {
-    s = s.replace(/[\p{Pd}]+/gu, "-");
-  } catch {
-    s = s.replace(/[\u2010-\u2015]/g, "-");
-  }
 
   // Strip accents/diacritics
   try {
