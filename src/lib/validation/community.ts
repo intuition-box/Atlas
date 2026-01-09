@@ -8,7 +8,7 @@ export const CommunityCreateSchema = z.object({
   handle: HandleSchema,
   description: z.string().trim().max(500).optional().nullable(),
   avatarUrl: OptionalUrl.optional().nullable(),
-  applicationsOpen: z.coerce.boolean().optional(),
+  isApplicationOpen: z.coerce.boolean().optional(),
   isPublicDirectory: z.coerce.boolean().optional(),
 });
 
@@ -17,7 +17,7 @@ export const CommunityUpdateSchema = z.object({
   name: NonEmptyString.max(80).optional(),
   description: z.string().trim().max(500).optional().nullable(),
   avatarUrl: OptionalUrl.optional().nullable(),
-  applicationsOpen: z.coerce.boolean().optional(),
+  isApplicationOpen: z.coerce.boolean().optional(),
   isPublicDirectory: z.coerce.boolean().optional(),
   // keep as Json in DB; validate shape later when you implement schema builder UI
   applicationFormSchema: jsonOk(z.unknown()).optional().nullable(),
