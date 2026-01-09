@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
           description: body.description ?? null,
           avatarUrl: body.avatarUrl ?? null,
           isPublicDirectory: body.isPublicDirectory ?? false,
-          applicationsOpen: body.applicationsOpen ?? true,
+          isApplicationOpen: body.isApplicationOpen ?? true,
           ownerId: userId,
           memberships: {
             create: {
@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
             create: { actorId: userId, type: "COMMUNITY_CREATED" },
           },
         },
-        select: { id: true, handle: true, name: true, applicationsOpen: true, avatarUrl: true, isPublicDirectory: true },
+        select: { id: true, handle: true, name: true, isApplicationOpen: true, avatarUrl: true, isPublicDirectory: true },
       });
 
       return created;
