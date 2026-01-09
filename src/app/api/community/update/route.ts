@@ -58,6 +58,7 @@ export async function PATCH(req: Request) {
       ...(body.description !== undefined ? { description: body.description } : {}),
       ...(body.avatarUrl !== undefined ? { avatarUrl: body.avatarUrl } : {}),
       ...(body.isPublicDirectory !== undefined ? { isPublicDirectory: body.isPublicDirectory } : {}),
+      ...(body.applicationsOpen !== undefined ? { applicationsOpen: body.applicationsOpen } : {}),
       ...(body.applicationFormSchema !== undefined
         ? { applicationFormSchema: toNullableJson(body.applicationFormSchema) }
         : {}),
@@ -71,6 +72,7 @@ export async function PATCH(req: Request) {
       description: true,
       avatarUrl: true,
       isPublicDirectory: true,
+      applicationsOpen: true,
       applicationFormSchema: true,
       orbitConfig: true,
     },
