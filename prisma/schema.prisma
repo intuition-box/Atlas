@@ -262,7 +262,7 @@ model Community {
   isPublicDirectory Boolean @default(false)
 
   /// If false, users cannot submit new applications to join this community.
-  applicationsOpen Boolean @default(true)
+  isApplicationOpen Boolean @default(true)
 
   // JSON settings so you can evolve without migrations every week
   applicationFormSchema Json?
