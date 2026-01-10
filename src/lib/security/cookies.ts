@@ -1,86 +1,113 @@
 import "server-only";
 
-import crypto from "node:crypto";
+import type { NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 
-import { cookies } from "next/headers";
+/**
+ * Cookie helpers (server-only)
+ *
+ * Goals:
+ * - One small, consistent place to read/set/clear cookies in route handlers.
+ * - Safe defaults: httpOnly + SameSite=Lax + Path=/ + Secure in production.
+ * - Avoid env toggles and magic behavior.
+ */
 
-import { serverEnv as env, isProd } from "@/lib/env-server";
+export type SameSite = "lax" | "strict" | "none";
 
-const COOKIE_NAME = "orbyt_mfa";
-
-async function cookieStore() {
-  return await cookies();
-}
-
-function sign(input: string): string {
-  const h = crypto.createHmac("sha256", env.AUTH_SECRET).update(input).digest("base64url");
-  return `${input}.${h}`;
-}
-
-function verify(signed: string): string | null {
-  const i = signed.lastIndexOf(".");
-  if (i <= 0) return null;
-
-  const raw = signed.slice(0, i);
-  const expected = sign(raw);
-
-  const a = Buffer.from(expected);
-  const b = Buffer.from(signed);
-
-  if (a.length !== b.length) return null;
-  return crypto.timingSafeEqual(a, b) ? raw : null;
-}
-
-export type RememberToken = {
-  did: string; // device id
-  uid: string; // user id
-  exp: number; // epoch seconds
-  iat: number; // epoch seconds
+export type CookieOptions = {
+  httpOnly?: boolean;
+  secure?: boolean;
+  sameSite?: SameSite;
+  path?: string;
+  domain?: string;
+  maxAge?: number;
+  expires?: Date;
 };
 
-export function createRememberToken(payload: RememberToken): string {
-  const raw = Buffer.from(JSON.stringify(payload)).toString("base64url");
-  return sign(raw);
+function isProd(): boolean {
+  return process.env.NODE_ENV === "production";
 }
 
-export function parseRememberToken(token: string): RememberToken | null {
-  const raw = verify(token);
-  if (!raw) return null;
-  try {
-    const obj = JSON.parse(Buffer.from(raw, "base64url").toString("utf8")) as RememberToken;
-    if (typeof obj.did !== "string" || typeof obj.uid !== "string") return null;
-    if (typeof obj.exp !== "number" || typeof obj.iat !== "number") return null;
-    if (obj.exp <= Math.floor(Date.now() / 1000)) return null;
-    return obj;
-  } catch {
-    return null;
-  }
-}
-
-export async function setRememberCookie(token: string) {
-  const maxAge = 60 * 60 * 24 * 30; // 30 days
-  const store = await cookieStore();
-  store.set(COOKIE_NAME, token, {
+/**
+ * Default options for app cookies.
+ *
+ * - httpOnly: true
+ * - sameSite: lax (safe default for most web apps)
+ * - secure: production only (dev http cannot set secure cookies)
+ * - path: /
+ */
+export function defaultCookieOptions(): Required<
+  Pick<CookieOptions, "httpOnly" | "secure" | "sameSite" | "path">
+> {
+  return {
     httpOnly: true,
-    secure: isProd,
+    secure: isProd(),
     sameSite: "lax",
     path: "/",
-    maxAge,
+  };
+}
+
+/**
+ * Make a __Host- cookie name in production for stronger scoping.
+ * In dev we return the base name because __Host- requires Secure.
+ */
+export function hostCookieName(base: string): string {
+  const b = base.trim();
+  if (!b) throw new Error("Cookie base name is required");
+  return isProd() ? `__Host-${b}` : b;
+}
+
+/** Read a cookie value from a NextRequest. */
+export function getCookie(req: NextRequest, name: string): string | null {
+  return req.cookies.get(name)?.value ?? null;
+}
+
+/**
+ * Set a cookie on a NextResponse.
+ *
+ * Note: In Next.js, cookies must be set on the response object you return.
+ */
+export function setCookie(
+  res: NextResponse,
+  name: string,
+  value: string,
+  opts?: CookieOptions,
+): void {
+  const d = defaultCookieOptions();
+  res.cookies.set(name, value, {
+    httpOnly: opts?.httpOnly ?? d.httpOnly,
+    secure: opts?.secure ?? d.secure,
+    sameSite: opts?.sameSite ?? d.sameSite,
+    path: opts?.path ?? d.path,
+    domain: opts?.domain,
+    maxAge: opts?.maxAge,
+    expires: opts?.expires,
   });
 }
 
-export async function getRememberCookie(): Promise<string | undefined> {
-  const store = await cookieStore();
-  return store.get(COOKIE_NAME)?.value;
-}
-
-export async function clearRememberCookie() {
-  const store = await cookieStore();
-  store.set(COOKIE_NAME, "", {
-    httpOnly: true,
-    secure: isProd,
-    sameSite: "lax",
-    path: "/",
+/**
+ * Clear a cookie by setting it to empty with maxAge=0.
+ */
+export function clearCookie(res: NextResponse, name: string, opts?: CookieOptions): void {
+  const d = defaultCookieOptions();
+  res.cookies.set(name, "", {
+    httpOnly: opts?.httpOnly ?? d.httpOnly,
+    secure: opts?.secure ?? d.secure,
+    sameSite: opts?.sameSite ?? d.sameSite,
+    path: opts?.path ?? d.path,
+    domain: opts?.domain,
     maxAge: 0,
   });
+}
+
+/**
+ * Convenience: set a token-style cookie (httpOnly + lax + secure-in-prod + path=/).
+ */
+export function setTokenCookie(
+  res: NextResponse,
+  name: string,
+  token: string,
+  opts?: Omit<CookieOptions, "httpOnly">,
+): void {
+  setCookie(res, name, token, { ...opts, httpOnly: true });
 }

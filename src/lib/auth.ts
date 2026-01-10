@@ -9,15 +9,34 @@ import { ROUTES } from "@/lib/routes";
 
 const isDev = process.env.NODE_ENV !== "production";
 
+const SESSION_MAX_AGE_SEC = 60 * 60 * 24 * 30;
+
 function requiredEnv(name: string) {
   const v = process.env[name];
   if (!v || v.length === 0) throw new Error(`${name} is required`);
   return v;
 }
 
-function optionalEnv(name: string) {
-  const v = process.env[name];
-  return v && v.length > 0 ? v : null;
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === "object";
+}
+
+function readString(obj: Record<string, unknown>, key: string): string | null {
+  const v = obj[key];
+  return typeof v === "string" && v.length > 0 ? v : null;
+}
+
+function discordImageUrl(profile: unknown, fallback: string | null | undefined): string | null {
+  if (isRecord(profile)) {
+    return (
+      readString(profile, "image_url") ??
+      readString(profile, "avatar_url") ??
+      readString(profile, "picture") ??
+      fallback ??
+      null
+    );
+  }
+  return fallback ?? null;
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -28,25 +47,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       clientSecret: requiredEnv("AUTH_DISCORD_SECRET"),
     }),
   ],
-  session: { strategy: "database" },
+  session: { strategy: "database", maxAge: SESSION_MAX_AGE_SEC },
   secret: requiredEnv("AUTH_SECRET"),
   pages: {
     signIn: ROUTES.signIn,
   },
-  trustHost: isDev || optionalEnv("AUTH_TRUST_HOST") === "true",
+  trustHost: true,
   debug: isDev,
   callbacks: {
     async signIn({ user, account, profile }) {
       if (account?.provider !== "discord") return true;
 
       const discordId = account.providerAccountId;
-
-      const imageUrl =
-        (profile as any)?.image_url ??
-        (profile as any)?.avatar_url ??
-        (profile as any)?.picture ??
-        user.image ??
-        null;
+      const imageUrl = discordImageUrl(profile, user.image);
 
       try {
         await db.user.update({
@@ -67,13 +80,25 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return true;
     },
     async session({ session, user }) {
-      if (session.user) {
-        (session.user as any).id = user.id;
-        (session.user as any).avatarUrl =
-          (user as any).avatarUrl ?? user.image ?? null;
-        (session.user as any).handle = (user as any).handle ?? null;
-        (session.user as any).onboarded = Boolean((user as any).handle);
-      }
+      if (!session.user) return session;
+
+      session.user.id = user.id;
+
+      // AdapterUser typing does not include our custom columns, so refetch.
+      const dbUser = await db.user.findUnique({
+        where: { id: user.id },
+        select: {
+          avatarUrl: true,
+          image: true,
+          // Prefer a single query: load the related handle name if present.
+          handleRecord: { select: { name: true } },
+        },
+      });
+
+      session.user.avatarUrl = dbUser?.avatarUrl ?? dbUser?.image ?? user.image ?? null;
+      session.user.handle = dbUser?.handleRecord?.name ?? null;
+      session.user.onboarded = Boolean(session.user.handle);
+
       return session;
     },
   },

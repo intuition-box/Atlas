@@ -1,215 +1,389 @@
-'use client';
+"use client";
 
-import { isApiResponse } from "@/types/api";
+import type { ApiEnvelope, ApiError, ApiIssue, Result } from "@/lib/api-shapes";
+import { err, isApiEnvelope, ok } from "@/lib/api-shapes";
 
 /**
- * Tiny browser RPC client (V3)
- * - Single entry: rpcRequest<T>(path, body?, opts?)
- * - Envelope required: { success:true, data } | { success:false, error:{ code, message, details? } }
- * - POST by default; set opts.method = 'GET' to send query-only requests
- * - Sends CSRF token for POST when available; retries once on CSRF errors
- * - Supports Idempotency-Key and If-Match headers
+ * Client-safe API client for JSON API routes.
+ *
+ * Canonical JSON envelope (see `src/lib/api-shapes.ts`):
+ * - { ok: true, data }
+ * - { ok: false, error: { code, message, status, issues?, meta? } }
+ *
+ * Convention (AGENTS.md): use GET and POST only.
  */
 
-let csrfCache: string = '';
-let csrfInitialized = false; // false until first attempt; then true (even if no token available)
+export type ApiClientErrorCode =
+  | "CLIENT_NETWORK_ERROR"
+  | "CLIENT_REQUEST_ABORTED"
+  | "CLIENT_REQUEST_TIMEOUT"
+  | "CLIENT_INVALID_RESPONSE"
+  | "CLIENT_NON_JSON_RESPONSE";
 
-export type RpcOptions = {
-  method?: 'GET' | 'POST';
-  ifMatch?: string; // pass ETag when editing/deleting
-  idempotencyKey?: string; // for create/mutate flows
-  signal?: AbortSignal;
+export type ApiClientError = ApiError<ApiClientErrorCode, number, unknown>;
+
+export type ApiRequestOptions = {
+  method?: "GET" | "POST";
+  query?: Record<string, QueryValue> | URLSearchParams;
+  body?: unknown;
   headers?: Record<string, string>;
-  // You can opt-in to force a fresh CSRF fetch (rarely needed)
-  refreshCsrf?: boolean;
+  signal?: AbortSignal;
+
+  /** If set, sent as If-Match for optimistic concurrency control. */
+  ifMatch?: string;
+
+  /** If set, sent as Idempotency-Key for safe request retries. */
+  idempotencyKey?: string;
+
+  /** Override automatic CSRF header attachment. Defaults to true for POST. */
+  csrf?: boolean;
+
+  /** Retry once after CSRF refresh on CSRF failure. Defaults to true. */
+  retryOnCsrfFailure?: boolean;
+
+  /** Request timeout in milliseconds. Aborts the request if exceeded. */
+  timeoutMs?: number;
+
+  /** @internal Used to prevent infinite retry loops. Do not set manually. */
+  _retryCount?: number;
 };
 
-export class RpcError<T = unknown> extends Error {
-  /** HTTP status code from the Response. */
-  status: number;
-  /** Optional application-level error code from the ApiResponse envelope. */
-  code?: number;
-  details?: T;
-  constructor(httpStatus: number, message: string, details?: T, code?: number) {
-    super(message);
-    this.name = 'RpcError';
-    this.status = httpStatus;
-    this.code = code;
-    this.details = details;
-  }
+type QueryValue =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | Array<string | number | boolean | null | undefined>;
+
+type CsrfResponse = { token: string };
+
+let csrfToken = "";
+let csrfReady = false;
+let csrfInFlight: Promise<string> | null = null;
+
+/**
+ * Resets the cached CSRF token, forcing a fresh fetch on next request.
+ * Useful for testing or handling token invalidation.
+ */
+export function resetCsrf(): void {
+  csrfToken = "";
+  csrfReady = false;
+  csrfInFlight = null;
 }
 
-export function resetCsrf() {
-  csrfCache = '';
-  csrfInitialized = false;
+function shouldAttachCsrf(method: "GET" | "POST", override?: boolean): boolean {
+  if (override === false) return false;
+  if (override === true) return true;
+  return method === "POST";
 }
 
-async function getCsrf(): Promise<string> {
-  if (csrfInitialized) return csrfCache;
-  try {
-    const r = await fetch('/api/security/csrf', {
-      method: 'GET',
-      credentials: 'same-origin',
-      cache: 'no-store',
-      headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-    });
-    if (!r.ok) {
-      // If the endpoint is absent/disabled, proceed without a token.
-      if (r.status === 404 || r.status === 405 || r.status === 501) {
-        csrfCache = '';
-        csrfInitialized = true;
-        return csrfCache;
+/**
+ * Fetches CSRF token with race condition protection.
+ * Multiple concurrent calls will reuse the same in-flight request.
+ */
+async function getCsrfToken(): Promise<string> {
+  if (csrfReady) return csrfToken;
+  if (csrfInFlight) return csrfInFlight;
+
+  csrfInFlight = (async () => {
+    try {
+      const r = await fetch("/api/security/csrf", {
+        method: "GET",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: {
+          Accept: "application/json",
+          "X-Requested-With": "XMLHttpRequest",
+        },
+      });
+
+      if (!r.ok) {
+        csrfToken = "";
+        csrfReady = true;
+        return csrfToken;
       }
-      throw new RpcError(r.status, 'CSRF bootstrap failed');
+
+      const json: unknown = await r.json().catch(() => null);
+      if (isApiEnvelope(json)) {
+        const env = json as ApiEnvelope<CsrfResponse>;
+        if (env.ok === true) {
+          csrfToken = env.data?.token ?? "";
+        } else {
+          csrfToken = "";
+        }
+      } else {
+        csrfToken = "";
+      }
+
+      csrfReady = true;
+      return csrfToken;
+    } catch {
+      csrfToken = "";
+      csrfReady = true;
+      return csrfToken;
+    } finally {
+      csrfInFlight = null;
     }
-    const json = await r.json().catch(() => null);
-    const token = typeof (json as any)?.data?.token === 'string' ? (json as any).data.token : '';
-    csrfCache = token;
-    csrfInitialized = true;
-    return csrfCache;
-  } catch {
-    // Network error — don’t block; proceed without header.
-    csrfCache = '';
-    csrfInitialized = true;
-    return csrfCache;
-  }
+  })();
+
+  return csrfInFlight;
 }
 
-function buildQuery(params: Record<string, unknown> | URLSearchParams | undefined) {
-  if (!params) return '';
-  if (params instanceof URLSearchParams) {
-    const s = params.toString();
-    return s ? `?${s}` : '';
+/**
+ * Builds query string from object or URLSearchParams.
+ * Handles arrays by appending multiple values with the same key.
+ * Filters out null and undefined values.
+ */
+function buildQuery(q?: Record<string, QueryValue> | URLSearchParams): string {
+  if (!q) return "";
+  if (q instanceof URLSearchParams) {
+    const s = q.toString();
+    return s ? `?${s}` : "";
   }
+
   const sp = new URLSearchParams();
-  Object.entries(params).forEach(([k, v]) => {
-    if (v === undefined || v === null) return;
-    sp.append(k, String(v));
-  });
+  for (const [k, v] of Object.entries(q)) {
+    if (v == null) continue;
+    if (Array.isArray(v)) {
+      for (const item of v) {
+        if (item == null) continue;
+        sp.append(k, String(item));
+      }
+    } else {
+      sp.append(k, String(v));
+    }
+  }
+
   const s = sp.toString();
-  return s ? `?${s}` : '';
+  return s ? `?${s}` : "";
 }
 
-async function parseApiResponse<T>(r: Response): Promise<T> {
-  const fallbackMessage = (status: number) => {
-    if (status === 401) return 'Please sign in to continue.';
-    if (status === 403) return 'You don’t have permission to do that.';
-    if (status === 404) return 'Not found.';
-    if (status === 409) return 'Conflict. Please refresh and try again.';
-    if (status === 412) return 'Out of date. Please refresh and try again.';
-    if (status === 419) return 'Security check expired. Please refresh and try again.';
-    if (status === 429) return 'Too many requests. Please try again soon.';
-    if (status >= 500) return 'Server error. Please try again.';
-    return 'Request failed. Please try again.';
+function nonJsonError(status: number, contentType: string | null): ApiClientError {
+  return {
+    code: "CLIENT_NON_JSON_RESPONSE",
+    message: "Invalid server response",
+    status,
+    meta: { contentType },
   };
+}
 
-  const ct = r.headers.get('content-type') || '';
+function invalidEnvelopeError(status: number, meta?: unknown): ApiClientError {
+  return {
+    code: "CLIENT_INVALID_RESPONSE",
+    message: "Invalid server response",
+    status,
+    meta,
+  };
+}
 
-  // If the server didn't return our JSON envelope, prefer a friendly, user-safe message.
-  if (!ct.includes('application/json')) {
-    // Try to consume the body to avoid leaking raw HTML/stack traces into the UI.
+function networkError(aborted: boolean = false, timeout: boolean = false): ApiClientError {
+  if (timeout) {
+    return {
+      code: "CLIENT_REQUEST_TIMEOUT",
+      message: "Request timeout",
+      status: 0,
+    };
+  }
+  if (aborted) {
+    return {
+      code: "CLIENT_REQUEST_ABORTED",
+      message: "Request cancelled",
+      status: 0,
+    };
+  }
+  return {
+    code: "CLIENT_NETWORK_ERROR",
+    message: "Network error",
+    status: 0,
+  };
+}
+
+function isCsrfProblem(e: { status: number; code?: string }): boolean {
+  return e.status === 419 || e.code === "CSRF_FAILED";
+}
+
+/**
+ * Parses a JSON response and validates the canonical API envelope shape.
+ */
+async function parseEnvelope<T>(r: Response): Promise<Result<T, ApiError<string, number, unknown> | ApiClientError>> {
+  const ct = r.headers.get("content-type");
+  if (!ct || !ct.toLowerCase().includes("application/json")) {
     try {
       await r.text();
     } catch {
       // ignore
     }
-    throw new RpcError(r.status, fallbackMessage(r.status));
+    return err(nonJsonError(r.status, ct));
   }
 
   let json: unknown;
   try {
     json = await r.json();
   } catch {
-    throw new RpcError(r.status, fallbackMessage(r.status));
+    return err(invalidEnvelopeError(r.status));
   }
 
-  if (!isApiResponse<T>(json)) {
-    throw new RpcError(r.status, 'Invalid server response', json);
+  if (!isApiEnvelope(json)) {
+    return err(invalidEnvelopeError(r.status, json));
   }
 
-  if (json.success === true) {
-    return json.data as T;
+  const env = json as ApiEnvelope<T>;
+
+  if (env.ok === true) {
+    return ok(env.data);
   }
 
-  const code = typeof json.error?.code === 'number' ? json.error.code : undefined;
-  const rawMessage = typeof json.error?.message === 'string' ? json.error.message : '';
+  // Error envelope
+  const error = env.error as ApiError<string, number, unknown>;
 
-  // If the server didn't provide a meaningful message, use a friendly status-based fallback.
-  const message = rawMessage && !/^Request failed \(\d+\)$/.test(rawMessage)
-    ? rawMessage
-    : fallbackMessage(r.status);
-
-  throw new RpcError(r.status, message, json.error?.details, code);
+  return err(error);
 }
 
-export async function rpcRequest<T>(
+/**
+ * Makes an API request and returns a Result for explicit handling.
+ */
+export async function apiRequest<T>(
   path: string,
-  body?: unknown,
-  opts: RpcOptions = {},
-): Promise<T> {
-  const method: 'GET' | 'POST' = opts.method ?? 'POST';
-  const isGet = method === 'GET';
+  options: ApiRequestOptions = {},
+): Promise<Result<T, ApiError<string, number, unknown> | ApiClientError>> {
+  const retryCount = options._retryCount ?? 0;
+  const method: "GET" | "POST" = options.method ?? "GET";
+  const retryOnCsrfFailure = options.retryOnCsrfFailure ?? true;
 
-  const url = isGet && body && typeof body === 'object'
-    ? `${path}${buildQuery(body as Record<string, unknown>)}`
-    : path;
+  const url = `${path}${buildQuery(options.query)}`;
 
   const headers: Record<string, string> = {
-    ...(opts.headers ?? {}),
+    Accept: "application/json",
+    "X-Requested-With": "XMLHttpRequest",
+    ...(options.headers ?? {}),
   };
-  headers['Accept'] = 'application/json';
-  headers['X-Requested-With'] = 'XMLHttpRequest';
 
-  let reqBody: string | undefined;
+  if (options.ifMatch) headers["If-Match"] = options.ifMatch;
+  if (options.idempotencyKey) headers["Idempotency-Key"] = options.idempotencyKey;
 
-  if (!isGet) {
-    if (opts.refreshCsrf) resetCsrf();
-    const csrf = await getCsrf();
-    headers['Content-Type'] = 'application/json';
-    if (csrf) headers['X-CSRF-Token'] = csrf; // optional if token available
-    if (opts.ifMatch) headers['If-Match'] = opts.ifMatch;
-    if (opts.idempotencyKey) headers['Idempotency-Key'] = opts.idempotencyKey;
-    reqBody = JSON.stringify(body ?? {});
+  // Setup abort/timeout handling
+  const controller = options.timeoutMs ? new AbortController() : undefined;
+  let timedOut = false;
+
+  let abortListener: (() => void) | null = null;
+  if (controller && options.signal) {
+    if (options.signal.aborted) {
+      controller.abort();
+    } else {
+      abortListener = () => controller.abort();
+      options.signal.addEventListener("abort", abortListener, { once: true });
+    }
   }
 
-  const r = await fetch(url, {
+  const timeoutId =
+    controller && options.timeoutMs
+      ? setTimeout(() => {
+          timedOut = true;
+          controller.abort();
+        }, options.timeoutMs)
+      : undefined;
+
+  const init: RequestInit = {
     method,
-    credentials: 'same-origin',
-    cache: 'no-store',
+    credentials: "same-origin",
+    cache: "no-store",
     headers,
-    body: reqBody,
-    signal: opts.signal,
-  });
+    signal: controller ? controller.signal : options.signal,
+  };
+
+  if (method === "POST") {
+    // Allow override but default to application/json
+    headers["Content-Type"] = headers["Content-Type"] ?? "application/json";
+    init.body = JSON.stringify(options.body ?? {});
+
+    const wantsCsrf = shouldAttachCsrf(method, options.csrf);
+    if (wantsCsrf) {
+      const token = await getCsrfToken();
+      if (token) headers["X-CSRF-Token"] = token;
+    }
+  }
+
+  const attempt = async (): Promise<
+    Result<T, ApiError<string, number, unknown> | ApiClientError>
+  > => {
+    try {
+      const r = await fetch(url, init);
+      return await parseEnvelope<T>(r);
+    } catch (e) {
+      // Distinguish between abort, timeout, and network errors
+      if (e instanceof DOMException && e.name === "AbortError") {
+        return err(networkError(true, timedOut));
+      }
+      return err(networkError(false, false));
+    }
+  };
 
   try {
-    return await parseApiResponse<T>(r);
-  } catch (err) {
-    if (!isGet && err instanceof RpcError) {
-      const status = err.status;
-      const msg = String(err.message || '');
-      if (status === 419 || (status === 403 && /csrf/i.test(msg))) {
-        if (!opts.refreshCsrf) {
-          resetCsrf();
-          return rpcRequest<T>(path, body, { ...opts, refreshCsrf: true });
-        }
-      }
+    const first = await attempt();
+
+    // No retry for GET or on success
+    if (method !== "POST") return first;
+    if (first.ok) return first;
+
+    // Only retry once on CSRF failure
+    const wantsRetry =
+      retryCount === 0 &&
+      retryOnCsrfFailure &&
+      shouldAttachCsrf(method, options.csrf);
+    if (!wantsRetry) return first;
+
+    const problem = first.error;
+    if (problem && isCsrfProblem(problem)) {
+      resetCsrf();
+      return await apiRequest<T>(path, { ...options, _retryCount: 1 });
     }
-    throw err;
+
+    return first;
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+    if (abortListener && options.signal) {
+      options.signal.removeEventListener("abort", abortListener);
+    }
   }
 }
 
-export async function rpcGet<T>(
+/**
+ * Convenience function for GET requests.
+ *
+ * @example
+ * const result = await apiGet<User[]>("/api/users", { page: 1, limit: 20 });
+ */
+export function apiGet<T>(
   path: string,
-  params?: Record<string, unknown> | URLSearchParams,
-  opts?: Omit<RpcOptions, 'method'>,
-): Promise<T> {
-  return rpcRequest<T>(path, params, { ...(opts ?? {}), method: 'GET' });
+  query?: Record<string, QueryValue> | URLSearchParams,
+  options: Omit<ApiRequestOptions, "method" | "query" | "body"> = {},
+) {
+  return apiRequest<T>(path, { ...options, method: "GET", query });
 }
 
-export async function rpcPost<T>(
+/**
+ * Convenience function for POST requests.
+ *
+ * @example
+ * const result = await apiPost<CreateResponse>("/api/posts", { title: "Hello" });
+ */
+export function apiPost<T>(
   path: string,
   body?: unknown,
-  opts?: Omit<RpcOptions, 'method'>,
-): Promise<T> {
-  return rpcRequest<T>(path, body, { ...(opts ?? {}), method: 'POST' });
+  options: Omit<ApiRequestOptions, "method" | "body"> = {},
+) {
+  return apiRequest<T>(path, { ...options, method: "POST", body });
+}
+
+/**
+ * Extracts validation issues from an error result.
+ * Returns undefined if the result is successful or has no validation issues.
+ */
+export function getApiIssues(
+  r: Result<unknown, ApiError<string, number, unknown> | ApiClientError>,
+): ApiIssue[] | undefined {
+  if (r.ok) return undefined;
+  const error = r.error;
+  return "issues" in error ? error.issues : undefined;
 }

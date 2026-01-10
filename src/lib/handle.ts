@@ -1,35 +1,53 @@
 import { z } from "zod";
 
+import type { ApiError, Result } from "@/lib/api-shapes";
+import { err, ok } from "@/lib/api-shapes";
 import { isReservedHandle } from "@/config/reserved-handles";
 
 /**
- * Handle policy (client-safe)
+ * Handle policy (client-safe).
  *
- * Canonical handle form:
- * - lowercase
- * - hyphen-separated segments
- * - a–z, 0–9, hyphen
+ * This file defines what a *valid handle string* looks like. It does NOT deal with:
+ * - uniqueness
+ * - cooldown / reclaim windows
+ * - retirement
  *
- * IMPORTANT:
- * - This file must remain client-safe (no db, no @prisma/client, no server-only).
- * - Server-side lifecycle enforcement (claim/release/reclaim/retire) lives in
- *   `src/lib/handle-registry.ts`.
+ * Those lifecycle rules live server-side in `src/lib/handle-registry.ts`.
  */
+
+// Keep these in sync with the DB schema.
 export const MIN_HANDLE_LEN = 3;
-// Keep in sync with `Handle.name` (and any other `*.handle`) length in `prisma/schema.prisma`.
 export const MAX_HANDLE_LEN = 32;
 
-// Canonical: lowercase, hyphen-separated segments. (We accept '_' in input but normalize to '-')
-export const handlePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+/** Canonical handle regex: lowercase segments separated by single hyphens. */
+export const HANDLE_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
-export type HandleValidationReason =
-  | "TOO_SHORT"
-  | "TOO_LONG"
-  | "INVALID_FORMAT"
-  | "RESERVED";
+export type HandleValidationCode =
+  | "HANDLE_TOO_SHORT"
+  | "HANDLE_TOO_LONG"
+  | "HANDLE_INVALID_FORMAT"
+  | "HANDLE_RESERVED";
 
+export type HandleValidationProblem = ApiError<
+  HandleValidationCode,
+  400,
+  {
+    /** Always included so callers can show what was actually parsed/normalized. */
+    normalized: string;
+  }
+>;
+
+export type HandleValidationResult = Result<string, HandleValidationProblem>;
+
+/**
+ * Normalize user input to canonical *shape*.
+ *
+ * Normalization is intentionally conservative:
+ * - It does not attempt to convert arbitrary characters into valid ones.
+ * - It does normalize common separators to avoid bypasses.
+ */
 export function normalizeHandle(input: string): string {
-  let s = (input ?? "").toString().trim().toLowerCase();
+  let s = input.trim().toLowerCase();
 
   // Normalize Unicode dashes to ASCII hyphen-minus (common on mobile copy/paste).
   try {
@@ -38,112 +56,150 @@ export function normalizeHandle(input: string): string {
     s = s.replace(/[\u2010-\u2015]/g, "-");
   }
 
-  // Convert underscores to hyphens so users can't bypass reserved handles.
+  // Prevent reserved-handle bypass via underscores.
   s = s.replace(/_+/g, "-");
 
-  // Convert whitespace/dots to hyphens, collapse, trim.
-  s = s.replace(/[\s.]+/g, "-").replace(/-+/g, "-").replace(/^-+|-+$/g, "");
+  // Convert whitespace and dots to hyphens.
+  s = s.replace(/[\s.]+/g, "-");
+
+  // Collapse repeats and trim.
+  s = s.replace(/-+/g, "-").replace(/^-+|-+$/g, "");
 
   return s;
 }
 
+function validateNormalizedHandle(normalized: string): HandleValidationResult {
+  if (normalized.length < MIN_HANDLE_LEN) {
+    return err({
+      code: "HANDLE_TOO_SHORT",
+      message: "Handle is too short",
+      status: 400,
+      meta: { normalized },
+    });
+  }
+
+  if (normalized.length > MAX_HANDLE_LEN) {
+    return err({
+      code: "HANDLE_TOO_LONG",
+      message: "Handle is too long",
+      status: 400,
+      meta: { normalized },
+    });
+  }
+
+  if (!HANDLE_PATTERN.test(normalized)) {
+    return err({
+      code: "HANDLE_INVALID_FORMAT",
+      message: "Invalid handle",
+      status: 400,
+      meta: { normalized },
+    });
+  }
+
+  if (isReservedHandle(normalized)) {
+    return err({
+      code: "HANDLE_RESERVED",
+      message: "Handle is reserved",
+      status: 400,
+      meta: { normalized },
+    });
+  }
+
+  return ok(normalized);
+}
+
 /**
- * Create a best-effort handle *candidate* from an arbitrary seed (name/email/etc.).
+ * Validate arbitrary input.
+ * Returns the canonical handle on success.
+ */
+export function validateHandle(input: string): HandleValidationResult {
+  return validateNormalizedHandle(normalizeHandle(input));
+}
+
+/**
+ * Parse + validate a handle.
  *
- * Notes:
- * - Client-safe (no DB checks). Uniqueness/availability is enforced server-side.
- * - This is intentionally a bit more permissive than `normalizeHandle`:
- *   it strips diacritics and drops unsupported characters.
+ * This is a small alias used by server-side code that wants an explicit Result.
+ */
+export function parseHandle(input: string): HandleValidationResult {
+  return validateHandle(input);
+}
+
+/**
+ * Parse + validate. Returns the canonical handle or throws.
+ *
+ * Server-side code uses this before touching the DB.
+ */
+export function assertValidHandle(input: string): string {
+  const r = validateHandle(input);
+  if (r.ok) return r.value;
+
+  // Keep the message generic; callers can use `validateHandle` for UI-level specificity.
+  throw new Error(
+    "Invalid handle. Use 3–32 lowercase letters/numbers separated by hyphens (e.g. 'saulo' or 'saulo-pt').",
+  );
+}
+
+/**
+ * Best-effort handle candidate from arbitrary input (name/email/etc.).
+ *
+ * This is client-safe and does not check uniqueness/availability.
+ * Use the handle-registry helpers server-side for uniqueness/availability suggestions.
  */
 export function makeHandleCandidate(seed: string): string {
   let s = normalizeHandle(seed);
 
-  // Strip accents/diacritics
+  // Strip accents/diacritics.
   try {
     s = s.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
   } catch {
     // ignore
   }
 
-  // Keep only a–z, 0–9, hyphen
-  s = s
-    .replace(/[^a-z0-9-]/g, "")
-    .replace(/-+/g, "-")
-    .replace(/^-+|-+$/g, "");
+  // Keep only a–z, 0–9, hyphen.
+  s = s.replace(/[^a-z0-9-]/g, "").replace(/-+/g, "-").replace(/^-+|-+$/g, "");
 
   if (!s) s = "member";
 
-  // Prefer returning a non-reserved candidate so onboarding/community creation
-  // doesn't immediately fail (uniqueness is still enforced server-side).
-  if (isReservedHandle(s)) {
-    s = `${s}-1`;
-  }
+  // Avoid immediate failure for reserved handles.
+  if (isReservedHandle(s)) s = `${s}-1`;
 
+  // Enforce max length.
   if (s.length > MAX_HANDLE_LEN) {
     s = s.slice(0, MAX_HANDLE_LEN).replace(/-+$/g, "");
   }
 
-  // If trimming reintroduced a reserved value (edge-case), nudge it.
+  // Ensure minimum length (edge-case after trimming).
+  if (s.length < MIN_HANDLE_LEN) {
+    s = (s + "-member").slice(0, MAX_HANDLE_LEN).replace(/-+$/g, "");
+  }
+
+  // If trimming reintroduced a reserved value, nudge again.
   if (isReservedHandle(s)) {
     s = `${s}-1`.slice(0, MAX_HANDLE_LEN).replace(/-+$/g, "");
   }
 
-  return s;
-}
+  const v = validateNormalizedHandle(s);
+  if (v.ok) return v.value;
 
-export function validateHandle(input: string): {
-  ok: boolean;
-  normalized: string;
-  reason?: HandleValidationReason;
-} {
-  const h = normalizeHandle(input);
-
-  if (h.length < MIN_HANDLE_LEN) return { ok: false, normalized: h, reason: "TOO_SHORT" };
-  if (h.length > MAX_HANDLE_LEN) return { ok: false, normalized: h, reason: "TOO_LONG" };
-  if (!handlePattern.test(h)) return { ok: false, normalized: h, reason: "INVALID_FORMAT" };
-  if (isReservedHandle(h)) return { ok: false, normalized: h, reason: "RESERVED" };
-
-  return { ok: true, normalized: h };
-}
-
-export function assertValidHandle(input: string): string {
-  const v = validateHandle(input);
-  if (v.ok) return v.normalized;
-
-  // One friendly message is enough for MVP.
-  throw new Error(
-    "Invalid handle. Use 3–32 lowercase letters/numbers separated by hyphens (e.g. 'saulo' or 'saulo-pt')."
-  );
+  // Last resort: a guaranteed-valid fallback.
+  return "member";
 }
 
 /**
- * Client-safe Zod schema for handles.
- * IMPORTANT: validation files import this to avoid duplicating handle rules.
+ * Zod schema for handles.
+ *
+ * - Preprocess normalizes
+ * - Refinement validates and reports a concise message
  */
 export const HandleSchema = z
-  .preprocess((v) => {
-    if (typeof v !== "string") return v;
-    return normalizeHandle(v);
-  }, z.string())
+  .preprocess((v) => (typeof v === "string" ? normalizeHandle(v) : v), z.string())
   .superRefine((v, ctx) => {
-    if (typeof v !== "string") {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid handle" });
-      return;
-    }
-
-    const res = validateHandle(v);
+    const res = validateNormalizedHandle(v);
     if (res.ok) return;
 
-    const msg =
-      res.reason === "TOO_SHORT"
-        ? "Handle is too short"
-        : res.reason === "TOO_LONG"
-          ? "Handle is too long"
-          : res.reason === "RESERVED"
-            ? "Handle is reserved"
-            : "Invalid handle";
-
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: msg });
+    ctx.addIssue({ code: "custom", message: res.error.message });
   });
 
-export type HandleInput = z.infer<typeof HandleSchema>;
+export type HandleInput = z.input<typeof HandleSchema>;
+export type Handle = z.output<typeof HandleSchema>;

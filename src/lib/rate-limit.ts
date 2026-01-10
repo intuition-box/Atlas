@@ -1,320 +1,196 @@
 import "server-only";
-/**
- * Lightweight, in-memory rate limiter (single-node, dev/local).
- * ------------------------------------------------------------------
- * ⚠️ For production (multi-region/serverless), use `redis-rate-limit.ts`.
- *
- * Features:
- *  - Sliding window per (action + callerKey)
- *  - Helper to emit standard RateLimit headers (IETF draft + common mirrors)
- */
 
-type TimestampMs = number;
+import type { NextRequest } from "next/server";
+import { createHash } from "node:crypto";
+
+export type RateLimitPolicyId = "api" | "auth";
+
+export type RateLimitDecision = {
+  allowed: boolean;
+  limit: number;
+  remaining: number;
+  /** Unix epoch seconds when the window resets. */
+  reset: number;
+  /** Seconds clients should wait before retrying (only present when blocked). */
+  retryAfter?: number;
+};
+
+type Policy = {
+  /** max requests per window */
+  limit: number;
+  /** window size in ms */
+  windowMs: number;
+};
+
+const POLICIES: Record<RateLimitPolicyId, Policy> = {
+  // General API traffic (authenticated and anonymous)
+  api: { limit: 60, windowMs: 60_000 },
+  // Login / onboarding / high-risk endpoints
+  auth: { limit: 10, windowMs: 60_000 },
+} as const;
 
 type Bucket = {
-  hits: TimestampMs[]; // sorted ascending
-  lastWindowMs: number;
+  count: number;
+  resetAtMs: number;
 };
 
-// Map key: `${action}:${callerKey}`
-const globalForRateLimit = globalThis as unknown as {
-  __rateLimitBuckets?: Map<string, Bucket>;
-};
+const MAX_BUCKETS = 10_000;
+const CLEANUP_INTERVAL_MS = 30_000;
 
-const buckets = globalForRateLimit.__rateLimitBuckets ?? new Map<string, Bucket>();
-
-// Keep buckets stable across HMR in dev.
-if (process.env.NODE_ENV !== "production") {
-  globalForRateLimit.__rateLimitBuckets = buckets;
+function shouldCleanup(t: number): boolean {
+  const last = globalThis.__orbytRateLimitCleanupAtMs ?? 0;
+  return t - last >= CLEANUP_INTERVAL_MS;
 }
 
-/** Compose a caller key from available identifiers */
-export function callerKey(input: { userId?: string | null; ip?: string | null; extra?: string | null }): string {
-  const parts: string[] = [];
-  if (input.userId) parts.push(`u:${input.userId}`);
-  if (input.ip) parts.push(`ip:${input.ip}`);
-  if (input.extra) parts.push(`x:${input.extra}`);
-  return parts.length ? parts.join('|') : 'anon';
+function noteCleanup(t: number) {
+  globalThis.__orbytRateLimitCleanupAtMs = t;
 }
 
-/**
- * Parse time window strings like "10s", "1m", "5m", "1h".
- * - If unit is omitted, defaults to seconds (e.g., "10" => 10s)
- * - If unparsable, falls back to 60s
- */
-function parseWindow(value: string): number {
-  const m = /^\s*(\d+)\s*([smh])?\s*$/i.exec(value);
-  if (!m) return 60_000; // default 60s
-  const n = Number(m[1]);
-  const unit = (m[2] || 's').toLowerCase();
-  if (unit === 'h') return n * 60 * 60 * 1000;
-  if (unit === 'm') return n * 60 * 1000;
-  return n * 1000; // seconds
-}
-
-export type RateLimitResult = {
-  allowed: boolean;
-  remaining: number;
-  resetAt: number; // epoch ms when the bucket fully drains (best-effort)
-  limit: number;
-  windowMs: number;
-  key: string; // composed key for observability
-  policyId: string; // action/policy label for headers + observability
-};
-
-export type RateLimitPolicy = {
-  limit: number;
-  window: string; // e.g. '10s' | '1m' | '5m' | '1h'
-};
-
-/**
- * Centralized policy registry.
- * Keep this small and explicit; add entries as new endpoints are introduced.
- */
-export const RATE_LIMIT_POLICIES: Record<string, RateLimitPolicy> = {
-  default: { limit: 60, window: '1m' },
-  'boards.create': { limit: 10, window: '1m' },
-  rpc: { limit: 120, window: '1m' },
-};
-
-export function resolveRateLimitPolicy(policyId: string): RateLimitPolicy {
-  return RATE_LIMIT_POLICIES[policyId] ?? RATE_LIMIT_POLICIES.default;
-}
-
-/** IETF draft header names */
-export const RATE_LIMIT_IETF_HEADERS = {
-  RATE_LIMIT: 'RateLimit',
-  POLICY: 'RateLimit-Policy',
-} as const;
-
-/** Widely-used mirrors */
-export const RATE_LIMIT_TRIO_HEADERS = {
-  LIMIT: 'RateLimit-Limit',
-  REMAINING: 'RateLimit-Remaining',
-  RESET: 'RateLimit-Reset', // seconds until reset
-  RETRY_AFTER: 'Retry-After',
-} as const;
-
-/** Common `X-RateLimit-*` mirrors (GitHub-style) */
-export const RATE_LIMIT_X_HEADERS = {
-  LIMIT: 'X-RateLimit-Limit',
-  REMAINING: 'X-RateLimit-Remaining',
-  RESET: 'X-RateLimit-Reset', // epoch seconds
-} as const;
-
-// ---------------------------------------------------------------------------
-// Privacy-safe helpers (centralized; no raw IP leakage)
-// ---------------------------------------------------------------------------
-
-/**
- * Extract the caller's public IP from standard reverse-proxy headers.
- * Never uses adapter-specific fields (e.g., req.ip) to avoid accidental
- * leakage/logging of private addresses.
- */
-export function extractClientIp(req: Request): string | undefined {
-  try {
-    const fwd = req.headers.get('x-forwarded-for');
-    if (fwd) {
-      const first = fwd.split(',')[0]?.trim();
-      if (first) return first;
-    }
-    const real = req.headers.get('x-real-ip');
-    if (real) return real.trim();
-  } catch {}
-  return undefined;
-}
-
-/** Lightweight salted FNV-1a (32-bit) hash → hex (opaque; non-reversible). */
-function fnv1a32(input: string): string {
-  let h = 0x811c9dc5; // offset basis
-  for (let i = 0; i < input.length; i++) {
-    h ^= input.charCodeAt(i);
-    // 32-bit FNV prime multiplication via shifts
-    h += (h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24);
-  }
-  // unsigned 32-bit, hex padded
-  return (h >>> 0).toString(16).padStart(8, '0');
-}
-
-/**
- * Build a pseudonymous identity for rate limiting from (userId, hashed-IP).
- * - Uses a secret salt so the hash is stable per deployment but opaque.
- * - We intentionally do NOT include raw IP in the composed key.
- */
-export function rateLimitIdentity(req: Request, userId?: string | null): { userId?: string; extra?: string } {
-  const ip = extractClientIp(req);
-  // Prefer dedicated salt; fall back to AUTH_SECRET; final fallback is a dev-safe fixed value.
-  const salt = (process.env.RATE_LIMIT_IP_SALT || process.env.AUTH_SECRET || 'dev-salt') as string;
-  const extra = ip ? `ip:${fnv1a32(`${salt}|${ip}`)}` : undefined;
-  return {
-    userId: userId ?? undefined,
-    extra,
-  };
-}
-
-/** Preferred name in route code/docs. */
-export function getClientIp(req: Request): string | undefined {
-  return extractClientIp(req);
-}
-
-/**
- * Derive a stable caller key suitable for rate limiting.
- * - If userId is present: `u:<userId>` (primary)
- * - Else: a pseudonymous hashed-ip identity (no raw IP)
- */
-export function getRateLimitKey(req: Request, userId?: string | null): string {
-  const ids = rateLimitIdentity(req, userId);
-  return callerKey({ userId: ids.userId, extra: ids.extra });
-}
-
-/**
- * Convenience wrapper: limit by (userId || hashed-IP) for a sliding window.
- * Example:
- *   const rl = await limitByRequest('boards:create', req, session?.user?.id, 1, '10m'); // uses userId or hashed-ip identity
- */
-export async function limitByRequest(
-  action: string,
-  req: Request,
-  userId: string | null | undefined,
-  limit: number,
-  window: string,
-) {
-  return limitByUserOrIp(action, rateLimitIdentity(req, userId), limit, window);
-}
-
-/**
- * Core limiter.
- * - `action`: human-readable action name (e.g., 'rpc')
- * - `who`: either a string key or an object { userId?, ip?, extra? }
- * - `limit`: max hits per window
- * - `window`: string like '10s' | '1m' | '5m' | '1h'
- *   Prefer using limitByRequest(...) to avoid handling raw IPs in route handlers.
- */
-export async function rateLimitDetailed(
-  action: string,
-  who: string | { userId?: string | null; ip?: string | null; extra?: string | null },
-  limit: number,
-  window: string,
-): Promise<RateLimitResult> {
-  const now = Date.now();
-  const windowMs = parseWindow(window);
-  const key = typeof who === 'string' ? who : callerKey(who);
-  const mapKey = `${action}:${key}`;
-
-  const bucket = buckets.get(mapKey) ?? { hits: [], lastWindowMs: windowMs };
-  // If the policy window changed for this key, update stored window.
-  if (bucket.lastWindowMs !== windowMs) bucket.lastWindowMs = windowMs;
-
-  // Drop timestamps older than the window (hits[] is kept sorted ascending)
-  const since = now - windowMs;
-  let idx = 0;
-  const arr = bucket.hits;
-  while (idx < arr.length && arr[idx] < since) idx++;
-  const pruned = idx > 0 ? arr.slice(idx) : arr;
-
-  let allowed = false;
-  if (pruned.length < limit) {
-    pruned.push(now);
-    allowed = true;
+function cleanupBuckets(store: Map<string, Bucket>, t: number) {
+  // First drop expired windows.
+  for (const [k, b] of store) {
+    if (b.resetAtMs <= t) store.delete(k);
   }
 
-  // Save back (or delete if empty to avoid memory growth)
-  if (pruned.length === 0) {
-    buckets.delete(mapKey);
-  } else {
-    buckets.set(mapKey, { hits: pruned, lastWindowMs: windowMs });
+  // If still too large, drop oldest entries (in insertion order).
+  while (store.size > MAX_BUCKETS) {
+    const firstKey = store.keys().next().value as string | undefined;
+    if (!firstKey) break;
+    store.delete(firstKey);
+  }
+}
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __orbytRateLimitBuckets: Map<string, Bucket> | undefined;
+  // eslint-disable-next-line no-var
+  var __orbytRateLimitCleanupAtMs: number | undefined;
+}
+
+function buckets(): Map<string, Bucket> {
+  if (!globalThis.__orbytRateLimitBuckets) {
+    globalThis.__orbytRateLimitBuckets = new Map();
+  }
+  return globalThis.__orbytRateLimitBuckets;
+}
+
+function nowMs(): number {
+  return Date.now();
+}
+
+function resetEpochSeconds(resetAtMs: number): number {
+  return Math.floor(resetAtMs / 1000);
+}
+
+function clampNonNegative(n: number): number {
+  return n < 0 ? 0 : n;
+}
+
+function getClientIp(req: NextRequest): string {
+  // Cloudflare first
+  const cf = req.headers.get("cf-connecting-ip");
+  if (cf) return cf;
+
+  // Common proxies
+  const realIp = req.headers.get("x-real-ip");
+  if (realIp) return realIp;
+
+  const xff = req.headers.get("x-forwarded-for");
+  if (xff) {
+    const first = xff.split(",")[0]?.trim();
+    if (first) return first;
   }
 
-  maybeCleanup(now);
+  // NextRequest may have `ip` on some platforms
+  const anyReq = req as unknown as { ip?: string };
+  if (anyReq.ip) return anyReq.ip;
 
-  // Estimate next reset and remaining
-  const oldest = pruned[0];
-  const resetAt = oldest ? oldest + windowMs : now;
+  return "unknown";
+}
 
-  return {
-    allowed,
-    remaining: Math.max(0, limit - pruned.length),
-    resetAt,
-    limit,
-    windowMs,
-    key,
-    policyId: action,
-  };
+function hashIdentity(raw: string): string {
+  return createHash("sha256").update(raw).digest("hex").slice(0, 24);
 }
 
 /**
- * Build standardized rate limit headers for API responses.
+ * Build a stable, privacy-preserving rate limit key.
+ * - If `viewerId` is present, key is user-scoped.
+ * - Otherwise key is based on hashed client IP.
+ */
+export function getRateLimitKey(req: NextRequest, viewerId?: string): string {
+  if (viewerId && viewerId.length > 0) return `u:${viewerId}`;
+  const ip = getClientIp(req);
+  return `ip:${hashIdentity(ip)}`;
+}
+
+/**
+ * Compute a fixed-window rate limit decision.
  *
- * Emits:
- *   - IETF draft headers:
- *       RateLimit-Policy:  "default";q=<limit>;w=<windowSec>
- *       RateLimit:         "default";r=<remaining>;t=<resetSec>
- *   - Trio:
- *       RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset (seconds until reset)
- *   - Retry-After (on 429)
- *   - X-RateLimit-* mirrors (epoch seconds)
+ * Note: this implementation is per-process. In serverless/multi-instance deployments,
+ * use a shared store (Redis/Upstash/etc.) behind this interface.
  */
-export function buildRateLimitHeaders(res: RateLimitResult): Record<string, string> {
-  const nowMs = Date.now();
-  const nowEpoch = Math.floor(nowMs / 1000);
-  const windowSec = Math.max(1, Math.ceil(res.windowMs / 1000));
-  const resetSec = Math.max(0, Math.ceil((res.resetAt - nowMs) / 1000));
+export async function rateLimit(args: {
+  key: string;
+  policyId: string;
+}): Promise<RateLimitDecision> {
+  const policy = (POLICIES as Record<string, Policy>)[args.policyId] ?? POLICIES.api;
 
-  const h: Record<string, string> = {};
+  const bucketKey = `${args.policyId}:${args.key}`;
+  const store = buckets();
 
-  const label = res.policyId || 'default';
-  // IETF draft headers
-  h[RATE_LIMIT_IETF_HEADERS.RATE_LIMIT] = `"${label}";r=${res.remaining};t=${resetSec}`;
-  h[RATE_LIMIT_IETF_HEADERS.POLICY] = `"${label}";q=${res.limit};w=${windowSec}`;
-
-  // Trio
-  h[RATE_LIMIT_TRIO_HEADERS.LIMIT] = String(res.limit);
-  h[RATE_LIMIT_TRIO_HEADERS.REMAINING] = String(res.remaining);
-  h[RATE_LIMIT_TRIO_HEADERS.RESET] = String(resetSec);
-  if (!res.allowed) {
-    h[RATE_LIMIT_TRIO_HEADERS.RETRY_AFTER] = String(resetSec);
+  const t = nowMs();
+  if (store.size > MAX_BUCKETS && shouldCleanup(t)) {
+    cleanupBuckets(store, t);
+    noteCleanup(t);
   }
 
-  // X- mirrors
-  h[RATE_LIMIT_X_HEADERS.LIMIT] = String(res.limit);
-  h[RATE_LIMIT_X_HEADERS.REMAINING] = String(res.remaining);
-  h[RATE_LIMIT_X_HEADERS.RESET] = String(nowEpoch + resetSec);
+  const existing = store.get(bucketKey);
+
+  let b: Bucket;
+  if (!existing || existing.resetAtMs <= t) {
+    b = { count: 0, resetAtMs: t + policy.windowMs };
+  } else {
+    b = existing;
+  }
+
+  b.count += 1;
+  store.set(bucketKey, b);
+
+  const remaining = clampNonNegative(policy.limit - b.count);
+  const allowed = b.count <= policy.limit;
+  const reset = resetEpochSeconds(b.resetAtMs);
+
+  if (allowed) {
+    return { allowed: true, limit: policy.limit, remaining, reset };
+  }
+
+  const retryAfter = clampNonNegative(Math.ceil((b.resetAtMs - t) / 1000));
+  return {
+    allowed: false,
+    limit: policy.limit,
+    remaining: 0,
+    reset,
+    retryAfter,
+  };
+}
+
+/**
+ * Build standard rate limit headers.
+ * Uses the emerging "RateLimit-*" headers and also mirrors values as X-RateLimit-*.
+ */
+export function buildRateLimitHeaders(d: RateLimitDecision): Record<string, string> {
+  const h: Record<string, string> = {
+    "RateLimit-Limit": String(d.limit),
+    "RateLimit-Remaining": String(d.remaining),
+    "RateLimit-Reset": String(d.reset),
+    "X-RateLimit-Limit": String(d.limit),
+    "X-RateLimit-Remaining": String(d.remaining),
+    "X-RateLimit-Reset": String(d.reset),
+  };
+
+  if (!d.allowed && typeof d.retryAfter === "number") {
+    h["Retry-After"] = String(d.retryAfter);
+  }
 
   return h;
-}
-
-/**
- * Single blessed API: deterministic and testable.
- * Callers must provide a stable key (e.g., `u:<userId>` or hashed-ip identity) and a policyId.
- */
-export async function rateLimit(input: { key: string; policyId: string }): Promise<RateLimitResult> {
-  const policy = resolveRateLimitPolicy(input.policyId);
-  return rateLimitDetailed(input.policyId, input.key, policy.limit, policy.window);
-}
-
-/**
- * Optionally limit by user OR ip in custom code paths:
- *   await limitByRequest('post:create', req, userId, 10, '1m')
- */
-export async function limitByUserOrIp(
-  action: string,
-  ids: { userId?: string | null; ip?: string | null; extra?: string | null },
-  limit: number,
-  window: string,
-): Promise<RateLimitResult> {
-  return rateLimitDetailed(action, ids, limit, window);
-}
-
-/** Soft cap to avoid unbounded memory growth in dev/single-node envs */
-const MAX_BUCKETS = 5000;
-
-/** Opportunistic cleanup when buckets grow large */
-function maybeCleanup(now: number) {
-  if (buckets.size <= MAX_BUCKETS) return;
-  for (const [k, b] of buckets) {
-    const newest = b.hits[b.hits.length - 1];
-    if (!newest || now - newest > b.lastWindowMs) {
-      buckets.delete(k);
-    }
-  }
 }

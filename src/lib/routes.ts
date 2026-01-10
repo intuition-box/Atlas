@@ -54,12 +54,3 @@ export function communityDashboardPath(handle: string): string {
 export function communitySettingsPath(handle: string): string {
   return `/c/${encodeURIComponent(handle)}/settings`;
 }
-
-/** Convenience grouped helpers (string-building only). */
-export const ROUTE = {
-  user: userPath,
-  community: communityPath,
-  communityApply: communityApplyPath,
-  communityDashboard: communityDashboardPath,
-  communitySettings: communitySettingsPath,
-} as const;

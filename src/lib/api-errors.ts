@@ -1,149 +1,144 @@
-/**
- * Helpers to turn API errors (including Zod issues) into field + form errors, V3-only.
- * Works with our ApiResponse<T> error envelope and the RpcError thrown by rpc-client.
- */
-
-import { isApiResponse, type ApiResponse } from "@/types/api";
+import type { ApiEnvelope, ApiError, ApiIssue } from "@/lib/api-shapes";
+import { isApiEnvelope } from "@/lib/api-shapes";
 
 /**
- * We intentionally avoid importing RpcError from the client module to prevent
- * server<->client coupling. Treat errors structurally instead.
+ * Shared helpers for turning API failures into UI-friendly error objects.
+ *
+ * This module is client-safe (no server-only imports).
  */
-export type RpcErrorLike = Error & {
-  status?: number;
-  code?: string | number;
-  details?: unknown;
-};
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function isRpcErrorLike(err: unknown): err is RpcErrorLike {
-  if (!isRecord(err)) return false;
-  const message = err["message"];
-  if (typeof message !== "string") return false;
-  return "status" in err || "code" in err || "details" in err;
-}
 
 export type ParsedApiError = {
+  /** Flat "field -> message" map for form UIs. */
   fieldErrors: Record<string, string>;
+  /** Optional form-level error message (toast/banner). */
   formError?: string;
-  code?: number;
-  status?: number;
-};
-
-type ParseOptions = {
-  /**
-   * Optional mapping from API issue paths to local field names.
-   * Example: { 'title': 'title', 'spaceSlug': 'space', 'boardId': 'board' }
-   */
-  fieldMap?: Record<string, string>;
-};
-
-type ApiIssue = {
-  path?: string | (string | number)[];
-  message?: string;
+  /** Optional app-level error code. */
   code?: string;
+  /** Optional HTTP status. */
+  status?: number;
+  /** Optional extra meta payload from the server. */
+  meta?: unknown;
 };
 
-type IssuesLike = ApiIssue[] | { issues?: ApiIssue[] } | null | undefined;
+export type ApiProblemLike = {
+  message?: string;
+  status?: number;
+  code?: string;
+  issues?: ApiIssue[];
+  meta?: unknown;
+};
 
-function extractIssues(details: unknown): ApiIssue[] | undefined {
-  if (!details) return undefined;
-  if (Array.isArray(details)) return details as ApiIssue[];
-  if (isRecord(details)) {
-    const maybe = details.issues;
-    if (Array.isArray(maybe)) return maybe as ApiIssue[];
-  }
-  return undefined;
+function pushFieldError(out: ParsedApiError, path: Array<string | number>, message: string) {
+  // Heuristic: use the last segment as the field key (matches typical form libs).
+  const key = String(path[path.length - 1] ?? "");
+  if (!key) return;
+
+  // Preserve first error per field.
+  if (!out.fieldErrors[key]) out.fieldErrors[key] = message;
 }
 
-function pathToKey(path: ApiIssue['path']): string {
-  if (Array.isArray(path)) return path.map(String).join(".");
-  if (typeof path === "string") return path;
-  return "";
-}
+export function parseIssues(issues: ApiIssue[] | undefined | null): ParsedApiError {
+  const out: ParsedApiError = { fieldErrors: {} };
+  if (!issues || !Array.isArray(issues)) return out;
 
-function applyIssues(
-  out: ParsedApiError,
-  issues: ApiIssue[] | null | undefined,
-  fieldMap: Record<string, string>,
-) {
-  if (!issues || issues.length === 0) return;
   for (const issue of issues) {
-    const raw = pathToKey(issue?.path);
-    const field = fieldMap[raw] ?? raw;
-    const message = String(issue?.message ?? "Invalid value");
-    if (field && !out.fieldErrors[field]) {
-      out.fieldErrors[field] = message;
-    }
+    if (!issue || !Array.isArray(issue.path) || typeof issue.message !== "string") continue;
+    pushFieldError(out, issue.path, issue.message);
   }
+
+  return out;
 }
 
-/**
- * Parse an ApiResponse<T> error payload (server standard).
- * Shape: { success: false, error: { code, message, details?: ApiIssue[] } }
- */
-export function parseApiErrorPayload(payload: ApiResponse<unknown>, opts: ParseOptions = {}): ParsedApiError {
-  const { fieldMap = {} } = opts;
+export function parseEnvelopeError(env: ApiEnvelope<unknown>): ParsedApiError {
   const out: ParsedApiError = { fieldErrors: {} };
 
-  if (payload.success !== false || typeof payload.error?.message !== "string") {
-    out.formError = "Unexpected server response";
-    return out;
-  }
+  if (env.ok === true) return out;
 
-  out.formError = payload.error.message;
-  applyIssues(out, extractIssues(payload.error.details), fieldMap);
+  const e = env.error as ApiError<string, number, unknown>;
+  if (typeof e.message === "string" && e.message) out.formError = e.message;
+  if (typeof e.code === "string") out.code = e.code;
+  if (typeof e.status === "number") out.status = e.status;
+  if ("meta" in e) out.meta = (e as any).meta;
+
+  const withIssues = parseIssues(e.issues);
+  out.fieldErrors = withIssues.fieldErrors;
+
   return out;
 }
 
 /**
- * Parse a failing fetch Response that returns our ApiResponse<T> envelope.
- * Keep this only for low-level calls; prefer using rpc-client and parseRpcError in UI code.
+ * Parse a Response that is expected to contain an ApiEnvelope.
+ *
+ * If parsing fails, returns a safe formError message.
  */
-export async function parseApiError(res: Response, opts: ParseOptions = {}): Promise<ParsedApiError> {
-  const out: ParsedApiError = { fieldErrors: {}, status: res.status };
-  if (res.ok) return out;
+export async function parseApiErrorResponse(res: Response): Promise<ParsedApiError> {
+  const out: ParsedApiError = { fieldErrors: {} };
 
-  let payload: unknown = null;
+  const ct = (res.headers.get("content-type") || "").toLowerCase();
+  if (!ct.includes("application/json")) {
+    out.formError = res.statusText || `Request failed (${res.status})`;
+    out.status = res.status;
+    return out;
+  }
+
+  let json: unknown;
   try {
-    payload = await res.json();
+    json = await res.json();
   } catch {
     out.formError = res.statusText || `Request failed (${res.status})`;
+    out.status = res.status;
     return out;
   }
 
-  if (!isApiResponse(payload)) {
-    out.formError = "Unexpected server response";
+  if (!isApiEnvelope(json)) {
+    out.formError = "Invalid server response";
+    out.status = res.status;
+    out.meta = json;
     return out;
   }
 
-  const parsed = parseApiErrorPayload(payload, opts);
-  return { ...parsed, status: res.status };
+  const env = json as ApiEnvelope<unknown>;
+  if (env.ok === true) return out;
+
+  const parsed = parseEnvelopeError(env);
+
+  // If server didn't include status, fall back to HTTP.
+  if (parsed.status === undefined) parsed.status = res.status;
+
+  return parsed;
 }
 
 /**
- * Preferred path in the UI: catch RpcError from `rpc-client` and parse it here.
+ * Parse an API problem object.
+ *
+ * Works with Result-first callers (`result.ok === false ? result.error : ...`) and also with thrown Errors.
  */
-export function parseRpcError(err: unknown, opts: ParseOptions = {}): ParsedApiError {
-  const { fieldMap = {} } = opts;
+export function parseApiProblem(problem: unknown): ParsedApiError {
   const out: ParsedApiError = { fieldErrors: {} };
 
-  if (isRpcErrorLike(err)) {
-    const numericCode = typeof err.code === "number" ? err.code : undefined;
-    out.code = numericCode;
-    out.status = typeof err.status === "number" ? err.status : numericCode;
-    out.formError = err.message || "Request failed";
-    applyIssues(out, extractIssues(err.details), fieldMap);
-    return out;
+  const e = problem as ApiProblemLike;
+
+  // Prefer issues when present.
+  const issues = e?.issues;
+  if (Array.isArray(issues) && issues.length > 0) {
+    const parsed = parseIssues(issues);
+    out.fieldErrors = parsed.fieldErrors;
   }
 
-  if (isRecord(err) && err["success"] === false && isApiResponse(err)) {
-    return parseApiErrorPayload(err, opts);
+  // Form-level error
+  if (typeof e?.message === "string" && e.message) {
+    out.formError = e.message;
   }
 
-  out.formError = isRecord(err) && typeof err["message"] === "string" ? err["message"] : "Request failed";
+  if (typeof e?.code === "string") out.code = e.code;
+  if (typeof e?.status === "number") out.status = e.status;
+  if ("meta" in (e as any)) out.meta = (e as any).meta;
+
   return out;
 }
+
+/**
+ * Compatibility wrapper: old code paths may still pass thrown errors.
+ * Prefer `parseApiProblem` for Result-first usage.
+ */
+export const parseApiClientError = parseApiProblem;

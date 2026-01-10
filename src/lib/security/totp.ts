@@ -2,116 +2,331 @@ import "server-only";
 
 import crypto from "node:crypto";
 
-// Minimal base32 (RFC 4648) decoder for TOTP secrets; ignores padding.
-// Accepts uppercase/lowercase input and strips whitespace.
-const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+import type { ApiError, Result } from "@/lib/api-shapes";
+import { err, ok } from "@/lib/api-shapes";
 
-export function base32Decode(input: string): Buffer {
-  const cleaned = String(input ?? "")
-    .replace(/=+$/g, "")
-    .toUpperCase()
-    .replace(/\s+/g, "");
+/**
+ * TOTP (RFC 6238) + Base32 (RFC 4648)
+ *
+ * - Base32 decoding is included because TOTP secrets are commonly encoded that way.
+ * - No env toggles, no hidden behavior.
+ * - All helpers are server-only.
+ */
 
-  let bitBuf = 0;
-  let bitCount = 0;
-  const out: number[] = [];
+// ---------------------------------------------------------------------------
+// RFC 4648 Base32 decoder (for TOTP secrets)
+// ---------------------------------------------------------------------------
 
-  for (const c of cleaned) {
-    const val = ALPHABET.indexOf(c);
-    if (val === -1) throw new Error("invalid_base32");
+const B32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
-    bitBuf = (bitBuf << 5) | val;
-    bitCount += 5;
+const B32_REV: Int16Array = (() => {
+  const t = new Int16Array(128);
+  t.fill(-1);
+  for (let i = 0; i < B32_ALPHABET.length; i++) {
+    t[B32_ALPHABET.charCodeAt(i)] = i;
+  }
+  for (let i = 0; i < 26; i++) {
+    t["a".charCodeAt(0) + i] = t["A".charCodeAt(0) + i];
+  }
+  return t;
+})();
 
-    while (bitCount >= 8) {
-      bitCount -= 8;
-      out.push((bitBuf >> bitCount) & 0xff);
+export type Base32ErrorCode = "BASE32_INVALID";
+
+export type Base32InvalidReason =
+  | "EMPTY"
+  | "INVALID_CHAR"
+  | "INVALID_PADDING"
+  | "INVALID_LENGTH";
+
+export type Base32Problem = ApiError<
+  Base32ErrorCode,
+  400,
+  { reason: Base32InvalidReason; index?: number; char?: string }
+>;
+
+export type Base32Result<T> = Result<T, Base32Problem>;
+
+function base32Problem(
+  reason: Base32InvalidReason,
+  message: string,
+  meta?: { index?: number; char?: string },
+): Base32Problem {
+  return { code: "BASE32_INVALID", message, status: 400, meta: { reason, ...meta } };
+}
+
+function isIgnorableBase32Char(ch: string): boolean {
+  // Common separators users paste into TOTP secrets.
+  return ch === " " || ch === "\t" || ch === "\n" || ch === "\r" || ch === "-";
+}
+
+/** Decode an RFC 4648 base32 string into bytes. */
+export function decodeBase32(input: string): Base32Result<Uint8Array> {
+  const s = input.trim();
+  if (s.length === 0) return err(base32Problem("EMPTY", "Secret is required"));
+
+  let sigCount = 0;
+  let seenPadding = false;
+
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (isIgnorableBase32Char(ch)) continue;
+
+    if (ch === "=") {
+      seenPadding = true;
+      continue;
+    }
+
+    if (seenPadding) {
+      return err(base32Problem("INVALID_PADDING", "Invalid padding", { index: i, char: ch }));
+    }
+
+    const code = ch.charCodeAt(0);
+    if (code >= 128 || B32_REV[code] === -1) {
+      return err(base32Problem("INVALID_CHAR", "Invalid base32 character", { index: i, char: ch }));
+    }
+
+    sigCount++;
+  }
+
+  if (sigCount === 0) return err(base32Problem("EMPTY", "Secret is required"));
+
+  // Valid unpadded base32 lengths modulo 8 are: 0,2,4,5,7.
+  const rem = sigCount % 8;
+  if (!(rem === 0 || rem === 2 || rem === 4 || rem === 5 || rem === 7)) {
+    return err(base32Problem("INVALID_LENGTH", "Invalid base32 length"));
+  }
+
+  const outLen = Math.floor((sigCount * 5) / 8);
+  const out = new Uint8Array(outLen);
+
+  let buffer = 0;
+  let bits = 0;
+  let outPos = 0;
+  let paddingOnly = false;
+
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (isIgnorableBase32Char(ch)) continue;
+
+    if (ch === "=") {
+      paddingOnly = true;
+      continue;
+    }
+
+    if (paddingOnly) {
+      return err(base32Problem("INVALID_PADDING", "Invalid padding", { index: i, char: ch }));
+    }
+
+    const v = B32_REV[ch.charCodeAt(0)];
+    buffer = (buffer << 5) | v;
+    bits += 5;
+
+    if (bits >= 8) {
+      bits -= 8;
+      out[outPos++] = (buffer >> bits) & 0xff;
     }
   }
 
-  return Buffer.from(out);
+  return ok(out);
 }
 
-export type TotpOptions = {
-  secretBase32: string;
-  period?: number; // seconds
-  digits?: number; // 6 or 8
-  algorithm?: "SHA1" | "SHA256" | "SHA512";
-};
+export function decodeBase32ToBuffer(input: string): Base32Result<Buffer> {
+  const r = decodeBase32(input);
+  if (!r.ok) return r;
+  return ok(Buffer.from(r.value));
+}
 
-function hotp(key: Buffer, counter: bigint, algo: "SHA1" | "SHA256" | "SHA512"): number {
-  const buf = Buffer.alloc(8);
-  buf.writeBigUInt64BE(counter);
+// ---------------------------------------------------------------------------
+// HOTP/TOTP
+// ---------------------------------------------------------------------------
 
-  const hmac = crypto.createHmac(algo.toLowerCase(), key).update(buf).digest();
+export type TotpAlgorithm = "SHA1" | "SHA256" | "SHA512";
+
+export type TotpErrorCode = "TOTP_INVALID_SECRET" | "TOTP_INVALID_TOKEN";
+
+export type TotpProblem = ApiError<
+  TotpErrorCode,
+  400,
+  { reason: "EMPTY" | "FORMAT" | "OUT_OF_RANGE" | "DECODE" }
+>;
+
+export type TotpResult<T> = Result<T, TotpProblem>;
+
+function totpProblem(code: TotpErrorCode, reason: TotpProblem["meta"]["reason"], message: string): TotpProblem {
+  return { code, status: 400, message, meta: { reason } };
+}
+
+function algoNodeName(a: TotpAlgorithm): string {
+  // Node expects lowercase algorithm names.
+  return a.toLowerCase();
+}
+
+function counterToBuffer(counter: bigint): Buffer {
+  const b = Buffer.alloc(8);
+  // Big-endian.
+  b.writeBigUInt64BE(counter);
+  return b;
+}
+
+function dynamicTruncate(hmac: Buffer): number {
   const offset = hmac[hmac.length - 1] & 0x0f;
-  const code =
-    ((hmac[offset] & 0x7f) << 24) |
-    ((hmac[offset + 1] & 0xff) << 16) |
-    ((hmac[offset + 2] & 0xff) << 8) |
-    (hmac[offset + 3] & 0xff);
-  return code;
+  const p = hmac.readUInt32BE(offset) & 0x7fffffff;
+  return p;
 }
 
-export function generateTotp(
-  { secretBase32, period = 30, digits = 6, algorithm = "SHA1" }: TotpOptions,
-  forTime?: number,
-): string {
-  if (!Number.isFinite(period) || period <= 0) throw new Error("invalid_period");
-  if (digits !== 6 && digits !== 8) throw new Error("invalid_digits");
-
-  const key = base32Decode(secretBase32);
-  const t = Math.floor((forTime ?? Date.now()) / 1000);
-  const counter = BigInt(Math.floor(t / period));
-  const code = hotp(key, counter, algorithm);
-
-  const mod = 10 ** digits;
-  const otp = code % mod;
-  return String(otp).padStart(digits, "0");
+function pow10(n: number): number {
+  // Digits are small (6-8), so this is safe.
+  let x = 1;
+  for (let i = 0; i < n; i++) x *= 10;
+  return x;
 }
 
-export function verifyTotp(
-  opts: TotpOptions & { window?: number },
-  token: string,
-  now?: number,
-): boolean {
-  const period = opts.period ?? 30;
-  const digits = opts.digits ?? 6;
-  if (!Number.isFinite(period) || period <= 0) return false;
-  if (digits !== 6 && digits !== 8) return false;
+/**
+ * HOTP (RFC 4226)
+ */
+export function hotp(args: {
+  secret: Buffer;
+  counter: bigint;
+  digits?: number;
+  algorithm?: TotpAlgorithm;
+}): string {
+  const digits = args.digits ?? 6;
+  const algorithm = args.algorithm ?? "SHA1";
 
-  const t = Math.floor((now ?? Date.now()) / 1000);
-  const window = Math.max(0, Math.min(10, opts.window ?? 1)); // +/- periods drift tolerance
+  const msg = counterToBuffer(args.counter);
+  const mac = crypto.createHmac(algoNodeName(algorithm), args.secret).update(msg).digest();
+  const code = dynamicTruncate(mac) % pow10(digits);
 
-  const normalized = String(token ?? "").trim();
-  if (normalized.length !== digits) return false;
-  if (!/^[0-9]+$/.test(normalized)) return false;
+  return String(code).padStart(digits, "0");
+}
 
-  for (let w = -window; w <= window; w++) {
-    const time = (t + w * period) * 1000;
-    const gen = generateTotp({ ...opts, period, digits }, time);
-    if (safeEqual(gen, normalized)) return true;
+/**
+ * TOTP (RFC 6238)
+ */
+export function totp(args: {
+  secret: Buffer;
+  timeMs?: number;
+  period?: number;
+  digits?: number;
+  algorithm?: TotpAlgorithm;
+}): string {
+  const period = args.period ?? 30;
+  const timeMs = args.timeMs ?? Date.now();
+  const counter = BigInt(Math.floor(timeMs / 1000 / period));
+
+  return hotp({
+    secret: args.secret,
+    counter,
+    digits: args.digits ?? 6,
+    algorithm: args.algorithm ?? "SHA1",
+  });
+}
+
+function normalizeToken(token: string): string {
+  // Users often paste tokens with spaces.
+  return token.replace(/\s+/g, "").trim();
+}
+
+function isNumericToken(token: string, digits: number): boolean {
+  if (token.length !== digits) return false;
+  for (let i = 0; i < token.length; i++) {
+    const c = token.charCodeAt(i);
+    if (c < 48 || c > 57) return false;
+  }
+  return true;
+}
+
+/**
+ * Verify a user-provided TOTP token.
+ *
+ * - `window` allows drift (number of periods to check before/after current).
+ */
+export function verifyTotp(args: {
+  secretBase32: string;
+  token: string;
+  timeMs?: number;
+  period?: number;
+  digits?: number;
+  algorithm?: TotpAlgorithm;
+  window?: number;
+}): TotpResult<boolean> {
+  const digits = args.digits ?? 6;
+  const period = args.period ?? 30;
+  const algorithm = args.algorithm ?? "SHA1";
+  const window = args.window ?? 1;
+
+  const rawToken = normalizeToken(args.token);
+  if (rawToken.length === 0) {
+    return err(totpProblem("TOTP_INVALID_TOKEN", "EMPTY", "Token is required"));
   }
 
-  return false;
+  if (!Number.isInteger(digits) || digits < 6 || digits > 10) {
+    return err(totpProblem("TOTP_INVALID_TOKEN", "OUT_OF_RANGE", "Invalid digits"));
+  }
+
+  if (!isNumericToken(rawToken, digits)) {
+    return err(totpProblem("TOTP_INVALID_TOKEN", "FORMAT", "Invalid token"));
+  }
+
+  const dec = decodeBase32ToBuffer(args.secretBase32);
+  if (!dec.ok) {
+    return err(totpProblem("TOTP_INVALID_SECRET", "DECODE", "Invalid secret"));
+  }
+
+  const timeMs = args.timeMs ?? Date.now();
+  const step = Math.floor(timeMs / 1000 / period);
+
+  for (let w = -window; w <= window; w++) {
+    const counter = BigInt(step + w);
+    const expected = hotp({ secret: dec.value, counter, digits, algorithm });
+    // Timing-safe compare is not critical here (short numeric strings), but easy to do.
+    const a = Buffer.from(expected);
+    const b = Buffer.from(rawToken);
+    if (a.length === b.length && crypto.timingSafeEqual(a, b)) return ok(true);
+  }
+
+  return ok(false);
 }
 
-function safeEqual(a: string, b: string): boolean {
-  const aa = Buffer.from(a);
-  const bb = Buffer.from(b);
-  if (aa.length !== bb.length) return false;
-  return crypto.timingSafeEqual(aa, bb);
-}
+/**
+ * Build an otpauth:// URL for authenticator apps.
+ */
+export function buildOtpauthUrl(args: {
+  issuer: string;
+  accountLabel: string;
+  secretBase32: string;
+  algorithm?: TotpAlgorithm;
+  digits?: number;
+  period?: number;
+}): TotpResult<string> {
+  const issuer = args.issuer.trim();
+  const label = args.accountLabel.trim();
+  const secret = args.secretBase32.trim();
 
-export function buildOtpauthUrl(opts: TotpOptions & { label: string; issuer?: string }): string {
-  const query = new URLSearchParams({
-    secret: opts.secretBase32,
-    period: String(opts.period ?? 30),
-    digits: String(opts.digits ?? 6),
-    algorithm: String(opts.algorithm ?? "SHA1"),
+  if (!issuer || !label || !secret) {
+    return err(totpProblem("TOTP_INVALID_SECRET", "EMPTY", "Missing issuer, label, or secret"));
+  }
+
+  // Validate secret (decode only; we don't need bytes here).
+  const dec = decodeBase32(secret);
+  if (!dec.ok) {
+    return err(totpProblem("TOTP_INVALID_SECRET", "DECODE", "Invalid secret"));
+  }
+
+  const algorithm = args.algorithm ?? "SHA1";
+  const digits = args.digits ?? 6;
+  const period = args.period ?? 30;
+
+  const otpauthLabel = encodeURIComponent(`${issuer}:${label}`);
+
+  const params = new URLSearchParams({
+    secret,
+    issuer,
+    algorithm,
+    digits: String(digits),
+    period: String(period),
   });
 
-  if (opts.issuer) query.set("issuer", opts.issuer);
-
-  return `otpauth://totp/${encodeURIComponent(opts.label)}?${query.toString()}`;
+  return ok(`otpauth://totp/${otpauthLabel}?${params.toString()}`);
 }

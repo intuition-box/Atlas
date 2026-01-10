@@ -1,89 +1,130 @@
 import "server-only";
 
 import { redirect } from "next/navigation";
+import type { Session } from "next-auth";
 
 import { auth } from "@/lib/auth";
 import { ROUTES } from "@/lib/routes";
 
-type SessionUser = {
-  id?: string;
+import type { ApiError, Result } from "@/lib/api-shapes";
+import { err, ok } from "@/lib/api-shapes";
+
+/**
+ * Server-only auth/onboarding guards.
+ *
+ * Two usage patterns:
+ * - Route handlers / server actions: throw a structured `AuthProblem` at the boundary in `require*` helpers.
+ * - Server Components / layouts: redirect to sign-in/onboarding (with safe returnToUrl).
+ */
+export type AuthErrorCode = "AUTH_REQUIRED" | "ONBOARDING_REQUIRED";
+
+export type AuthProblem = ApiError<AuthErrorCode, 401 | 428>;
+export type AuthResult<T> = Result<T, AuthProblem>;
+
+type AuthContext = {
+  session: Session;
+  userId: string;
   handle?: string;
+  onboarded: boolean;
 };
 
-type StatusError = Error & { status: number };
+async function checkAuth(): Promise<AuthResult<AuthContext>> {
+  const session = await auth();
+  const userId = session?.user?.id;
 
-function fail(status: number, message: string): never {
-  const err = new Error(message) as StatusError;
-  err.name = "AuthError";
-  err.status = status;
-  throw err;
+  if (!session || !userId) {
+    return err({ code: "AUTH_REQUIRED", message: "Please sign in.", status: 401 });
+  }
+
+  return ok({
+    session,
+    userId,
+    handle: session.user.handle ?? undefined,
+    onboarded: Boolean(session.user.onboarded),
+  });
 }
 
-export function safeReturnToUrl(input?: string | null) {
-  const raw = (input ?? "").trim();
-  // Prevent open redirects: only allow internal absolute paths.
-  if (!raw.startsWith("/")) return null;
-  // Disallow protocol-relative URLs.
-  if (raw.startsWith("//")) return null;
-  return raw;
+function requireOnboardedContext(
+  ctx: AuthContext,
+): AuthResult<{ session: AuthContext["session"]; userId: string; handle: string }> {
+  if (!ctx.onboarded || !ctx.handle) {
+    return err({ code: "ONBOARDING_REQUIRED", message: "Onboarding required.", status: 428 });
+  }
+  return ok({ session: ctx.session, userId: ctx.userId, handle: ctx.handle });
 }
 
-export function redirectWithReturn(to: string, returnToUrl?: string | null) {
+/**
+ * Allow only internal absolute paths (e.g. "/c/orbyt").
+ * Reject "//" to avoid scheme-relative redirects.
+ */
+export function safeReturnToUrl(input: string | null | undefined): string | null {
+  if (!input) return null;
+  const s = input.toString().trim();
+  // Reject control chars and backslashes to avoid weird parsing edge-cases.
+  if (/[\u0000-\u001F\u007F]/.test(s)) return null;
+  if (s.includes("\\")) return null;
+  if (!s.startsWith("/")) return null;
+  if (s.startsWith("//")) return null;
+  return s;
+}
+
+export function redirectWithReturn(to: string, returnToUrl?: string | null): never {
   const safe = safeReturnToUrl(returnToUrl);
-  if (!safe) redirect(to);
+  if (!safe) {
+    return redirect(to);
+  }
 
   const sep = to.includes("?") ? "&" : "?";
-  redirect(`${to}${sep}returnToUrl=${encodeURIComponent(safe)}`);
+  return redirect(`${to}${sep}returnToUrl=${encodeURIComponent(safe)}`);
 }
 
 /**
- * Guard for Route Handlers / policies.
- * Throws (does not redirect) when unauthenticated.
+ * Require authentication. Throws when unauthenticated.
  */
-export async function requireAuth() {
-  const session = await auth();
-  const user = session?.user as SessionUser | undefined;
-  const userId = user?.id;
-
-  if (!session || !userId) fail(401, "Please sign in.");
-  return { session, userId };
+export async function requireAuth(): Promise<{ session: AuthContext["session"]; userId: string }> {
+  const r = await checkAuth();
+  if (!r.ok) throw r.error;
+  return { session: r.value.session, userId: r.value.userId };
 }
 
 /**
- * Guard for Route Handlers / policies.
- * Throws 428 when onboarding is incomplete.
+ * Require authentication + onboarding (handle present).
+ * Throws when unauthenticated or not onboarded.
  */
-export async function requireOnboarded() {
-  const { session, userId } = await requireAuth();
-  const user = session?.user as SessionUser | undefined;
-  const handle = user?.handle;
+export async function requireOnboarded(): Promise<{ session: AuthContext["session"]; userId: string; handle: string }> {
+  const r = await checkAuth();
+  if (!r.ok) throw r.error;
 
-  if (!handle) fail(428, "Onboarding required.");
-  return { session, userId, handle };
+  const o = requireOnboardedContext(r.value);
+  if (!o.ok) throw o.error;
+  return o.value;
 }
 
 /**
- * Guard for Layouts/Pages (redirect UX).
- * Use in Server Components. Do not use in Edge/proxy.
+ * Require authentication; redirect to sign-in when unauthenticated.
  */
-export async function requireAuthRedirect(returnToUrl?: string) {
-  const session = await auth();
-  const user = session?.user as SessionUser | undefined;
-  const userId = user?.id;
-
-  if (!session || !userId) redirectWithReturn(ROUTES.signIn, returnToUrl);
-  return { session, userId: userId! };
+export async function requireAuthRedirect(
+  returnToUrl?: string | null,
+): Promise<{ session: AuthContext["session"]; userId: string }> {
+  const r = await checkAuth();
+  if (!r.ok) redirectWithReturn(ROUTES.signIn, returnToUrl);
+  return { session: r.value.session, userId: r.value.userId };
 }
 
 /**
- * Guard for Layouts/Pages (redirect UX).
- * Onboarding is complete once `session.user.handle` exists.
+ * Require authentication + onboarding; redirect unauthenticated users to sign-in and
+ * non-onboarded users to onboarding.
  */
-export async function requireOnboardedRedirect(returnToUrl?: string) {
-  const { session, userId } = await requireAuthRedirect(returnToUrl);
-  const user = session?.user as SessionUser | undefined;
-  const handle = user?.handle;
+export async function requireOnboardedRedirect(
+  returnToUrl?: string | null,
+): Promise<{ session: AuthContext["session"]; userId: string; handle: string }> {
+  const r = await checkAuth();
+  if (!r.ok) redirectWithReturn(ROUTES.signIn, returnToUrl);
 
-  if (!handle) redirectWithReturn(ROUTES.onboarding, returnToUrl);
-  return { session, userId, handle: handle! };
+  const o = requireOnboardedContext(r.value);
+  if (!o.ok) {
+    redirectWithReturn(ROUTES.onboarding, returnToUrl);
+  }
+
+  return o.value;
 }

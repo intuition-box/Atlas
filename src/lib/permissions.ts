@@ -10,13 +10,22 @@ const ROLE_ORDER = ["OWNER", "ADMIN", "MODERATOR", "MEMBER"] as const;
 
 type AnyRole = MembershipRole | "MODERATOR";
 
-type HttpError = Error & { status: number };
+export class PermissionError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "PermissionError";
+    this.status = status;
+  }
+}
+
+export function isPermissionError(e: unknown): e is PermissionError {
+  return e instanceof PermissionError;
+}
 
 function fail(status: number, message: string): never {
-  const err = new Error(message) as HttpError;
-  err.name = "PermissionError";
-  err.status = status;
-  throw err;
+  throw new PermissionError(status, message);
 }
 
 function roleIndex(role: AnyRole): number {

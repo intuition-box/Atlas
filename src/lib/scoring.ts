@@ -18,19 +18,28 @@ function arrayLen(v: unknown): number {
   return Array.isArray(v) ? v.length : 0;
 }
 
-const SCORE = {
-  // Love
+const LOVE = {
   profileCompleteThreshold: 3,
   profileCompleteBonus: 2,
   approvedBonus: 3,
   attestationsGivenMax: 10,
   attestationGivenWeight: 1,
+} as const;
 
-  // Reach
+const REACH = {
+  // Unique peers you have reached (given attestations)
   uniqueToMax: 20,
-  uniqueFromMax: 20,
   uniqueToWeight: 1,
+
+  // Unique peers who have reached you (received attestations)
+  uniqueFromMax: 20,
   uniqueFromWeight: 2,
+
+  // Extra attestations beyond the first per peer (capped, to avoid spam dominating reach)
+  extraToMax: 10,
+  extraToWeight: 1,
+  extraFromMax: 10,
+  extraFromWeight: 1,
 } as const;
 
 function computeLove(params: {
@@ -53,23 +62,30 @@ function computeLove(params: {
     (arrayLen(user.skills) > 0 ? 1 : 0) +
     (arrayLen(user.tags) > 0 ? 1 : 0);
 
-  const profileCompleteEnough = profileCompleteness >= SCORE.profileCompleteThreshold;
+  const profileCompleteEnough = profileCompleteness >= LOVE.profileCompleteThreshold;
 
   let love = 0;
-  if (profileCompleteEnough) love += SCORE.profileCompleteBonus;
-  if (status === MembershipStatus.APPROVED) love += SCORE.approvedBonus;
+  if (profileCompleteEnough) love += LOVE.profileCompleteBonus;
+  if (status === MembershipStatus.APPROVED) love += LOVE.approvedBonus;
 
   love +=
-    clamp(attestationsGivenCount, 0, SCORE.attestationsGivenMax) *
-    SCORE.attestationGivenWeight;
+    clamp(attestationsGivenCount, 0, LOVE.attestationsGivenMax) *
+    LOVE.attestationGivenWeight;
 
   return love;
 }
 
-function computeReach(params: { uniqueToCount: number; uniqueFromCount: number }): number {
+function computeReach(params: {
+  uniqueToCount: number;
+  uniqueFromCount: number;
+  extraToCount: number;
+  extraFromCount: number;
+}): number {
   return (
-    clamp(params.uniqueToCount, 0, SCORE.uniqueToMax) * SCORE.uniqueToWeight +
-    clamp(params.uniqueFromCount, 0, SCORE.uniqueFromMax) * SCORE.uniqueFromWeight
+    clamp(params.uniqueToCount, 0, REACH.uniqueToMax) * REACH.uniqueToWeight +
+    clamp(params.uniqueFromCount, 0, REACH.uniqueFromMax) * REACH.uniqueFromWeight +
+    clamp(params.extraToCount, 0, REACH.extraToMax) * REACH.extraToWeight +
+    clamp(params.extraFromCount, 0, REACH.extraFromMax) * REACH.extraFromWeight
   );
 }
 
@@ -94,7 +110,7 @@ export async function recomputeMemberScoresBatch(params: {
   const userIds = Array.from(new Set(params.userIds)).filter(Boolean);
   if (userIds.length === 0) return;
 
-  const [users, memberships, givenCounts, uniqueToPairs, uniqueFromPairs] = await Promise.all([
+  const [users, memberships, givenCounts, receivedCounts, uniqueToPairs, uniqueFromPairs] = await Promise.all([
     db.user.findMany({
       where: { id: { in: userIds } },
       select: {
@@ -111,23 +127,52 @@ export async function recomputeMemberScoresBatch(params: {
       select: { userId: true, status: true },
     }),
 
-    // attestations given per user
+    // attestations given per user (active only)
     db.attestation.groupBy({
       by: ["fromUserId"],
-      where: { communityId, fromUserId: { in: userIds } },
+      where: {
+        communityId,
+        fromUserId: { in: userIds },
+        revokedAt: null,
+        supersededById: null,
+      },
       _count: { _all: true },
     }),
 
+    // attestations received per user (active only)
+    db.attestation.groupBy({
+      by: ["toUserId"],
+      where: {
+        communityId,
+        toUserId: { in: userIds },
+        revokedAt: null,
+        supersededById: null,
+      },
+      _count: { _all: true },
+    }),
+
+    // Distinct user pairs (dedup) to count unique peers.
+    // We also separately count total attestations so multiple attestations can increase reach (capped).
     // distinct (fromUserId,toUserId) pairs => uniqueTo per fromUserId
     db.attestation.groupBy({
       by: ["fromUserId", "toUserId"],
-      where: { communityId, fromUserId: { in: userIds } },
+      where: {
+        communityId,
+        fromUserId: { in: userIds },
+        revokedAt: null,
+        supersededById: null,
+      },
     }),
 
     // distinct (toUserId,fromUserId) pairs => uniqueFrom per toUserId
     db.attestation.groupBy({
       by: ["toUserId", "fromUserId"],
-      where: { communityId, toUserId: { in: userIds } },
+      where: {
+        communityId,
+        toUserId: { in: userIds },
+        revokedAt: null,
+        supersededById: null,
+      },
     }),
   ]);
 
@@ -139,6 +184,12 @@ export async function recomputeMemberScoresBatch(params: {
     // Prisma returns fromUserId nullable in types if schema allows; guard defensively.
     if (!row.fromUserId) continue;
     givenByUserId.set(row.fromUserId, row._count._all);
+  }
+
+  const receivedByUserId = new Map<string, number>();
+  for (const row of receivedCounts) {
+    if (!row.toUserId) continue;
+    receivedByUserId.set(row.toUserId, row._count._all);
   }
 
   const uniqueToByFrom = new Map<string, number>();
@@ -165,9 +216,21 @@ export async function recomputeMemberScoresBatch(params: {
         attestationsGivenCount: givenByUserId.get(userId) ?? 0,
       });
 
+      const uniqueTo = uniqueToByFrom.get(userId) ?? 0;
+      const uniqueFrom = uniqueFromByTo.get(userId) ?? 0;
+
+      const givenTotal = givenByUserId.get(userId) ?? 0;
+      const receivedTotal = receivedByUserId.get(userId) ?? 0;
+
+      // Extra attestations beyond the first per unique peer.
+      const extraTo = Math.max(0, givenTotal - uniqueTo);
+      const extraFrom = Math.max(0, receivedTotal - uniqueFrom);
+
       const reach = computeReach({
-        uniqueToCount: uniqueToByFrom.get(userId) ?? 0,
-        uniqueFromCount: uniqueFromByTo.get(userId) ?? 0,
+        uniqueToCount: uniqueTo,
+        uniqueFromCount: uniqueFrom,
+        extraToCount: extraTo,
+        extraFromCount: extraFrom,
       });
 
       const gravity = love * reach;
