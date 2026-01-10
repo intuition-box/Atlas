@@ -94,15 +94,10 @@ enum HandleStatus {
 model User {
   id            String   @id @default(cuid())
 
-  /// Public handle used for pretty URLs (e.g., /u/[handle]).
-  ///
-  /// IMPORTANT:
-  /// - The DB row is created by Auth.js on first sign-in, before the user completes onboarding.
-  /// - Therefore this field is nullable until onboarding assigns it.
-  /// - Routes are still handle-only; users without a handle are redirected to /welcome.
-  ///
-  /// Handle lifecycle (release/reclaim/retire) is tracked in the `Handle` table.
-  handle        String?  @unique @db.VarChar(32)
+  /// Canonical handle registry row for this user.
+  /// The user has no public handle until onboarding assigns `handleId`.
+  handleId     String?  @unique
+  handleRecord Handle?  @relation("UserHandle", fields: [handleId], references: [id], onDelete: SetNull)
 
   // Auth.js core fields
   name          String?
@@ -144,8 +139,13 @@ model User {
   securityPrefs   UserSecurityPrefs? @relation("UserSecurityPrefs")
   securityEvents  SecurityEvent[]    @relation("UserSecurityEvents")
 
+  // MFA + passkeys
+  webAuthnCredentials WebAuthnCredential[]
+  mfaTotp             MfaTotp?
+  mfaBackupCodes      MfaBackupCode[]
+
   @@index([createdAt])
-  @@index([handle])
+  @@index([handleId])
 }
 
 model Account {
@@ -173,10 +173,12 @@ model Session {
   sessionToken String   @unique
   userId       String
   expires      DateTime
+  createdAt    DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([createdAt])
 }
 
 model VerificationToken {
@@ -185,6 +187,78 @@ model VerificationToken {
   expires    DateTime
 
   @@unique([identifier, token])
+}
+
+/// Create account or sign in with passkeys.
+model WebAuthnCredential {
+  id             String    @id @default(cuid())
+  userId         String
+
+  nickname       String?
+
+  /// Base64url credential ID.
+  credentialId   String    @unique
+
+  /// Base64url-encoded public key.
+  publicKey      String
+
+  /// Signature counter.
+  counter        Int       @default(0)
+
+  /// Transport hints (e.g. ["usb","nfc","internal"]).
+  transports     String[]
+
+  deviceType     String?
+  backedUp       Boolean   @default(false)
+  attestationFmt String?
+
+  createdAt      DateTime  @default(now())
+  lastUsedAt     DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// Time-based one-time password (TOTP) secret for MFA.
+/// Store the secret encrypted at rest (`secretEnc`).
+model MfaTotp {
+  id             String    @id @default(cuid())
+  userId         String    @unique
+
+  /// Encrypted secret (see `src/lib/security/crypto.ts`).
+  secretEnc      String
+
+  algorithm      String    @default("SHA1")
+  digits         Int       @default(6)
+  period         Int       @default(30)
+
+  enabledAt      DateTime?
+  lastVerifiedAt DateTime?
+
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// Backup codes for MFA (one-time use; store hashes only).
+model MfaBackupCode {
+  id        String    @id @default(cuid())
+  userId    String
+
+  /// scrypt hash (see `src/lib/security/crypto.ts`).
+  codeHash  String
+
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, codeHash])
+  @@index([userId])
 }
 
 /// Global handle registry used for pretty URLs and UI display.
@@ -229,6 +303,12 @@ model Handle {
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
+  /// Prisma relation backrefs for the canonical handleId relations.
+  /// These are used for ORM navigation; canonical ownership is still determined by
+  /// `status` + `ownerType` + `ownerId`.
+  userHandle      User?      @relation("UserHandle")
+  communityHandle Community? @relation("CommunityHandle")
+
   @@unique([ownerType, ownerId])
   @@index([status, availableAt])
   @@index([ownerType, ownerId, status])
@@ -242,9 +322,9 @@ model Handle {
 model Community {
   id          String   @id @default(cuid())
 
-  /// Public handle used for pretty URLs (e.g., /c/[handle]).
-  /// NOTE: Handle lifecycle (release/reclaim/retire) is tracked in the `Handle` table.
-  handle      String   @unique @db.VarChar(32)
+  /// Canonical handle registry row for this community.
+  handleId     String   @unique
+  handleRecord Handle   @relation("CommunityHandle", fields: [handleId], references: [id], onDelete: Restrict)
 
   /// Small visual identifier for the community (e.g., an emoji like "🪐").
   icon        String?  @db.VarChar(16)
@@ -275,7 +355,7 @@ model Community {
 
   @@index([ownerId])
   @@index([createdAt])
-  @@index([handle])
+  @@index([handleId])
 }
 
 model Membership {
@@ -462,7 +542,7 @@ model ApiIdempotency {
   /// HTTP status to replay.
   statusCode Int
 
-  /// Stored ApiResponse envelope for replay.
+  /// Stored ApiEnvelope (see `src/lib/api-shapes.ts`) for replay.
   response   Json?
 
   /// Non-null while a handler is processing the first request.
