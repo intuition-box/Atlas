@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AttestationType } from "@prisma/client";
+import { AttestationType, MembershipStatus, ScoringType } from "@prisma/client";
 
 import { db } from "@/lib/database";
 import { auth } from "@/lib/auth";
@@ -63,21 +63,21 @@ export async function POST(req: NextRequest) {
 
     // Both author and target must be approved members (prevents abuse / drive-by attestations).
     const [fromMembership, toMembership] = await Promise.all([
-      db.membership.findFirst({
-        where: { communityId, userId, status: "APPROVED" },
-        select: { id: true },
+      db.membership.findUnique({
+        where: { userId_communityId: { userId, communityId } },
+        select: { id: true, status: true },
       }),
-      db.membership.findFirst({
-        where: { communityId, userId: toUserId, status: "APPROVED" },
-        select: { id: true },
+      db.membership.findUnique({
+        where: { userId_communityId: { userId: toUserId, communityId } },
+        select: { id: true, status: true },
       }),
     ]);
 
-    if (!fromMembership) {
+    if (!fromMembership || fromMembership.status !== MembershipStatus.APPROVED) {
       return errJson({ code: "FORBIDDEN", message: "You must be a member to attest", status: 403 });
     }
 
-    if (!toMembership) {
+    if (!toMembership || toMembership.status !== MembershipStatus.APPROVED) {
       return errJson({ code: "FORBIDDEN", message: "Target user is not a member", status: 403 });
     }
 
@@ -116,12 +116,17 @@ export async function POST(req: NextRequest) {
         select: { id: true },
       });
 
-      // Track activity for scoring/engagement.
-      await tx.activityEvent.create({
+      // Track scoring/engagement.
+      await tx.scoringEvent.create({
         data: {
           communityId,
           actorId: userId,
-          type: "ATTESTED",
+          type: ScoringType.ATTESTED,
+          metadata: {
+            toUserId,
+            attestationId: attestation.id,
+            attestationType: type,
+          },
         },
         select: { id: true },
       });

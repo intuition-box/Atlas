@@ -16,7 +16,7 @@ const QuerySchema = z.object({
   fromUserId: z.string().trim().min(1).optional(),
   type: z.nativeEnum(AttestationType).optional(),
 
-  limit: z.coerce.number().int().min(1).max(100).optional(),
+  take: z.coerce.number().int().min(1).max(100).optional(),
   cursor: z.string().trim().min(1).optional(),
 });
 
@@ -50,14 +50,14 @@ type AttestationListOk = {
 
 export async function GET(req: NextRequest) {
   try {
-    const url = new URL(req.url);
+    const sp = req.nextUrl.searchParams;
     const parsed = QuerySchema.safeParse({
-      communityId: url.searchParams.get("communityId") ?? undefined,
-      toUserId: url.searchParams.get("toUserId") ?? undefined,
-      fromUserId: url.searchParams.get("fromUserId") ?? undefined,
-      type: url.searchParams.get("type") ?? undefined,
-      limit: (url.searchParams.get("limit") ?? url.searchParams.get("take")) ?? undefined,
-      cursor: url.searchParams.get("cursor") ?? undefined,
+      communityId: sp.get("communityId") ?? undefined,
+      toUserId: sp.get("toUserId") ?? undefined,
+      fromUserId: sp.get("fromUserId") ?? undefined,
+      type: sp.get("type") ?? undefined,
+      take: sp.get("take") ?? undefined,
+      cursor: sp.get("cursor") ?? undefined,
     });
 
     if (!parsed.success) {
@@ -73,7 +73,7 @@ export async function GET(req: NextRequest) {
     }
 
     const { communityId, toUserId, fromUserId, type, cursor } = parsed.data;
-    const limit = parsed.data.limit ?? 50;
+    const take = parsed.data.take ?? 50;
 
     // Community visibility gate: if not public, require membership.
     const community = await db.community.findUnique({
@@ -93,16 +93,12 @@ export async function GET(req: NextRequest) {
         return errJson({ code: "UNAUTHORIZED", message: "Sign in required", status: 401 });
       }
 
-      const member = await db.membership.findFirst({
-        where: {
-          communityId,
-          userId,
-          status: MembershipStatus.APPROVED,
-        },
-        select: { id: true },
+      const member = await db.membership.findUnique({
+        where: { userId_communityId: { userId, communityId } },
+        select: { id: true, status: true },
       });
 
-      if (!member) {
+      if (!member || member.status !== MembershipStatus.APPROVED) {
         return errJson({ code: "FORBIDDEN", message: "Not allowed", status: 403 });
       }
     }
@@ -115,7 +111,7 @@ export async function GET(req: NextRequest) {
         ...(type ? { type } : {}),
       },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: limit + 1,
+      take: take + 1,
       ...(cursor
         ? {
             cursor: { id: cursor },
@@ -150,8 +146,8 @@ export async function GET(req: NextRequest) {
       },
     });
 
-    const page = rows.slice(0, limit);
-    const nextCursor = rows.length > limit ? rows[limit]!.id : null;
+    const page = rows.slice(0, take);
+    const nextCursor = rows.length > take ? rows[take]!.id : null;
 
     if (page.length === 0) {
       return okJson<AttestationListOk>({ attestations: [], nextCursor });

@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 
-import { MembershipRole, MembershipStatus } from "@prisma/client";
+import { MembershipRole, MembershipStatus, ScoringType } from "@prisma/client";
 
 import { auth } from "@/lib/auth";
 import { errJson, okJson } from "@/lib/api-server";
@@ -85,16 +85,12 @@ export async function POST(req: NextRequest) {
     // Author can retract; moderators+ can retract for moderation.
     const isAuthor = row.fromUserId === userId;
 
-    const actorMembership = await db.membership.findFirst({
-      where: {
-        communityId: row.communityId,
-        userId,
-        status: MembershipStatus.APPROVED,
-      },
-      select: { id: true, role: true },
+    const actorMembership = await db.membership.findUnique({
+      where: { userId_communityId: { userId, communityId: row.communityId } },
+      select: { id: true, role: true, status: true },
     });
 
-    if (!actorMembership) {
+    if (!actorMembership || actorMembership.status !== MembershipStatus.APPROVED) {
       return errJson({ code: "FORBIDDEN", message: "Not allowed", status: 403 });
     }
 
@@ -122,11 +118,11 @@ export async function POST(req: NextRequest) {
       });
 
       // Audit / preferences feed.
-      await tx.activityEvent.create({
+      await tx.scoringEvent.create({
         data: {
           communityId: row.communityId,
           actorId: userId,
-          type: "ATTESTATION_RETRACTED",
+          type: ScoringType.ATTESTATION_RETRACTED,
           metadata: {
             attestationId: row.id,
             reason: reason ?? null,

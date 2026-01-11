@@ -5,6 +5,7 @@ import {
   AttestationType,
   MembershipRole,
   MembershipStatus,
+  ScoringType,
 } from "@prisma/client";
 
 import { auth } from "@/lib/auth";
@@ -107,16 +108,12 @@ export async function POST(req: NextRequest) {
     // Author can supersede; moderators+ can supersede for moderation.
     const isAuthor = existing.fromUserId === userId;
 
-    const actorMembership = await db.membership.findFirst({
-      where: {
-        communityId: existing.communityId,
-        userId,
-        status: MembershipStatus.APPROVED,
-      },
-      select: { id: true, role: true },
+    const actorMembership = await db.membership.findUnique({
+      where: { userId_communityId: { userId, communityId: existing.communityId } },
+      select: { id: true, role: true, status: true },
     });
 
-    if (!actorMembership) {
+    if (!actorMembership || actorMembership.status !== MembershipStatus.APPROVED) {
       return errJson({ code: "FORBIDDEN", message: "Not allowed", status: 403 });
     }
 
@@ -126,16 +123,14 @@ export async function POST(req: NextRequest) {
     }
 
     // Target must be an approved member too.
-    const targetMembership = await db.membership.findFirst({
+    const targetMembership = await db.membership.findUnique({
       where: {
-        communityId: existing.communityId,
-        userId: existing.toUserId,
-        status: MembershipStatus.APPROVED,
+        userId_communityId: { userId: existing.toUserId, communityId: existing.communityId },
       },
-      select: { id: true },
+      select: { id: true, status: true },
     });
 
-    if (!targetMembership) {
+    if (!targetMembership || targetMembership.status !== MembershipStatus.APPROVED) {
       return errJson({ code: "FORBIDDEN", message: "Target user is not a member", status: 403 });
     }
 
@@ -191,11 +186,11 @@ export async function POST(req: NextRequest) {
         data: { lastActiveAt: now },
       });
 
-      await tx.activityEvent.create({
+      await tx.scoringEvent.create({
         data: {
           communityId: existing.communityId,
           actorId: userId,
-          type: "ATTESTATION_SUPERSEDED",
+          type: ScoringType.ATTESTATION_SUPERSEDED,
           metadata: {
             fromAttestationId: existing.id,
             toAttestationId: replacement.id,
