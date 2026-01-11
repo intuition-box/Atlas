@@ -97,25 +97,31 @@ export const HandleSchema = z
 export type HandleInput = z.infer<typeof HandleSchema>;
 
 // -----------------------------------------------------------------------------
-// Applications
+// Memberships
 // -----------------------------------------------------------------------------
+// Must match Prisma enum `MembershipStatus`.
+// IMPORTANT: keep this list in sync with `enum MembershipStatus` in `prisma/schema.prisma`.
+export const MembershipStatusSchema = z.enum([
+  "PENDING",
+  "APPROVED",
+  "REJECTED",
+  "WITHDRAWN",
+  "BANNED",
+]);
 
-export const ApplicationStatusSchema = z.enum(["SUBMITTED", "APPROVED", "REJECTED"]);
-
-export const ApplicationSubmitSchema = z.object({
+export const MembershipSubmitSchema = z.object({
   communityId: Id,
   answers: JsonInputValueSchema.default({}),
 });
 
-export const ApplicationListSchema = z.object({
+export const MembershipListSchema = z.object({
   communityId: Id,
-  status: ApplicationStatusSchema.optional(),
+  status: MembershipStatusSchema.optional(),
   take: z.coerce.number().int().min(1).max(100).optional(),
 });
 
-export type ApplicationStatus = z.infer<typeof ApplicationStatusSchema>;
-export type ApplicationSubmitInput = z.infer<typeof ApplicationSubmitSchema>;
-export type ApplicationListInput = z.infer<typeof ApplicationListSchema>;
+export type MembershipSubmitInput = z.infer<typeof MembershipSubmitSchema>;
+export type MembershipListInput = z.infer<typeof MembershipListSchema>;
 
 // -----------------------------------------------------------------------------
 // Attestations
@@ -187,9 +193,9 @@ export const CommunityCreateSchema = z.object({
   description: z.string().trim().max(1000).nullable().optional(),
   avatarUrl: OptionalUrl.nullable().optional(),
   handle: HandleSchema,
-  isApplicationOpen: z.coerce.boolean().optional(),
+  isMembershipOpen: z.coerce.boolean().optional(),
   isPublicDirectory: z.coerce.boolean().optional(),
-  applicationConfig: jsonOk(z.unknown()).nullable().optional(),
+  membershipConfig: jsonOk(z.unknown()).nullable().optional(),
   orbitConfig: jsonOk(z.unknown()).nullable().optional(),
 });
 
@@ -198,9 +204,9 @@ export const CommunityUpdateSchema = z.object({
   name: NonEmptyString.max(120).optional(),
   description: z.string().trim().max(1000).nullable().optional(),
   avatarUrl: OptionalUrl.nullable().optional(),
-  isApplicationOpen: z.coerce.boolean().optional(),
+  isMembershipOpen: z.coerce.boolean().optional(),
   isPublicDirectory: z.coerce.boolean().optional(),
-  applicationConfig: jsonOk(z.unknown()).nullable().optional(),
+  membershipConfig: jsonOk(z.unknown()).nullable().optional(),
   orbitConfig: jsonOk(z.unknown()).nullable().optional(),
 });
 
