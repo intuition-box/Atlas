@@ -35,14 +35,12 @@ export type HandleErrorCode =
   | "HANDLE_RESERVED_FOR_PREVIOUS_OWNER"
   | "HANDLE_NOT_AVAILABLE";
 
-export type HandleProblem = ApiError<
-  HandleErrorCode,
-  400 | 409,
-  {
-    reclaimUntil?: Date;
-    availableAt?: Date;
-  }
->;
+type HandleProblemMeta = {
+  reclaimUntil?: Date;
+  availableAt?: Date;
+};
+
+export type HandleProblem = ApiError<HandleErrorCode, 400 | 409, HandleProblemMeta> & HandleProblemMeta;
 
 export type HandleResult<T> = Result<T, HandleProblem>;
 
@@ -79,30 +77,33 @@ function retired(): HandleProblem {
   };
 }
 
-function cooldown(meta: { reclaimUntil?: Date; availableAt?: Date }): HandleProblem {
+function cooldown(meta: HandleProblemMeta): HandleProblem {
   return {
     code: "HANDLE_COOLDOWN",
     message: "Handle is cooling down.",
     status: 409,
     meta,
+    ...meta,
   };
 }
 
-function reserved(meta: { reclaimUntil?: Date; availableAt?: Date }): HandleProblem {
+function reserved(meta: HandleProblemMeta): HandleProblem {
   return {
     code: "HANDLE_RESERVED_FOR_PREVIOUS_OWNER",
     message: "Handle is reserved for the previous owner.",
     status: 409,
     meta,
+    ...meta,
   };
 }
 
-function notAvailable(meta: { reclaimUntil?: Date; availableAt?: Date } = {}): HandleProblem {
+function notAvailable(meta: HandleProblemMeta = {}): HandleProblem {
   return {
     code: "HANDLE_NOT_AVAILABLE",
     message: "Handle is not available.",
     status: 409,
     meta,
+    ...meta,
   };
 }
 

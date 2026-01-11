@@ -1,64 +1,121 @@
-import { NextResponse } from "next/server";
+import { HandleOwnerType, Prisma } from "@prisma/client";
+import type { NextRequest } from "next/server";
+import { z } from "zod";
 
+import { auth } from "@/lib/auth";
+import { errJson, okJson } from "@/lib/api-server";
 import { db } from "@/lib/database";
-import { UserGetQuerySchema } from "@/lib/validation/user";
 
 export const runtime = "nodejs";
 
-type ApiError = {
-  code: number;
-  message: string;
-  details?: unknown;
+type GetUserOk = {
+  user: {
+    id: string;
+    handle: string | null;
+    name: string | null;
+    image: string | null;
+  };
+  isSelf: boolean;
 };
 
-function jsonOk<T>(data: T, init?: ResponseInit) {
-  return NextResponse.json({ ok: true, data }, init);
-}
+const QuerySchema = z.object({
+  userId: z.string().min(1).optional(),
+  handle: z.string().min(1).optional(),
+});
 
-function jsonFail(status: number, message: string, details?: unknown, init?: ResponseInit) {
-  const error: ApiError = { code: status, message, ...(details !== undefined ? { details } : {}) };
-  return NextResponse.json({ ok: false, error }, { status, ...init });
-}
+export async function GET(req: NextRequest) {
+  try {
+    const session = await auth();
+    const actorId = session?.user?.id ?? null;
 
-export async function GET(req: Request) {
-  const url = new URL(req.url);
-  const sp = url.searchParams;
+    const sp = req.nextUrl.searchParams;
+    const parsed = QuerySchema.safeParse({
+      userId: sp.get("userId") ?? undefined,
+      handle: sp.get("handle") ?? undefined,
+    });
 
-  const raw = {
-    userId: sp.get("userId") || undefined,
-    handle: sp.get("handle") || undefined,
-  };
+    if (!parsed.success) {
+      return errJson({
+        code: "INVALID_REQUEST",
+        message: "Invalid request",
+        status: 400,
+        issues: parsed.error.issues.map((iss) => ({
+          path: iss.path.map((seg) => (typeof seg === "number" ? seg : String(seg))),
+          message: iss.message,
+        })),
+      });
+    }
 
-  const parsed = UserGetQuerySchema.safeParse(raw);
-  if (!parsed.success) {
-    return jsonFail(400, "Invalid request", parsed.error.flatten());
+    const input = parsed.data;
+
+    // Default to self only when no identifier is provided.
+    if (!input.userId && !input.handle) {
+      if (!actorId) {
+        return errJson({ code: "UNAUTHORIZED", message: "Sign in required", status: 401 });
+      }
+    }
+
+    let targetUserId: string | null = input.userId ?? actorId;
+    let handleName: string | null = null;
+
+    if (!targetUserId && input.handle) {
+      const owner = await db.handleOwner.findFirst({
+        where: {
+          ownerType: HandleOwnerType.USER,
+          handle: { name: input.handle },
+        },
+        select: { ownerId: true, handle: { select: { name: true } } },
+      });
+
+      if (!owner) {
+        return errJson({ code: "NOT_FOUND", message: "User not found", status: 404 });
+      }
+
+      targetUserId = owner.ownerId;
+      handleName = owner.handle.name;
+    }
+
+    if (!targetUserId) {
+      return errJson({ code: "UNAUTHORIZED", message: "Sign in required", status: 401 });
+    }
+
+    const user = await db.user.findUnique({
+      where: { id: targetUserId },
+      select: {
+        id: true,
+        name: true,
+        image: true,
+      },
+    });
+
+    if (!user) {
+      return errJson({ code: "NOT_FOUND", message: "User not found", status: 404 });
+    }
+
+    // If we didn’t resolve by handle, fetch the canonical handle name (if any).
+    if (!handleName) {
+      const owner = await db.handleOwner.findFirst({
+        where: { ownerType: HandleOwnerType.USER, ownerId: user.id },
+        select: { handle: { select: { name: true } } },
+      });
+
+      handleName = owner?.handle.name ?? null;
+    }
+
+    return okJson<GetUserOk>({
+      user: {
+        id: user.id,
+        handle: handleName,
+        name: user.name,
+        image: user.image,
+      },
+      isSelf: actorId === user.id,
+    });
+  } catch (e) {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2025") {
+      return errJson({ code: "NOT_FOUND", message: "User not found", status: 404 });
+    }
+
+    return errJson({ code: "INTERNAL_ERROR", message: "Something went wrong", status: 500 });
   }
-
-  const body = parsed.data;
-
-  // Prefer id when provided.
-  const where = body.userId ? { id: body.userId } : { handle: body.handle! };
-
-  const user = await db.user.findUnique({
-    where,
-    select: {
-      id: true,
-      handle: true,
-      name: true,
-      avatarUrl: true,
-      headline: true,
-      bio: true,
-      location: true,
-      links: true,
-      skills: true,
-      tags: true,
-      createdAt: true,
-    },
-  });
-
-  if (!user) {
-    return jsonFail(404, "User not found");
-  }
-
-  return jsonOk({ user });
 }
