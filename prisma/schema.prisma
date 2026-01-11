@@ -18,9 +18,19 @@ enum MembershipRole {
 }
 
 enum MembershipStatus {
+  /// Waiting for review / approval.
   PENDING
+
+  /// Approved member / approved application.
   APPROVED
+
+  /// Rejected member / rejected application.
   REJECTED
+
+  /// Applicant withdrew their own application.
+  WITHDRAWN
+
+  /// Membership is banned.
   BANNED
 }
 
@@ -29,12 +39,6 @@ enum OrbitLevel {
   PARTICIPANT
   CONTRIBUTOR
   ADVOCATE
-}
-
-enum ApplicationStatus {
-  SUBMITTED
-  APPROVED
-  REJECTED
 }
 
 enum AttestationType {
@@ -46,14 +50,9 @@ enum AttestationType {
   OTHER
 }
 
-enum ActivityType {
+enum ScoringType {
   COMMUNITY_CREATED
   JOINED
-  APPLIED
-  APPROVED
-  REJECTED
-  BANNED
-  UNBANNED
 
   ATTESTED
   ATTESTATION_RETRACTED
@@ -87,17 +86,17 @@ enum HandleStatus {
   RETIRED
 }
 
+enum CommunityConfigType {
+  MEMBERSHIP
+  ORBIT
+}
+
 /// -----------------------------
 /// Core: People & Accounts
 /// -----------------------------
 
 model User {
   id            String   @id @default(cuid())
-
-  /// Canonical handle registry row for this user.
-  /// The user has no public handle until onboarding assigns `handleId`.
-  handleId     String?  @unique
-  handleRecord Handle?  @relation("UserHandle", fields: [handleId], references: [id], onDelete: SetNull)
 
   // Auth.js core fields
   name          String?
@@ -126,14 +125,15 @@ model User {
 
   // App relations
   ownedCommunities      Community[] @relation("CommunityOwner")
+  communityConfigEdits  CommunityConfigRevision[] @relation("CommunityConfigMember")
   memberships           Membership[]
   applications          Application[] @relation("ApplicationApplicant")
   applicationsReviewed  Application[] @relation("ApplicationReviewer")
   attestationsGiven     Attestation[] @relation("attestationsGiven")
   attestationsReceived  Attestation[] @relation("attestationsReceived")
   attestationsRevoked   Attestation[] @relation("attestationsRevokedBy")
-  activityEvents        ActivityEvent[] @relation("activityActor")
-  activitySubjects      ActivityEvent[] @relation("ActivitySubject")
+  scoringEvents         ScoringEvent[] @relation("scoringActor")
+  scoringSubjects       ScoringEvent[] @relation("ScoringSubject")
 
   // Security
   securityPrefs   UserSecurityPrefs? @relation("UserSecurityPrefs")
@@ -145,7 +145,6 @@ model User {
   mfaBackupCodes      MfaBackupCode[]
 
   @@index([createdAt])
-  @@index([handleId])
 }
 
 model Account {
@@ -268,22 +267,15 @@ model MfaBackupCode {
 /// - RELEASED and RETIRED must return 404.
 ///
 /// Reuse policy (enforced in application logic):
-/// - On handle change: set previous handle to RELEASED, clear ownerType/ownerId,
+/// - On handle change: set previous handle to RELEASED,
 ///   set lastOwnerType/lastOwnerId, set releasedAt=now, reclaimUntil=now+7d, availableAt=now+30d.
 /// - Reclaim: only allowed for the last owner while now <= reclaimUntil.
 /// - Public claim: only allowed when now >= availableAt.
 /// - Deletion: set status=RETIRED and set retiredAt=now; never becomes available.
 model Handle {
   id            String         @id @default(cuid())
-
-  /// Normalized (lowercase) name used in routes (e.g., "saulo", "orbit-love").
   name          String         @unique @db.VarChar(32)
-
   status        HandleStatus   @default(ACTIVE)
-
-  /// Current owner when ACTIVE. Must be NULL when status != ACTIVE.
-  ownerType     HandleOwnerType?
-  ownerId       String?
 
   /// Last owner info to support short reclaim windows.
   lastOwnerType HandleOwnerType?
@@ -303,16 +295,32 @@ model Handle {
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
-  /// Prisma relation backrefs for the canonical handleId relations.
-  /// These are used for ORM navigation; canonical ownership is still determined by
-  /// `status` + `ownerType` + `ownerId`.
-  userHandle      User?      @relation("UserHandle")
-  communityHandle Community? @relation("CommunityHandle")
+  /// Canonical current owner mapping (enforced by DB constraints).
+  owner HandleOwner?
+
+  @@index([status, availableAt])
+  @@index([lastOwnerType, lastOwnerId])
+}
+
+/// Canonical current owner mapping for a handle.
+///
+/// This table exists to make ownership race-safe and DB-enforced:
+/// - Each handle can have at most one owner (handleId is the primary key).
+/// - Each owner can have at most one handle (unique on [ownerType, ownerId]).
+model HandleOwner {
+  /// One owner mapping per handle.
+  handleId   String         @id
+
+  ownerType  HandleOwnerType
+  ownerId    String
+
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  handle     Handle         @relation(fields: [handleId], references: [id], onDelete: Cascade)
 
   @@unique([ownerType, ownerId])
-  @@index([status, availableAt])
-  @@index([ownerType, ownerId, status])
-  @@index([lastOwnerType, lastOwnerId])
+  @@index([ownerType, ownerId])
 }
 
 /// -----------------------------
@@ -321,10 +329,6 @@ model Handle {
 
 model Community {
   id          String   @id @default(cuid())
-
-  /// Canonical handle registry row for this community.
-  handleId     String   @unique
-  handleRecord Handle   @relation("CommunityHandle", fields: [handleId], references: [id], onDelete: Restrict)
 
   /// Small visual identifier for the community (e.g., an emoji like "🪐").
   icon        String?  @db.VarChar(16)
@@ -342,20 +346,52 @@ model Community {
   isPublicDirectory Boolean @default(false)
 
   /// If false, users cannot submit new applications to join this community.
-  isApplicationOpen Boolean @default(true)
+  isMembershipOpen Boolean @default(true)
 
   // JSON settings so you can evolve without migrations every week
-  applicationFormSchema Json?
-  orbitConfig           Json? // thresholds, weights, etc.
+  membershipConfig Json?
+  orbitConfig       Json? // thresholds, weights, etc.
 
+  configRevisions CommunityConfigRevision[]
   memberships Membership[]
   applications Application[]
   attestations Attestation[]
-  activityEvents ActivityEvent[]
+  scoringEvents ScoringEvent[]
 
   @@index([ownerId])
   @@index([createdAt])
-  @@index([handleId])
+}
+
+/// Append-only history of community config changes.
+///
+/// Why this exists:
+/// - audit: who changed config and when
+/// - rollback: re-apply an older revision as the current config
+///
+/// We keep the current config on `Community` for fast reads,
+/// and write a revision row whenever config changes.
+model CommunityConfigRevision {
+  id          String             @id @default(cuid())
+
+  communityId String
+  type        CommunityConfigType
+
+  /// Snapshot of the config at this revision.
+  config      Json?
+
+  /// Who authored the change (nullable for system migrations).
+  memberId     String?
+
+  /// Optional human-readable note (e.g. "initial", "updated form", "rollback").
+  note        String?            @db.VarChar(200)
+
+  createdAt   DateTime           @default(now())
+
+  community   Community          @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  member      User?              @relation("CommunityConfigMember", fields: [memberId], references: [id], onDelete: SetNull)
+
+  @@index([communityId, type, createdAt])
+  @@index([memberId, createdAt])
 }
 
 model Membership {
@@ -392,12 +428,16 @@ model Application {
   userId      String
   communityId String
 
-  status      ApplicationStatus @default(SUBMITTED)
+  status      MembershipStatus @default(PENDING)
   answers     Json              // store RHF output here (validated server-side)
 
   reviewerId  String?
   reviewedAt  DateTime?
-  reviewer  User?     @relation("ApplicationReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+
+  /// Optional reviewer note (e.g., reason for rejection).
+  reviewNote  String?  @db.VarChar(500)
+
+  reviewer    User?    @relation("ApplicationReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
 
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -456,22 +496,22 @@ model Attestation {
 }
 
 /// -----------------------------
-/// Activities and XP
+/// Scoring events
 /// -----------------------------
 
-model ActivityEvent {
-  id          String   @id @default(cuid())
-  communityId String
-  actorId     String
+model ScoringEvent {
+  id            String    @id @default(cuid())
+  communityId   String
+  actorId       String
   subjectUserId String?
 
-  type        ActivityType
-  metadata    Json?
-  createdAt   DateTime @default(now())
+  type          ScoringType
+  metadata      Json?
+  createdAt     DateTime  @default(now())
 
-  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
-  actor     User      @relation("activityActor", fields: [actorId], references: [id], onDelete: Cascade)
-  subjectUser User? @relation("ActivitySubject", fields: [subjectUserId], references: [id], onDelete: SetNull)
+  community     Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  actor         User      @relation("scoringActor", fields: [actorId], references: [id], onDelete: Cascade)
+  subjectUser   User?     @relation("ScoringSubject", fields: [subjectUserId], references: [id], onDelete: SetNull)
 
   @@index([communityId, createdAt])
   @@index([communityId, actorId, createdAt])
