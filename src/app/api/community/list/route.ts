@@ -1,95 +1,173 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { HandleOwnerType, MembershipStatus } from "@prisma/client";
+import { z } from "zod";
 
-import type { ApiResponse } from "@/types/api";
-
-import { MembershipStatus } from "@prisma/client";
 import { db } from "@/lib/database";
-import { requireUser } from "@/lib/permissions";
-import { CommunityListSchema } from "@/lib/validation/community";
+import { auth } from "@/lib/auth";
+import { errJson, okJson } from "@/lib/api-server";
 
 export const runtime = "nodejs";
 
-type StatusError = Error & { status?: number };
+const QuerySchema = z.object({
+  q: z.string().trim().min(1).max(100).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+  cursor: z.string().trim().min(1).optional(),
+  includePrivate: z.coerce.boolean().optional(),
+});
 
-function jsonOk<T>(data: T, status = 200) {
-  return NextResponse.json<ApiResponse<T>>(
-    { success: true, data },
-    { status, headers: { "Cache-Control": "no-store" } },
-  );
-}
+type CommunityListItem = {
+  id: string;
+  handle: string;
+  name: string;
+  description: string | null;
+  avatarUrl: string | null;
+  isPublicDirectory: boolean;
+  isApplicationOpen: boolean;
+  memberCount: number;
+};
 
-function jsonFail(status: number, message: string, details?: unknown) {
-  return NextResponse.json<ApiResponse<never>>(
-    { success: false, error: { code: status, message, details } },
-    { status, headers: { "Cache-Control": "no-store" } },
-  );
-}
+type CommunityListOk = {
+  communities: CommunityListItem[];
+  nextCursor: string | null;
+};
 
-export async function GET(req: NextRequest) {
+export async function GET(req: Request) {
   try {
-    const sp = req.nextUrl.searchParams;
+    const url = new URL(req.url);
+    const parsed = QuerySchema.safeParse({
+      q: url.searchParams.get("q") ?? undefined,
+      limit: (url.searchParams.get("limit") ?? url.searchParams.get("take")) ?? undefined,
+      cursor: url.searchParams.get("cursor") ?? undefined,
+      includePrivate: url.searchParams.get("includePrivate") ?? undefined,
+    });
 
-    const raw = {
-      take: sp.get("take") ? Number(sp.get("take")) : undefined,
-      includePrivate: sp.get("includePrivate") === "true" ? true : undefined,
-    };
-
-    const parsed = CommunityListSchema.safeParse(raw);
     if (!parsed.success) {
-      return jsonFail(400, "Invalid request", parsed.error.flatten());
+      return errJson({
+        code: "INVALID_REQUEST",
+        message: "Invalid request",
+        status: 400,
+        issues: parsed.error.issues.map((iss) => ({
+          path: iss.path.map((seg) => (typeof seg === "number" ? seg : String(seg))),
+          message: iss.message,
+        })),
+      });
     }
 
-    const take = Math.max(1, Math.min(100, parsed.data.take ?? 24));
-    const includePrivate = parsed.data.includePrivate === true;
+    const { q, cursor } = parsed.data;
+    const limit = parsed.data.limit ?? 24;
 
-    // Default: list only public communities.
-    // If includePrivate=true: include private communities ONLY when the caller is a member.
-    let where;
+    const includePrivate = parsed.data.includePrivate ?? false;
 
-    if (!includePrivate) {
-      where = { isPublicDirectory: true };
-    } else {
-      const { userId } = await requireUser();
-      where = {
-        OR: [
-          { isPublicDirectory: true },
-          {
-            isPublicDirectory: false,
-            memberships: {
-              some: {
-                userId,
-                // Don’t leak private communities to banned users.
-                status: { in: [MembershipStatus.APPROVED, MembershipStatus.PENDING] },
-              },
-            },
-          },
-        ],
-      };
+    let memberCommunityIds: string[] = [];
+    if (includePrivate) {
+      const session = await auth();
+      const userId = session?.user?.id;
+
+      if (!userId) {
+        return errJson({
+          code: "UNAUTHORIZED",
+          message: "Sign in required",
+          status: 401,
+        });
+      }
+
+      const memberships = await db.membership.findMany({
+        where: {
+          userId,
+          status: { in: [MembershipStatus.APPROVED, MembershipStatus.PENDING] },
+        },
+        select: { communityId: true },
+      });
+
+      memberCommunityIds = memberships.map((m) => m.communityId);
     }
 
-    const communities = await db.community.findMany({
-      take,
-      orderBy: { createdAt: "desc" },
+    const visibilityWhere = includePrivate
+      ? {
+          OR: [{ isPublicDirectory: true }, { id: { in: memberCommunityIds } }],
+        }
+      : { isPublicDirectory: true };
+
+    const searchWhere = q
+      ? {
+          OR: [
+            { name: { contains: q, mode: "insensitive" as const } },
+            { description: { contains: q, mode: "insensitive" as const } },
+          ],
+        }
+      : null;
+
+    const where = searchWhere ? { AND: [visibilityWhere, searchWhere] } : visibilityWhere;
+
+    // Stable pagination by createdAt desc + id desc.
+    const rows = await db.community.findMany({
       where,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: limit + 1,
+      ...(cursor
+        ? {
+            cursor: { id: cursor },
+            skip: 1,
+          }
+        : {}),
       select: {
         id: true,
-        handle: true,
         name: true,
         description: true,
         avatarUrl: true,
         isPublicDirectory: true,
+        isApplicationOpen: true,
         _count: { select: { memberships: true } },
       },
     });
 
-    return jsonOk({ communities });
-  } catch (err) {
-    const e = err as StatusError;
+    const page = rows.slice(0, limit);
+    const nextCursor = rows.length > limit ? rows[limit]!.id : null;
 
-    if (e instanceof Response) return e;
+    if (page.length === 0) {
+      return okJson<CommunityListOk>({ communities: [], nextCursor });
+    }
 
-    const status = typeof e.status === "number" ? e.status : 500;
-    const message = status === 500 ? "Internal error" : e.message || "Request failed";
-    return jsonFail(status, message);
+    // Fetch canonical handles from HandleOwner mapping.
+    const owners = await db.handleOwner.findMany({
+      where: {
+        ownerType: HandleOwnerType.COMMUNITY,
+        ownerId: { in: page.map((c) => c.id) },
+      },
+      select: {
+        ownerId: true,
+        handle: { select: { name: true } },
+      },
+    });
+
+    const handleByCommunityId = new Map<string, string>();
+    for (const o of owners) handleByCommunityId.set(o.ownerId, o.handle.name);
+
+    // Only return rows with a valid handle mapping.
+    const communities: CommunityListItem[] = page
+      .map((c) => {
+        const handle = handleByCommunityId.get(c.id);
+        if (!handle) return null;
+        return {
+          id: c.id,
+          handle,
+          name: c.name,
+          description: c.description,
+          avatarUrl: c.avatarUrl,
+          isPublicDirectory: c.isPublicDirectory,
+          isApplicationOpen: c.isApplicationOpen,
+          memberCount: c._count.memberships,
+        };
+      })
+      .filter((c): c is CommunityListItem => Boolean(c));
+
+    return okJson<CommunityListOk>({ communities, nextCursor });
+  } catch (e) {
+    return errJson({
+      code: "INTERNAL_ERROR",
+      message: "Something went wrong",
+      status: 500,
+    });
   }
 }
+
+// (Optional) You can add POST later if you want server-side filtering bodies, but per conventions we keep list as GET.
