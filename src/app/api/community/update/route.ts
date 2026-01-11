@@ -1,12 +1,15 @@
-import { CommunityConfigType, HandleOwnerType, MembershipRole, MembershipStatus, Prisma } from "@prisma/client";
-import { z } from "zod";
+import {
+  CommunityConfigType,
+  HandleOwnerType,
+  MembershipRole,
+  MembershipStatus,
+  Prisma,
+} from "@prisma/client";
+import type { NextRequest } from "next/server";
 
-import { NextResponse, type NextRequest } from "next/server";
-
-import type { ApiEnvelope, ApiError, ApiIssue } from "@/lib/api-shapes";
-import { errEnvelope, okEnvelope } from "@/lib/api-shapes";
+import { auth } from "@/lib/auth";
+import { errJson, okJson } from "@/lib/api-server";
 import { db } from "@/lib/database";
-import { requireAuth } from "@/lib/guards";
 import { requireCsrf } from "@/lib/security/csrf";
 import { CommunityUpdateSchema } from "@/lib/validations";
 
@@ -19,39 +22,24 @@ type UpdateCommunityOk = {
     name: string;
     description: string | null;
     avatarUrl: string | null;
-    isApplicationOpen: boolean;
+    isMembershipOpen: boolean;
     isPublicDirectory: boolean;
-    applicationConfig: unknown | null;
+    membershipConfig: unknown | null;
     orbitConfig: unknown | null;
   };
 };
 
-const UpdateCommunitySchema = CommunityUpdateSchema.refine(
+const UpdateSchema = CommunityUpdateSchema.refine(
   (v) =>
     v.name !== undefined ||
     v.description !== undefined ||
     v.avatarUrl !== undefined ||
-    v.isApplicationOpen !== undefined ||
+    v.isMembershipOpen !== undefined ||
     v.isPublicDirectory !== undefined ||
-    v.applicationConfig !== undefined ||
+    v.membershipConfig !== undefined ||
     v.orbitConfig !== undefined,
   { message: "No updates provided", path: ["name"] },
 );
-
-type StatusErr = ApiError<string, number, unknown>;
-
-function zodIssues(e: z.ZodError): ApiIssue[] {
-  return e.issues.map((iss) => ({
-    path: iss.path.map((seg) => (typeof seg === "number" ? seg : String(seg))),
-    message: iss.message,
-  }));
-}
-
-function jsonError<E extends StatusErr>(e: E): NextResponse<ApiEnvelope<never>> {
-  const res = NextResponse.json(errEnvelope(e), { status: e.status });
-  res.headers.set("cache-control", "no-store");
-  return res;
-}
 
 function prismaJson(
   v: unknown | null | undefined,
@@ -62,156 +50,153 @@ function prismaJson(
   return v as Prisma.InputJsonValue;
 }
 
-function revisionDbJson(
-  v: unknown | null,
-): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput {
+function revisionDbJson(v: unknown | null): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput {
   // For standalone revision rows, represent a cleared config as SQL NULL.
   if (v === null) return Prisma.DbNull;
   return v as Prisma.InputJsonValue;
 }
 
-export async function POST(req: NextRequest): Promise<NextResponse<ApiEnvelope<UpdateCommunityOk>>> {
-  const { userId } = await requireAuth();
-
-  const csrf = requireCsrf(req);
-  if (!csrf.ok) return jsonError(csrf.error);
-
-  let raw: unknown;
+export async function POST(req: NextRequest) {
   try {
-    raw = await req.json();
-  } catch {
-    return jsonError({ code: "INVALID_REQUEST", message: "Invalid JSON", status: 400 });
-  }
+    const session = await auth();
+    const userId = session?.user?.id;
 
-  const parsed = UpdateCommunitySchema.safeParse(raw);
-  if (!parsed.success) {
-    return jsonError({
-      code: "INVALID_REQUEST",
-      message: "Invalid request",
-      status: 400,
-      issues: zodIssues(parsed.error),
-    });
-  }
+    if (!userId) {
+      return errJson({ code: "UNAUTHORIZED", message: "Sign in required", status: 401 });
+    }
 
-  const input = parsed.data;
+    const csrf = await requireCsrf(req);
+    if (csrf instanceof Response) return csrf;
 
-  const data: Prisma.CommunityUpdateInput = {};
+    const raw = await req.json().catch(() => null);
+    const parsed = await UpdateSchema.safeParseAsync(raw);
 
-  if (input.name !== undefined) data.name = input.name;
-  if (input.description !== undefined) data.description = input.description;
-  if (input.avatarUrl !== undefined) data.avatarUrl = input.avatarUrl;
-  if (input.isApplicationOpen !== undefined) data.isApplicationOpen = input.isApplicationOpen;
-  if (input.isPublicDirectory !== undefined) data.isPublicDirectory = input.isPublicDirectory;
-  if (input.applicationConfig !== undefined) data.applicationConfig = prismaJson(input.applicationConfig);
-  if (input.orbitConfig !== undefined) data.orbitConfig = prismaJson(input.orbitConfig);
-
-  const txResult = await (async () => {
-    try {
-      return await db.$transaction(async (tx) => {
-        const membership = await tx.membership.findUnique({
-          where: { userId_communityId: { userId, communityId: input.communityId } },
-          select: { status: true, role: true },
-        });
-
-        if (!membership || membership.status !== MembershipStatus.APPROVED) {
-          return { kind: "not_found" } as const;
-        }
-
-        if (membership.role !== MembershipRole.OWNER && membership.role !== MembershipRole.ADMIN) {
-          return { kind: "forbidden" } as const;
-        }
-
-        const community = await tx.community.update({
-          where: { id: input.communityId },
-          data,
-          select: {
-            id: true,
-            name: true,
-            description: true,
-            avatarUrl: true,
-            isApplicationOpen: true,
-            isPublicDirectory: true,
-            applicationConfig: true,
-            orbitConfig: true,
-          },
-        });
-
-        if (input.applicationConfig !== undefined) {
-          await tx.communityConfigRevision.create({
-            data: {
-              communityId: input.communityId,
-              type: CommunityConfigType.APPLICATION,
-              config: revisionDbJson(input.applicationConfig),
-              memberId: userId,
-              note: "updated",
-            },
-            select: { id: true },
-          });
-        }
-
-        if (input.orbitConfig !== undefined) {
-          await tx.communityConfigRevision.create({
-            data: {
-              communityId: input.communityId,
-              type: CommunityConfigType.ORBIT,
-              config: revisionDbJson(input.orbitConfig),
-              memberId: userId,
-              note: "updated",
-            },
-            select: { id: true },
-          });
-        }
-
-        const owner = await tx.handleOwner.findUnique({
-          where: {
-            ownerType_ownerId: {
-              ownerType: HandleOwnerType.COMMUNITY,
-              ownerId: community.id,
-            },
-          },
-          select: { handle: { select: { name: true } } },
-        });
-
-        if (!owner) {
-          // Community exists, but handle mapping is missing.
-          return { kind: "not_found" } as const;
-        }
-
-        return { kind: "ok", community, handleName: owner.handle.name } as const;
+    if (!parsed.success) {
+      return errJson({
+        code: "INVALID_REQUEST",
+        message: "Invalid request",
+        status: 400,
+        issues: parsed.error.issues.map((iss) => ({
+          path: iss.path.map((seg) => (typeof seg === "number" ? seg : String(seg))),
+          message: iss.message,
+        })),
       });
-    } catch (e) {
-      // Community was deleted between auth and update.
-      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2025") {
+    }
+
+    const input = parsed.data;
+    const now = new Date();
+
+    const data: Prisma.CommunityUpdateInput = {};
+    if (input.name !== undefined) data.name = input.name;
+    if (input.description !== undefined) data.description = input.description;
+    if (input.avatarUrl !== undefined) data.avatarUrl = input.avatarUrl;
+    if (input.isMembershipOpen !== undefined) data.isMembershipOpen = input.isMembershipOpen;
+    if (input.isPublicDirectory !== undefined) data.isPublicDirectory = input.isPublicDirectory;
+    if (input.membershipConfig !== undefined) data.membershipConfig = prismaJson(input.membershipConfig);
+    if (input.orbitConfig !== undefined) data.orbitConfig = prismaJson(input.orbitConfig);
+
+    const txResult = await db.$transaction(async (tx) => {
+      const membership = await tx.membership.findUnique({
+        where: { userId_communityId: { userId, communityId: input.communityId } },
+        select: { status: true, role: true },
+      });
+
+      if (!membership || membership.status !== MembershipStatus.APPROVED) {
         return { kind: "not_found" } as const;
       }
-      throw e;
+
+      if (membership.role !== MembershipRole.OWNER && membership.role !== MembershipRole.ADMIN) {
+        return { kind: "forbidden" } as const;
+      }
+
+      const community = await tx.community.update({
+        where: { id: input.communityId },
+        data,
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          avatarUrl: true,
+          isMembershipOpen: true,
+          isPublicDirectory: true,
+          membershipConfig: true,
+          orbitConfig: true,
+        },
+      });
+
+      // Config revision history (only when those fields are provided in the payload)
+      if (input.membershipConfig !== undefined) {
+        await tx.communityConfigRevision.create({
+          data: {
+            communityId: input.communityId,
+            type: CommunityConfigType.MEMBERSHIP,
+            config: revisionDbJson(input.membershipConfig),
+            memberId: userId,
+            note: "updated",
+          },
+          select: { id: true },
+        });
+      }
+
+      if (input.orbitConfig !== undefined) {
+        await tx.communityConfigRevision.create({
+          data: {
+            communityId: input.communityId,
+            type: CommunityConfigType.ORBIT,
+            config: revisionDbJson(input.orbitConfig),
+            memberId: userId,
+            note: "updated",
+          },
+          select: { id: true },
+        });
+      }
+
+      const owner = await tx.handleOwner.findUnique({
+        where: {
+          ownerType_ownerId: {
+            ownerType: HandleOwnerType.COMMUNITY,
+            ownerId: community.id,
+          },
+        },
+        select: { handle: { select: { name: true } } },
+      });
+
+      if (!owner) {
+        return { kind: "not_found" } as const;
+      }
+
+      return { kind: "ok", community, handleName: owner.handle.name } as const;
+    });
+
+    if (txResult.kind === "not_found") {
+      return errJson({ code: "NOT_FOUND", message: "Community not found", status: 404 });
     }
-  })();
 
-  if (txResult.kind === "not_found") {
-    return jsonError({ code: "NOT_FOUND", message: "Community not found", status: 404 });
+    if (txResult.kind === "forbidden") {
+      return errJson({ code: "FORBIDDEN", message: "Insufficient permissions", status: 403 });
+    }
+
+    const updated = txResult.community;
+
+    return okJson<UpdateCommunityOk>({
+      community: {
+        id: updated.id,
+        handle: txResult.handleName,
+        name: updated.name,
+        description: updated.description,
+        avatarUrl: updated.avatarUrl,
+        isMembershipOpen: updated.isMembershipOpen,
+        isPublicDirectory: updated.isPublicDirectory,
+        membershipConfig: (updated.membershipConfig as unknown) ?? null,
+        orbitConfig: (updated.orbitConfig as unknown) ?? null,
+      },
+    });
+  } catch (e) {
+    // Community was deleted between read and update.
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2025") {
+      return errJson({ code: "NOT_FOUND", message: "Community not found", status: 404 });
+    }
+
+    return errJson({ code: "INTERNAL_ERROR", message: "Something went wrong", status: 500 });
   }
-
-  if (txResult.kind === "forbidden") {
-    return jsonError({ code: "FORBIDDEN", message: "Insufficient permissions", status: 403 });
-  }
-
-  const updated = txResult.community;
-
-  const body = okEnvelope<UpdateCommunityOk>({
-    community: {
-      id: updated.id,
-      handle: txResult.handleName,
-      name: updated.name,
-      description: updated.description,
-      avatarUrl: updated.avatarUrl,
-      isApplicationOpen: updated.isApplicationOpen,
-      isPublicDirectory: updated.isPublicDirectory,
-      applicationConfig: (updated.applicationConfig as unknown) ?? null,
-      orbitConfig: (updated.orbitConfig as unknown) ?? null,
-    },
-  });
-  const res = NextResponse.json(body, { status: 200 });
-  res.headers.set("cache-control", "no-store");
-  return res;
 }

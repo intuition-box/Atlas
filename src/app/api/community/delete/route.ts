@@ -1,12 +1,16 @@
-import { HandleOwnerType, HandleStatus } from "@prisma/client";
+import {
+  HandleOwnerType,
+  HandleStatus,
+  MembershipRole,
+  MembershipStatus,
+  Prisma,
+} from "@prisma/client";
+import type { NextRequest } from "next/server";
 import { z } from "zod";
 
-import { NextResponse, type NextRequest } from "next/server";
-
-import type { ApiEnvelope, ApiError, ApiIssue } from "@/lib/api-shapes";
-import { errEnvelope, okEnvelope } from "@/lib/api-shapes";
+import { auth } from "@/lib/auth";
+import { errJson, okJson } from "@/lib/api-server";
 import { db } from "@/lib/database";
-import { requireAuth } from "@/lib/guards";
 import { DEFAULT_COOLDOWN_DAYS, DEFAULT_RECLAIM_DAYS } from "@/lib/handle-registry";
 import { requireCsrf } from "@/lib/security/csrf";
 
@@ -20,77 +24,80 @@ const DeleteCommunitySchema = z.object({
   communityId: z.string().min(1, "communityId is required"),
 });
 
-type StatusErr = ApiError<string, number, unknown>;
-
-function zodIssues(e: z.ZodError): ApiIssue[] {
-  return e.issues.map((iss) => ({
-    path: iss.path.map((seg) => (typeof seg === "number" ? seg : String(seg))),
-    message: iss.message,
-  }));
-}
-
-function jsonError<E extends StatusErr>(e: E): NextResponse<ApiEnvelope<never>> {
-  const res = NextResponse.json(errEnvelope(e), { status: e.status });
-  res.headers.set("cache-control", "no-store");
-  return res;
-}
-
 function addDays(d: Date, days: number): Date {
   const out = new Date(d);
   out.setUTCDate(out.getUTCDate() + days);
   return out;
 }
 
-export async function POST(req: NextRequest): Promise<NextResponse<ApiEnvelope<DeleteCommunityOk>>> {
-  const { userId } = await requireAuth();
-
-  const csrf = requireCsrf(req);
-  if (!csrf.ok) return jsonError(csrf.error);
-
-  let raw: unknown;
+export async function POST(req: NextRequest) {
   try {
-    raw = await req.json();
-  } catch {
-    return jsonError({ code: "INVALID_REQUEST", message: "Invalid JSON", status: 400 });
-  }
+    const session = await auth();
+    const userId = session?.user?.id;
 
-  const parsed = DeleteCommunitySchema.safeParse(raw);
-  if (!parsed.success) {
-    return jsonError({
-      code: "INVALID_REQUEST",
-      message: "Invalid request",
-      status: 400,
-      issues: zodIssues(parsed.error),
+    if (!userId) {
+      return errJson({ code: "UNAUTHORIZED", message: "Sign in required", status: 401 });
+    }
+
+    const csrf = await requireCsrf(req);
+    if (csrf instanceof Response) return csrf;
+
+    const raw = await req.json().catch(() => null);
+    const parsed = DeleteCommunitySchema.safeParse(raw);
+
+    if (!parsed.success) {
+      return errJson({
+        code: "INVALID_REQUEST",
+        message: "Invalid request",
+        status: 400,
+        issues: parsed.error.issues.map((iss) => ({
+          path: iss.path.map((seg) => (typeof seg === "number" ? seg : String(seg))),
+          message: iss.message,
+        })),
+      });
+    }
+
+    const { communityId } = parsed.data;
+
+    const found = await db.community.findUnique({
+      where: { id: communityId },
+      select: { id: true },
     });
-  }
 
-  const { communityId } = parsed.data;
+    if (!found) {
+      return errJson({ code: "NOT_FOUND", message: "Community not found", status: 404 });
+    }
 
-  const now = new Date();
-  const reclaimUntil = addDays(now, DEFAULT_COOLDOWN_DAYS);
-  const availableAt = addDays(reclaimUntil, DEFAULT_RECLAIM_DAYS);
+    const membership = await db.membership.findUnique({
+      where: { userId_communityId: { userId, communityId } },
+      select: { status: true, role: true },
+    });
 
-  const found = await db.community.findUnique({
-    where: { id: communityId },
-    select: { id: true, ownerId: true },
-  });
+    if (!membership || membership.status !== MembershipStatus.APPROVED || membership.role !== MembershipRole.OWNER) {
+      return errJson({
+        code: "FORBIDDEN",
+        message: "Only the owner can delete this community",
+        status: 403,
+      });
+    }
 
-  if (!found) {
-    return jsonError({ code: "NOT_FOUND", message: "Community not found", status: 404 });
-  }
+    const now = new Date();
+    const reclaimUntil = addDays(now, DEFAULT_COOLDOWN_DAYS);
+    const availableAt = addDays(reclaimUntil, DEFAULT_RECLAIM_DAYS);
 
-  if (found.ownerId !== userId) {
-    return jsonError({ code: "FORBIDDEN", message: "Only the owner can delete this community", status: 403 });
-  }
-
-  try {
     await db.$transaction(async (tx) => {
       const mapping = await tx.handleOwner.findUnique({
-        where: { ownerType_ownerId: { ownerType: HandleOwnerType.COMMUNITY, ownerId: communityId } },
+        where: {
+          ownerType_ownerId: {
+            ownerType: HandleOwnerType.COMMUNITY,
+            ownerId: communityId,
+          },
+        },
         select: { handleId: true },
       });
 
       if (!mapping) {
+        // This should never happen; keep error code stable for clients.
         throw new Error("HANDLE_MAPPING_MISSING");
       }
 
@@ -113,32 +120,44 @@ export async function POST(req: NextRequest): Promise<NextResponse<ApiEnvelope<D
       }
 
       await tx.handleOwner.deleteMany({
-        where: { handleId: mapping.handleId, ownerType: HandleOwnerType.COMMUNITY, ownerId: communityId },
+        where: {
+          handleId: mapping.handleId,
+          ownerType: HandleOwnerType.COMMUNITY,
+          ownerId: communityId,
+        },
       });
 
-      // Delete the community.
+      // Cleanup rows that might use RESTRICT in some schemas.
+      await tx.application.deleteMany({ where: { communityId } });
+      await tx.membership.deleteMany({ where: { communityId } });
+      await tx.scoringEvent.deleteMany({ where: { communityId } });
+      await tx.attestation.deleteMany({ where: { communityId } });
+
       await tx.community.delete({ where: { id: communityId } });
     });
+
+    return okJson<DeleteCommunityOk>({ communityId });
   } catch (e) {
-    if (e instanceof Error && e.message === "HANDLE_RELEASE_FAILED") {
-      return jsonError({
-        code: "HANDLE_NOT_AVAILABLE",
-        message: "Community handle could not be released. Please try again.",
-        status: 409,
-      });
-    }
     if (e instanceof Error && e.message === "HANDLE_MAPPING_MISSING") {
-      return jsonError({
+      return errJson({
         code: "HANDLE_NOT_AVAILABLE",
         message: "Community handle mapping is missing. Please try again.",
         status: 409,
       });
     }
-    throw e;
-  }
 
-  const body = okEnvelope<DeleteCommunityOk>({ communityId });
-  const res = NextResponse.json(body, { status: 200 });
-  res.headers.set("cache-control", "no-store");
-  return res;
+    if (e instanceof Error && e.message === "HANDLE_RELEASE_FAILED") {
+      return errJson({
+        code: "HANDLE_NOT_AVAILABLE",
+        message: "Community handle could not be released. Please try again.",
+        status: 409,
+      });
+    }
+
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2025") {
+      return errJson({ code: "NOT_FOUND", message: "Community not found", status: 404 });
+    }
+
+    return errJson({ code: "INTERNAL_ERROR", message: "Something went wrong", status: 500 });
+  }
 }

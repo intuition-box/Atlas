@@ -1,4 +1,4 @@
-import { ActivityType, MembershipRole, MembershipStatus } from "@prisma/client";
+import { MembershipRole, MembershipStatus, ScoringType } from "@prisma/client";
 import { z } from "zod";
 
 import { NextResponse, type NextRequest } from "next/server";
@@ -80,7 +80,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<ApiEnvelope<J
     where: { id: communityId },
     select: {
       id: true,
-      isApplicationOpen: true,
+      isMembershipOpen: true,
     },
   });
 
@@ -88,7 +88,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<ApiEnvelope<J
     return jsonError({ code: "NOT_FOUND", message: "Community not found", status: 404 });
   }
 
-  if (!community.isApplicationOpen) {
+  if (!community.isMembershipOpen) {
     return jsonError({
       code: "APPLICATION_CLOSED",
       message: "This community is not accepting new members.",
@@ -108,7 +108,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<ApiEnvelope<J
       return jsonError({ code: "FORBIDDEN", message: "You are banned from this community.", status: 403 });
     }
 
-    // Repeated joins count as activity, but do not create additional JOINED events.
+    // Repeated joins update activity timestamp, but do not create additional JOINED scoring events.
     await db.membership.update({
       where: { id: existing.id },
       data: { lastActiveAt: now },
@@ -125,7 +125,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<ApiEnvelope<J
     return res;
   }
 
-  // Create a pending membership application and record a single JOINED event.
+  // Create a pending membership request and record a single JOINED scoring event.
   // Scores default to 0; role/status are explicit.
   const created = await db.$transaction(async (tx) => {
     const membership = await tx.membership.create({
@@ -140,11 +140,11 @@ export async function POST(req: NextRequest): Promise<NextResponse<ApiEnvelope<J
       select: { id: true, status: true },
     });
 
-    await tx.activityEvent.create({
+    await tx.scoringEvent.create({
       data: {
         communityId,
         actorId: userId,
-        type: ActivityType.JOINED,
+        type: ScoringType.JOINED,
         // Keep metadata minimal; we can expand later if needed.
       },
       select: { id: true },

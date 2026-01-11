@@ -1,4 +1,5 @@
 import { HandleOwnerType, MembershipStatus } from "@prisma/client";
+import type { NextRequest } from "next/server";
 import { z } from "zod";
 
 import { db } from "@/lib/database";
@@ -9,7 +10,7 @@ export const runtime = "nodejs";
 
 const QuerySchema = z.object({
   q: z.string().trim().min(1).max(100).optional(),
-  limit: z.coerce.number().int().min(1).max(100).optional(),
+  take: z.coerce.number().int().min(1).max(100).optional(),
   cursor: z.string().trim().min(1).optional(),
   includePrivate: z.coerce.boolean().optional(),
 });
@@ -21,7 +22,7 @@ type CommunityListItem = {
   description: string | null;
   avatarUrl: string | null;
   isPublicDirectory: boolean;
-  isApplicationOpen: boolean;
+  isMembershipOpen: boolean;
   memberCount: number;
 };
 
@@ -30,12 +31,12 @@ type CommunityListOk = {
   nextCursor: string | null;
 };
 
-export async function GET(req: Request) {
+export async function GET(req: NextRequest) {
   try {
     const url = new URL(req.url);
     const parsed = QuerySchema.safeParse({
       q: url.searchParams.get("q") ?? undefined,
-      limit: (url.searchParams.get("limit") ?? url.searchParams.get("take")) ?? undefined,
+      take: url.searchParams.get("take") ?? undefined,
       cursor: url.searchParams.get("cursor") ?? undefined,
       includePrivate: url.searchParams.get("includePrivate") ?? undefined,
     });
@@ -53,14 +54,14 @@ export async function GET(req: Request) {
     }
 
     const { q, cursor } = parsed.data;
-    const limit = parsed.data.limit ?? 24;
+    const take = parsed.data.take ?? 24;
 
     const includePrivate = parsed.data.includePrivate ?? false;
 
-    let memberCommunityIds: string[] = [];
+    let userId: string | null = null;
     if (includePrivate) {
       const session = await auth();
-      const userId = session?.user?.id;
+      userId = session?.user?.id ?? null;
 
       if (!userId) {
         return errJson({
@@ -69,21 +70,21 @@ export async function GET(req: Request) {
           status: 401,
         });
       }
-
-      const memberships = await db.membership.findMany({
-        where: {
-          userId,
-          status: { in: [MembershipStatus.APPROVED, MembershipStatus.PENDING] },
-        },
-        select: { communityId: true },
-      });
-
-      memberCommunityIds = memberships.map((m) => m.communityId);
     }
 
     const visibilityWhere = includePrivate
       ? {
-          OR: [{ isPublicDirectory: true }, { id: { in: memberCommunityIds } }],
+          OR: [
+            { isPublicDirectory: true },
+            {
+              memberships: {
+                some: {
+                  userId: userId!,
+                  status: { in: [MembershipStatus.APPROVED, MembershipStatus.PENDING] },
+                },
+              },
+            },
+          ],
         }
       : { isPublicDirectory: true };
 
@@ -102,7 +103,7 @@ export async function GET(req: Request) {
     const rows = await db.community.findMany({
       where,
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: limit + 1,
+      take: take + 1,
       ...(cursor
         ? {
             cursor: { id: cursor },
@@ -115,13 +116,13 @@ export async function GET(req: Request) {
         description: true,
         avatarUrl: true,
         isPublicDirectory: true,
-        isApplicationOpen: true,
+        isMembershipOpen: true,
         _count: { select: { memberships: true } },
       },
     });
 
-    const page = rows.slice(0, limit);
-    const nextCursor = rows.length > limit ? rows[limit]!.id : null;
+    const page = rows.slice(0, take);
+    const nextCursor = rows.length > take ? rows[take]!.id : null;
 
     if (page.length === 0) {
       return okJson<CommunityListOk>({ communities: [], nextCursor });
@@ -154,7 +155,7 @@ export async function GET(req: Request) {
           description: c.description,
           avatarUrl: c.avatarUrl,
           isPublicDirectory: c.isPublicDirectory,
-          isApplicationOpen: c.isApplicationOpen,
+          isMembershipOpen: c.isMembershipOpen,
           memberCount: c._count.memberships,
         };
       })
