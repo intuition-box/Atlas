@@ -1,119 +1,151 @@
-import { Prisma } from "@prisma/client";
-import { NextResponse, type NextRequest } from "next/server";
-
-import type { ApiResponse } from "@/types/api";
+import { z } from "zod";
+import { AttestationType } from "@prisma/client";
 
 import { db } from "@/lib/database";
-import { requireApprovedMember, requireUser } from "@/lib/permissions";
-import { recomputeMemberScores } from "@/lib/scoring";
+import { auth } from "@/lib/auth";
+import { errJson, okJson } from "@/lib/api-server";
 import { requireCsrf } from "@/lib/security/csrf";
-import { AttestationCreateSchema } from "@/lib/validation/attestation";
+import type { NextRequest } from "next/server";
 
 export const runtime = "nodejs";
 
-type StatusError = Error & { status?: number };
+const BodySchema = z.object({
+  communityId: z.string().trim().min(1),
+  toUserId: z.string().trim().min(1),
+  // Optional note shown to the receiver / community.
+  note: z.string().trim().min(1).max(500).optional(),
+  // Attestation type (Prisma enum).
+  type: z.nativeEnum(AttestationType),
+});
 
-function jsonOk<T>(data: T, status = 200) {
-  return NextResponse.json<ApiResponse<T>>(
-    { success: true, data },
-    { status, headers: { "Cache-Control": "no-store" } },
-  );
-}
-
-function jsonFail(status: number, message: string, details?: unknown) {
-  return NextResponse.json<ApiResponse<never>>(
-    { success: false, error: { code: status, message, details } },
-    { status, headers: { "Cache-Control": "no-store" } },
-  );
-}
+type CreateAttestationOk = {
+  attestation: {
+    id: string;
+  };
+};
 
 export async function POST(req: NextRequest) {
   try {
-    await requireCsrf(req);
+    const session = await auth();
+    const userId = session?.user?.id;
 
-    const { userId: fromUserId } = await requireUser();
+    if (!userId) {
+      return errJson({ code: "UNAUTHORIZED", message: "Sign in required", status: 401 });
+    }
 
-    const json = await req.json().catch(() => null);
-    if (!json) return jsonFail(400, "Invalid JSON body");
+    const csrf = await requireCsrf(req);
+    if (csrf instanceof Response) return csrf;
 
-    const parsed = AttestationCreateSchema.safeParse(json);
+    const body = await req.json().catch(() => null);
+    const parsed = await BodySchema.safeParseAsync(body);
+
     if (!parsed.success) {
-      return jsonFail(400, "Invalid request", parsed.error.flatten());
+      return errJson({
+        code: "INVALID_REQUEST",
+        message: "Invalid request",
+        status: 400,
+        issues: parsed.error.issues.map((iss) => ({
+          path: iss.path.map((seg) => (typeof seg === "number" ? seg : String(seg))),
+          message: iss.message,
+        })),
+      });
     }
 
-    const body = parsed.data;
+    const { communityId, toUserId, note, type } = parsed.data;
 
-    if (body.toUserId === fromUserId) {
-      return jsonFail(400, "You can't attest to yourself.");
+    if (toUserId === userId) {
+      return errJson({
+        code: "INVALID_REQUEST",
+        message: "You can't attest yourself",
+        status: 400,
+      });
     }
 
-    // MVP rule: both must be approved members of the same community
-    await requireApprovedMember({ userId: fromUserId, communityId: body.communityId });
-    await requireApprovedMember({ userId: body.toUserId, communityId: body.communityId });
+    // Both author and target must be approved members (prevents abuse / drive-by attestations).
+    const [fromMembership, toMembership] = await Promise.all([
+      db.membership.findFirst({
+        where: { communityId, userId, status: "APPROVED" },
+        select: { id: true },
+      }),
+      db.membership.findFirst({
+        where: { communityId, userId: toUserId, status: "APPROVED" },
+        select: { id: true },
+      }),
+    ]);
 
-    // Simple spam guard: prevent same (from,to,type) within 24h
+    if (!fromMembership) {
+      return errJson({ code: "FORBIDDEN", message: "You must be a member to attest", status: 403 });
+    }
+
+    if (!toMembership) {
+      return errJson({ code: "FORBIDDEN", message: "Target user is not a member", status: 403 });
+    }
+
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const dup = await db.attestation.findFirst({
+
+    const recent = await db.attestation.findFirst({
       where: {
-        communityId: body.communityId,
-        fromUserId,
-        toUserId: body.toUserId,
-        type: body.type,
+        communityId,
+        fromUserId: userId,
+        toUserId,
+        type,
         createdAt: { gte: since },
       },
       select: { id: true },
     });
 
-    if (dup) {
-      return jsonFail(409, "You already created this attestation recently.");
+    if (recent) {
+      return errJson({
+        code: "CONFLICT",
+        message: "You already attested this user recently",
+        status: 409,
+      });
     }
 
-    await db.$transaction(async (tx) => {
-      await tx.attestation.create({
+    const now = new Date();
+
+    const created = await db.$transaction(async (tx) => {
+      const attestation = await tx.attestation.create({
         data: {
-          communityId: body.communityId,
-          fromUserId,
-          toUserId: body.toUserId,
-          type: body.type,
-          note: body.note ?? null,
-          confidence: body.confidence ?? null,
+          communityId,
+          fromUserId: userId,
+          toUserId,
+          note: note ?? null,
+          type,
         },
+        select: { id: true },
       });
 
+      // Track activity for scoring/engagement.
       await tx.activityEvent.create({
         data: {
-          communityId: body.communityId,
-          actorId: fromUserId,
-          subjectUserId: body.toUserId,
+          communityId,
+          actorId: userId,
           type: "ATTESTED",
-          metadata: ({ type: body.type } as unknown) as Prisma.InputJsonValue,
         },
+        select: { id: true },
       });
 
-      // Keep lastActiveAt warm for orbit “recency”
-      await tx.membership.update({
-        where: {
-          userId_communityId: {
-            userId: fromUserId,
-            communityId: body.communityId,
-          },
-        },
-        data: { lastActiveAt: new Date() },
+      // Keep memberships warm.
+      await tx.membership.updateMany({
+        where: { id: fromMembership.id },
+        data: { lastActiveAt: now },
       });
+
+      await tx.membership.updateMany({
+        where: { id: toMembership.id },
+        data: { lastActiveAt: now },
+      });
+
+      return attestation;
     });
 
-    // Recompute scores for both sides
-    await recomputeMemberScores({ communityId: body.communityId, userId: fromUserId });
-    await recomputeMemberScores({ communityId: body.communityId, userId: body.toUserId });
-
-    return jsonOk({ ok: true, created: true });
-  } catch (err) {
-    const e = err as StatusError;
-
-    if (e instanceof Response) return e;
-
-    const status = typeof e.status === "number" ? e.status : 500;
-    const message = status === 500 ? "Internal error" : e.message || "Request failed";
-    return jsonFail(status, message);
+    return okJson<CreateAttestationOk>({ attestation: { id: created.id } });
+  } catch {
+    return errJson({
+      code: "INTERNAL_ERROR",
+      message: "Something went wrong",
+      status: 500,
+    });
   }
 }

@@ -1,52 +1,61 @@
-import { NextResponse, type NextRequest } from "next/server";
+import type { NextRequest } from "next/server";
 import { z } from "zod";
 
-import type { ApiResponse } from "@/types/api";
+import { MembershipRole, MembershipStatus } from "@prisma/client";
 
+import { auth } from "@/lib/auth";
+import { errJson, okJson } from "@/lib/api-server";
 import { db } from "@/lib/database";
-import { requireCommunityRole, requireUser } from "@/lib/permissions";
 import { requireCsrf } from "@/lib/security/csrf";
 
 export const runtime = "nodejs";
 
-type StatusError = Error & { status?: number };
-
-function jsonOk<T>(data: T, status = 200) {
-  return NextResponse.json<ApiResponse<T>>(
-    { success: true, data },
-    { status, headers: { "Cache-Control": "no-store" } },
-  );
-}
-
-function jsonFail(status: number, message: string, details?: unknown) {
-  return NextResponse.json<ApiResponse<never>>(
-    { success: false, error: { code: status, message, details } },
-    { status, headers: { "Cache-Control": "no-store" } },
-  );
-}
-
-const Body = z.object({
-  attestationId: z.string().min(1),
-  reason: z.string().trim().max(500).optional(),
+const BodySchema = z.object({
+  attestationId: z.string().trim().min(1),
+  reason: z.string().trim().min(1).max(200).optional(),
 });
+
+type RetractOk = {
+  attestation: { id: string };
+  alreadyRevoked: boolean;
+};
+
+const MOD_ROLES: MembershipRole[] = [
+  MembershipRole.OWNER,
+  MembershipRole.ADMIN,
+  MembershipRole.MODERATOR,
+];
 
 export async function POST(req: NextRequest) {
   try {
-    await requireCsrf(req);
+    const session = await auth();
+    const userId = session?.user?.id;
 
-    const { userId } = await requireUser();
+    if (!userId) {
+      return errJson({ code: "UNAUTHORIZED", message: "Sign in required", status: 401 });
+    }
 
-    const json = await req.json().catch(() => null);
-    if (!json) return jsonFail(400, "Invalid JSON body");
+    const csrf = await requireCsrf(req);
+    if (csrf instanceof Response) return csrf;
 
-    const parsed = Body.safeParse(json);
+    const body = await req.json().catch(() => null);
+    const parsed = await BodySchema.safeParseAsync(body);
+
     if (!parsed.success) {
-      return jsonFail(400, "Invalid request", parsed.error.flatten());
+      return errJson({
+        code: "INVALID_REQUEST",
+        message: "Invalid request",
+        status: 400,
+        issues: parsed.error.issues.map((iss) => ({
+          path: iss.path.map((seg) => (typeof seg === "number" ? seg : String(seg))),
+          message: iss.message,
+        })),
+      });
     }
 
     const { attestationId, reason } = parsed.data;
 
-    const att = await db.attestation.findUnique({
+    const row = await db.attestation.findUnique({
       where: { id: attestationId },
       select: {
         id: true,
@@ -57,58 +66,82 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    if (!att) return jsonFail(404, "Attestation not found");
-
-    // No-op retract is OK and idempotent.
-    if (att.revokedAt) {
-      return jsonOk({ ok: true, revoked: true, alreadyRevoked: true });
+    if (!row) {
+      return errJson({ code: "NOT_FOUND", message: "Attestation not found", status: 404 });
     }
 
-    // Only allow retracting an active attestation.
-    if (att.supersededById) {
-      return jsonFail(409, "This attestation was superseded and cannot be retracted.");
+    if (row.revokedAt) {
+      return okJson<RetractOk>({ attestation: { id: row.id }, alreadyRevoked: true });
     }
 
-    const isAuthor = att.fromUserId === userId;
-
-    if (!isAuthor) {
-      // Moderation: allow community staff to retract.
-      // For your numeric ranking (OWNER=0, ADMIN=1, MODERATOR=2, MEMBER=3),
-      // MODERATOR and above means role <= MODERATOR.
-      await requireCommunityRole({ userId, communityId: att.communityId, atLeast: "MODERATOR" });
+    if (row.supersededById) {
+      return errJson({
+        code: "CONFLICT",
+        message: "Attestation can’t be retracted (superseded)",
+        status: 409,
+      });
     }
+
+    // Author can retract; moderators+ can retract for moderation.
+    const isAuthor = row.fromUserId === userId;
+
+    const actorMembership = await db.membership.findFirst({
+      where: {
+        communityId: row.communityId,
+        userId,
+        status: MembershipStatus.APPROVED,
+      },
+      select: { id: true, role: true },
+    });
+
+    if (!actorMembership) {
+      return errJson({ code: "FORBIDDEN", message: "Not allowed", status: 403 });
+    }
+
+    const canModerate = MOD_ROLES.includes(actorMembership.role);
+    if (!isAuthor && !canModerate) {
+      return errJson({ code: "FORBIDDEN", message: "Not allowed", status: 403 });
+    }
+
+    const now = new Date();
 
     await db.$transaction(async (tx) => {
       await tx.attestation.update({
-        where: { id: attestationId },
+        where: { id: row.id },
         data: {
-          revokedAt: new Date(),
+          revokedAt: now,
           revokedByUserId: userId,
           revokedReason: reason ?? null,
         },
+        select: { id: true },
       });
 
+      await tx.membership.updateMany({
+        where: { id: actorMembership.id },
+        data: { lastActiveAt: now },
+      });
+
+      // Audit / preferences feed.
       await tx.activityEvent.create({
         data: {
-          communityId: att.communityId,
+          communityId: row.communityId,
           actorId: userId,
           type: "ATTESTATION_RETRACTED",
           metadata: {
-            attestationId,
+            attestationId: row.id,
             reason: reason ?? null,
           },
         },
+        select: { id: true },
       });
     });
 
-    return jsonOk({ ok: true, revoked: true });
-  } catch (err) {
-    const e = err as StatusError;
-
-    if (e instanceof Response) return e;
-
-    const status = typeof e.status === "number" ? e.status : 500;
-    const message = status === 500 ? "Internal error" : e.message || "Request failed";
-    return jsonFail(status, message);
+    return okJson<RetractOk>({ attestation: { id: row.id }, alreadyRevoked: false });
+  } catch {
+    return errJson({
+      code: "INTERNAL_ERROR",
+      message: "Something went wrong",
+      status: 500,
+    });
   }
 }

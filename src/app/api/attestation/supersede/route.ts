@@ -1,54 +1,77 @@
-import { NextResponse, type NextRequest } from "next/server";
+import type { NextRequest } from "next/server";
 import { z } from "zod";
 
-import type { ApiResponse } from "@/types/api";
+import {
+  AttestationType,
+  MembershipRole,
+  MembershipStatus,
+} from "@prisma/client";
 
+import { auth } from "@/lib/auth";
+import { errJson, okJson } from "@/lib/api-server";
 import { db } from "@/lib/database";
-import { requireApprovedMember, requireUser } from "@/lib/permissions";
-import { recomputeMemberScores } from "@/lib/scoring";
 import { requireCsrf } from "@/lib/security/csrf";
+import { recomputeMemberScores } from "@/lib/scoring";
 
 export const runtime = "nodejs";
 
-type StatusError = Error & { status?: number };
+const BodySchema = z
+  .object({
+    attestationId: z.string().trim().min(1),
+    // New values to apply to the replacement attestation.
+    // Semantics:
+    // - undefined: keep existing
+    // - null: clear
+    // - value: set
+    note: z.union([z.string().trim().min(1).max(500), z.null()]).optional(),
+    confidence: z.union([z.number().finite().min(0).max(1), z.null()]).optional(),
+  })
+  .refine((v) => v.note !== undefined || v.confidence !== undefined, {
+    message: "Nothing to change",
+    path: ["note"],
+  });
 
-function jsonOk<T>(data: T, status = 200) {
-  return NextResponse.json<ApiResponse<T>>(
-    { success: true, data },
-    { status, headers: { "Cache-Control": "no-store" } },
-  );
-}
+type SupersedeOk = {
+  attestation: {
+    id: string;
+    supersedesId: string;
+  };
+};
 
-function jsonFail(status: number, message: string, details?: unknown) {
-  return NextResponse.json<ApiResponse<never>>(
-    { success: false, error: { code: status, message, details } },
-    { status, headers: { "Cache-Control": "no-store" } },
-  );
-}
-
-const Body = z.object({
-  attestationId: z.string().min(1),
-  note: z.string().trim().max(500).nullable().optional(),
-  confidence: z.number().min(0).max(1).nullable().optional(),
-});
+const MOD_ROLES: MembershipRole[] = [
+  MembershipRole.OWNER,
+  MembershipRole.ADMIN,
+  MembershipRole.MODERATOR,
+];
 
 export async function POST(req: NextRequest) {
   try {
-    await requireCsrf(req);
+    const session = await auth();
+    const userId = session?.user?.id;
 
-    const { userId: fromUserId } = await requireUser();
-
-    const json = await req.json().catch(() => null);
-    if (!json) return jsonFail(400, "Invalid JSON body");
-
-    const parsed = Body.safeParse(json);
-    if (!parsed.success) {
-      return jsonFail(400, "Invalid request", parsed.error.flatten());
+    if (!userId) {
+      return errJson({ code: "UNAUTHORIZED", message: "Sign in required", status: 401 });
     }
 
-    const { attestationId } = parsed.data;
-    const note = parsed.data.note ?? undefined;
-    const confidence = parsed.data.confidence ?? undefined;
+    const csrf = await requireCsrf(req);
+    if (csrf instanceof Response) return csrf;
+
+    const body = await req.json().catch(() => null);
+    const parsed = await BodySchema.safeParseAsync(body);
+
+    if (!parsed.success) {
+      return errJson({
+        code: "INVALID_REQUEST",
+        message: "Invalid request",
+        status: 400,
+        issues: parsed.error.issues.map((iss) => ({
+          path: iss.path.map((seg) => (typeof seg === "number" ? seg : String(seg))),
+          message: iss.message,
+        })),
+      });
+    }
+
+    const { attestationId, note, confidence } = parsed.data;
 
     const existing = await db.attestation.findUnique({
       where: { id: attestationId },
@@ -58,86 +81,150 @@ export async function POST(req: NextRequest) {
         fromUserId: true,
         toUserId: true,
         type: true,
+        note: true,
+        confidence: true,
         revokedAt: true,
         supersededById: true,
       },
     });
 
-    if (!existing) return jsonFail(404, "Attestation not found");
-
-    if (existing.fromUserId !== fromUserId) {
-      return jsonFail(403, "Only the author can supersede an attestation.");
+    if (!existing) {
+      return errJson({ code: "NOT_FOUND", message: "Attestation not found", status: 404 });
     }
 
     if (existing.revokedAt) {
-      return jsonFail(409, "This attestation was retracted and cannot be superseded.");
+      return errJson({ code: "CONFLICT", message: "Attestation is revoked", status: 409 });
     }
 
     if (existing.supersededById) {
-      return jsonFail(409, "This attestation was already superseded.");
+      return errJson({
+        code: "CONFLICT",
+        message: "Attestation is already superseded",
+        status: 409,
+      });
     }
 
-    // MVP rule: both must be approved members of the same community
-    await requireApprovedMember({ userId: fromUserId, communityId: existing.communityId });
-    await requireApprovedMember({ userId: existing.toUserId, communityId: existing.communityId });
+    // Author can supersede; moderators+ can supersede for moderation.
+    const isAuthor = existing.fromUserId === userId;
+
+    const actorMembership = await db.membership.findFirst({
+      where: {
+        communityId: existing.communityId,
+        userId,
+        status: MembershipStatus.APPROVED,
+      },
+      select: { id: true, role: true },
+    });
+
+    if (!actorMembership) {
+      return errJson({ code: "FORBIDDEN", message: "Not allowed", status: 403 });
+    }
+
+    const canModerate = MOD_ROLES.includes(actorMembership.role);
+    if (!isAuthor && !canModerate) {
+      return errJson({ code: "FORBIDDEN", message: "Not allowed", status: 403 });
+    }
+
+    // Target must be an approved member too.
+    const targetMembership = await db.membership.findFirst({
+      where: {
+        communityId: existing.communityId,
+        userId: existing.toUserId,
+        status: MembershipStatus.APPROVED,
+      },
+      select: { id: true },
+    });
+
+    if (!targetMembership) {
+      return errJson({ code: "FORBIDDEN", message: "Target user is not a member", status: 403 });
+    }
+
+    const nextType: AttestationType = existing.type;
+
+    const nextNote =
+      note === undefined ? (existing.note ?? null) : note === null ? null : note;
+
+    const nextConfidence =
+      confidence === undefined
+        ? (existing.confidence ?? null)
+        : confidence === null
+          ? null
+          : confidence;
+
+    // If nothing changes after defaults, avoid creating a no-op replacement.
+    if (nextNote === (existing.note ?? null) && nextConfidence === (existing.confidence ?? null)) {
+      return errJson({
+        code: "INVALID_REQUEST",
+        message: "Nothing to change",
+        status: 400,
+      });
+    }
+
+    const now = new Date();
 
     const created = await db.$transaction(async (tx) => {
-      const next = await tx.attestation.create({
+      const replacement = await tx.attestation.create({
         data: {
           communityId: existing.communityId,
-          fromUserId,
+          fromUserId: existing.fromUserId,
           toUserId: existing.toUserId,
-          type: existing.type,
-          note: note === undefined ? null : note,
-          confidence: confidence === undefined ? null : confidence,
+          type: nextType,
+          note: nextNote,
+          confidence: nextConfidence,
         },
         select: { id: true },
       });
 
       await tx.attestation.update({
         where: { id: existing.id },
-        data: { supersededById: next.id },
+        data: { supersededById: replacement.id },
+        select: { id: true },
+      });
+
+      await tx.membership.updateMany({
+        where: { id: actorMembership.id },
+        data: { lastActiveAt: now },
+      });
+
+      await tx.membership.updateMany({
+        where: { id: targetMembership.id },
+        data: { lastActiveAt: now },
       });
 
       await tx.activityEvent.create({
         data: {
           communityId: existing.communityId,
-          actorId: fromUserId,
-          subjectUserId: existing.toUserId,
+          actorId: userId,
           type: "ATTESTATION_SUPERSEDED",
           metadata: {
             fromAttestationId: existing.id,
-            toAttestationId: next.id,
+            toAttestationId: replacement.id,
           },
         },
+        select: { id: true },
       });
 
-      // Keep lastActiveAt warm for orbit “recency”
-      await tx.membership.update({
-        where: {
-          userId_communityId: {
-            userId: fromUserId,
-            communityId: existing.communityId,
-          },
-        },
-        data: { lastActiveAt: new Date() },
-      });
-
-      return next;
+      return replacement;
     });
 
-    // Recompute scores for both sides
-    await recomputeMemberScores({ communityId: existing.communityId, userId: fromUserId });
-    await recomputeMemberScores({ communityId: existing.communityId, userId: existing.toUserId });
+    // Best-effort: keep scoring in sync without risking the primary write path.
+    try {
+      await Promise.all([
+        recomputeMemberScores({ communityId: existing.communityId, userId: existing.fromUserId }),
+        recomputeMemberScores({ communityId: existing.communityId, userId: existing.toUserId }),
+      ]);
+    } catch {
+      // Ignore scoring failures; the core supersede is already committed.
+    }
 
-    return jsonOk({ ok: true, superseded: true, newAttestationId: created.id });
-  } catch (err) {
-    const e = err as StatusError;
-
-    if (e instanceof Response) return e;
-
-    const status = typeof e.status === "number" ? e.status : 500;
-    const message = status === 500 ? "Internal error" : e.message || "Request failed";
-    return jsonFail(status, message);
+    return okJson<SupersedeOk>({
+      attestation: { id: created.id, supersedesId: existing.id },
+    });
+  } catch {
+    return errJson({
+      code: "INTERNAL_ERROR",
+      message: "Something went wrong",
+      status: 500,
+    });
   }
 }

@@ -1,71 +1,110 @@
-import { NextResponse, type NextRequest } from "next/server";
+import type { NextRequest } from "next/server";
 import { z } from "zod";
 
-import type { ApiResponse } from "@/types/api";
+import { AttestationType, HandleOwnerType, MembershipStatus } from "@prisma/client";
 
+import { auth } from "@/lib/auth";
+import { errJson, okJson } from "@/lib/api-server";
 import { db } from "@/lib/database";
-import { requireApprovedMember, requireUser } from "@/lib/permissions";
 
 export const runtime = "nodejs";
 
-type StatusError = Error & { status?: number };
+const QuerySchema = z.object({
+  communityId: z.string().trim().min(1),
+  // Filter by receiver / author.
+  toUserId: z.string().trim().min(1).optional(),
+  fromUserId: z.string().trim().min(1).optional(),
+  type: z.nativeEnum(AttestationType).optional(),
 
-function jsonOk<T>(data: T, status = 200) {
-  return NextResponse.json<ApiResponse<T>>(
-    { success: true, data },
-    { status, headers: { "Cache-Control": "no-store" } },
-  );
-}
-
-function jsonFail(status: number, message: string, details?: unknown) {
-  return NextResponse.json<ApiResponse<never>>(
-    { success: false, error: { code: status, message, details } },
-    { status, headers: { "Cache-Control": "no-store" } },
-  );
-}
-
-const Query = z.object({
-  communityId: z.string().min(1),
-  toUserId: z.string().min(1).optional(),
-  fromUserId: z.string().min(1).optional(),
-  take: z.coerce.number().int().optional(),
-  cursor: z.string().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+  cursor: z.string().trim().min(1).optional(),
 });
+
+type AttestationListItem = {
+  id: string;
+  communityId: string;
+  type: AttestationType;
+  note: string | null;
+  confidence: number | null;
+  createdAt: string;
+  fromUser: {
+    id: string;
+    handle: string | null;
+    name: string | null;
+    avatarUrl: string | null;
+    headline: string | null;
+  };
+  toUser: {
+    id: string;
+    handle: string | null;
+    name: string | null;
+    avatarUrl: string | null;
+    headline: string | null;
+  };
+};
+
+type AttestationListOk = {
+  attestations: AttestationListItem[];
+  nextCursor: string | null;
+};
 
 export async function GET(req: NextRequest) {
   try {
-    const sp = req.nextUrl.searchParams;
-
-    // NOTE: `userId` used to mean `toUserId` — we no longer support it.
-    const raw = {
-      communityId: sp.get("communityId") || undefined,
-      toUserId: sp.get("toUserId") || undefined,
-      fromUserId: sp.get("fromUserId") || undefined,
-      take: sp.get("take") || undefined,
-      cursor: sp.get("cursor") || undefined,
-    };
-
-    const parsed = Query.safeParse(raw);
-    if (!parsed.success) {
-      return jsonFail(400, "Invalid request", parsed.error.flatten());
-    }
-
-    const { communityId, toUserId, fromUserId, cursor } = parsed.data;
-    const take = Math.max(1, Math.min(100, parsed.data.take ?? 50));
-
-    const community = await db.community.findUnique({
-      where: { id: communityId },
-      select: { isPublicDirectory: true },
+    const url = new URL(req.url);
+    const parsed = QuerySchema.safeParse({
+      communityId: url.searchParams.get("communityId") ?? undefined,
+      toUserId: url.searchParams.get("toUserId") ?? undefined,
+      fromUserId: url.searchParams.get("fromUserId") ?? undefined,
+      type: url.searchParams.get("type") ?? undefined,
+      limit: (url.searchParams.get("limit") ?? url.searchParams.get("take")) ?? undefined,
+      cursor: url.searchParams.get("cursor") ?? undefined,
     });
 
-    if (!community) return jsonFail(404, "Community not found");
+    if (!parsed.success) {
+      return errJson({
+        code: "INVALID_REQUEST",
+        message: "Invalid request",
+        status: 400,
+        issues: parsed.error.issues.map((iss) => ({
+          path: iss.path.map((seg) => (typeof seg === "number" ? seg : String(seg))),
+          message: iss.message,
+        })),
+      });
+    }
 
-    // Hybrid access rule:
-    // - Public directory communities: list is public
-    // - Private communities: only approved members can list
+    const { communityId, toUserId, fromUserId, type, cursor } = parsed.data;
+    const limit = parsed.data.limit ?? 50;
+
+    // Community visibility gate: if not public, require membership.
+    const community = await db.community.findUnique({
+      where: { id: communityId },
+      select: { id: true, isPublicDirectory: true },
+    });
+
+    if (!community) {
+      return errJson({ code: "NOT_FOUND", message: "Community not found", status: 404 });
+    }
+
     if (!community.isPublicDirectory) {
-      const { userId } = await requireUser();
-      await requireApprovedMember({ userId, communityId });
+      const session = await auth();
+      const userId = session?.user?.id;
+
+      if (!userId) {
+        return errJson({ code: "UNAUTHORIZED", message: "Sign in required", status: 401 });
+      }
+
+      const member = await db.membership.findFirst({
+        where: {
+          communityId,
+          userId,
+          status: MembershipStatus.APPROVED,
+        },
+        select: { id: true },
+      });
+
+      if (!member) {
+        return errJson({ code: "FORBIDDEN", message: "Not allowed", status: 403 });
+      }
     }
 
     const rows = await db.attestation.findMany({
@@ -73,13 +112,21 @@ export async function GET(req: NextRequest) {
         communityId,
         ...(toUserId ? { toUserId } : {}),
         ...(fromUserId ? { fromUserId } : {}),
+        ...(type ? { type } : {}),
       },
-      take: take + 1,
-      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: limit + 1,
+      ...(cursor
+        ? {
+            cursor: { id: cursor },
+            skip: 1,
+          }
+        : {}),
       select: {
         id: true,
         communityId: true,
+        fromUserId: true,
+        toUserId: true,
         type: true,
         note: true,
         confidence: true,
@@ -87,7 +134,6 @@ export async function GET(req: NextRequest) {
         fromUser: {
           select: {
             id: true,
-            handle: true,
             name: true,
             avatarUrl: true,
             headline: true,
@@ -96,7 +142,6 @@ export async function GET(req: NextRequest) {
         toUser: {
           select: {
             id: true,
-            handle: true,
             name: true,
             avatarUrl: true,
             headline: true,
@@ -105,18 +150,66 @@ export async function GET(req: NextRequest) {
       },
     });
 
-    const hasMore = rows.length > take;
-    const attestations = hasMore ? rows.slice(0, take) : rows;
-    const nextCursor = hasMore ? attestations[attestations.length - 1]?.id ?? null : null;
+    const page = rows.slice(0, limit);
+    const nextCursor = rows.length > limit ? rows[limit]!.id : null;
 
-    return jsonOk({ attestations, nextCursor });
-  } catch (err) {
-    const e = err as StatusError;
+    if (page.length === 0) {
+      return okJson<AttestationListOk>({ attestations: [], nextCursor });
+    }
 
-    if (e instanceof Response) return e;
+    // Fetch canonical handles (best-effort) for involved users.
+    const userIds = Array.from(
+      new Set(page.flatMap((a) => [a.fromUserId, a.toUserId])),
+    );
 
-    const status = typeof e.status === "number" ? e.status : 500;
-    const message = status === 500 ? "Internal error" : e.message || "Request failed";
-    return jsonFail(status, message);
+    const owners = await db.handleOwner.findMany({
+      where: {
+        ownerType: HandleOwnerType.USER,
+        ownerId: { in: userIds },
+      },
+      select: {
+        ownerId: true,
+        handle: { select: { name: true } },
+      },
+    });
+
+    const handleByUserId = new Map<string, string>();
+    for (const o of owners) handleByUserId.set(o.ownerId, o.handle.name);
+
+    const attestations: AttestationListItem[] = page.map((a) => {
+      const fromHandle = handleByUserId.get(a.fromUserId) ?? null;
+      const toHandle = handleByUserId.get(a.toUserId) ?? null;
+
+      return {
+        id: a.id,
+        communityId: a.communityId,
+        type: a.type,
+        note: a.note,
+        confidence: a.confidence,
+        createdAt: a.createdAt.toISOString(),
+        fromUser: {
+          id: a.fromUser.id,
+          handle: fromHandle,
+          name: a.fromUser.name,
+          avatarUrl: a.fromUser.avatarUrl,
+          headline: a.fromUser.headline,
+        },
+        toUser: {
+          id: a.toUser.id,
+          handle: toHandle,
+          name: a.toUser.name,
+          avatarUrl: a.toUser.avatarUrl,
+          headline: a.toUser.headline,
+        },
+      };
+    });
+
+    return okJson<AttestationListOk>({ attestations, nextCursor });
+  } catch {
+    return errJson({
+      code: "INTERNAL_ERROR",
+      message: "Something went wrong",
+      status: 500,
+    });
   }
 }
