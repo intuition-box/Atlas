@@ -2,47 +2,251 @@
  * Source of truth for reserved handle names.
  *
  * Conventions:
- * - All entries are lowercase, hyphen-separated, and represent canonical handle segments.
- * - Callers must normalize user input (e.g., via `makeHandle`) before calling `isReservedHandle`.
+ * - All entries are lowercase.
+ * - Entries represent full handle values (not "keys").
+ * - Callers should normalize user input (via `makeHandleCandidate` / `parseHandle`) before checking.
  * - Do not mutate this set at runtime.
  */
 export const RESERVED_HANDLES = new Set<string>([
-  // Core / staffy
-  'core', 'admin', 'administrator', 'root', 'system', 'owner', 'moderator', 'mods', 'mod', 'support', 'help', 'meta',
+  // ---------------------------------------------------------------------------
+  // Core / staff / authority (avoid impersonation)
+  // ---------------------------------------------------------------------------
+  "admin",
+  "administrator",
+  "root",
+  "system",
+  "owner",
+  "team",
+  "staff",
+  "moderator",
+  "moderators",
+  "mod",
+  "mods",
+  "support",
+  "help",
+  "meta",
+  "official",
 
-  // App paths (top-level pages)
-  'account', 'settings', 'dashboard', 'home', 'welcome', 'about', 'contact', 'legal', 'privacy', 'terms', 'status', 'docs', 'blog',
-  'notifications', 'inbox', 'messages', 'chat', 'billing',
-  'new', 'create',
+  // ---------------------------------------------------------------------------
+  // Common UX routes / top-level pages
+  // ---------------------------------------------------------------------------
+  "home",
+  "welcome",
+  "about",
+  "contact",
+  "pricing",
+  "plans",
+  "billing",
+  "payments",
+  "subscribe",
+  "subscription",
+  "legal",
+  "privacy",
+  "terms",
+  "status",
+  "docs",
+  "blog",
+  "changelog",
+  "roadmap",
+  "support",
+  "faq",
 
-  // Auth flows
-  'auth', 'login', 'logout', 'signin', 'signup', 'signout', 'register', 'verify',
+  // Navigation / discovery
+  "search",
+  "explore",
+  "discover",
+  "feed",
+  "trending",
+  "popular",
+  "latest",
+  "new",
+  "create",
 
-  // Route groups & namespaces (vanity + resources)
-  'h', 'handle', 'handles',
-  'u', 'user', 'users',
-  'c', 'community', 'communities',
-  'apply', 'join', 'invite',
-  's', 'space', 'spaces',
-  'b', 'board', 'boards',
-  'p', 'post', 'posts',
+  // Account / settings
+  "account",
+  "accounts",
+  "settings",
+  "dashboard",
+  "notifications",
+  "inbox",
+  "messages",
+  "chat",
 
-  // API / security / webhooks (ensure these namespaces can't be claimed)
-  'api', 'security', 'csrf', 'webhooks', 'events',
+  // Useful special-cases that many apps reserve
+  "me",
+  "you",
 
-  // Platform / features
-  'realtime', 'mentions',
+  // ---------------------------------------------------------------------------
+  // Auth flows / identity
+  // ---------------------------------------------------------------------------
+  "auth",
+  "login",
+  "logout",
+  "signin",
+  "signup",
+  "signout",
+  "register",
+  "verify",
+  "reset",
+  "forgot",
+  "invite",
+  "join",
+  "apply",
 
-  // Tech / infra words
-  'static', 'public', 'assets', 'upload', 'uploads', 'images', 'img', 'dev', 'test', 'null', 'undefined',
+  // ---------------------------------------------------------------------------
+  // Route groups & resource namespaces
+  // ---------------------------------------------------------------------------
+  "u",
+  "user",
+  "users",
+  "c",
+  "community",
+  "communities",
+  "m",
+  "member",
+  "members",
+  "membership",
+  "memberships",
+  "p",
+  "post",
+  "posts",
+  "b",
+  "board",
+  "boards",
+  "h",
+  "handle",
+  "handles",
 
+  // Product nouns that commonly become top-level routes
+  "attestation",
+  "attestations",
+  "verification",
+  "verifications",
+  "scoring",
+  "analytics",
+  "insights",
+  "quests",
+  "quest",
+  "badges",
+  "badge",
+  "leaderboard",
+  "leaderboards",
+  "rewards",
+  "reward",
+
+  // ---------------------------------------------------------------------------
+  // API / security / infra (never claimable)
+  // ---------------------------------------------------------------------------
+  "api",
+  "apis",
+  "api-endpoint",
+  "api-endpoints",
+  "rpc",
+  "graphql",
+  "webhook",
+  "webhooks",
+  "events",
+  "eventing",
+  "csrf",
+  "security",
+  "idempotency",
+  "ratelimit",
+  "rate-limit",
+  "limits",
+  "quota",
+  "quotas",
+
+  "db",
+  "database",
+  "sql",
+  "cache",
+  "caches",
+  "metrics",
+  "monitoring",
+  "health",
+  "healthz",
+
+  "internal",
+  "private",
+  "protected",
+  "admin-api",
+
+  // Auth protocols
+  "authn",
+  "authz",
+  "oauth",
+  "oauth2",
+  "openid",
+  "sso",
+  "saml",
+
+  // Dev / tooling
+  "dev",
+  "debug",
+  "logs",
+  "logging",
+  "migrations",
+  "migration",
+  "seeds",
+  "seed",
+  "tests",
+  "test",
+  "testing",
+  "spec",
+  "specs",
+  "experiments",
+  "experiment",
+  "beta",
+  "betas",
+
+  // Files / assets / static endpoints
+  "static",
+  "public",
+  "assets",
+  "cdn",
+  "upload",
+  "uploads",
+  "file",
+  "files",
+  "media",
+  "img",
+  "image",
+  "images",
+  "js",
+  "css",
+
+  // Common static files
+  "favicon",
+  "favicon.ico",
+  "robots",
+  "robots.txt",
+  "sitemap",
+  "sitemap.xml",
+
+  // ---------------------------------------------------------------------------
   // Brand-safe
-  'orbit', 'orbyt', 'team', 'orbyt-team', 'official',
+  // ---------------------------------------------------------------------------
+  "orbit",
+  "orbit-team",
+  "orbyt",
+  "orbyt-team",
 
-  // Common static files / endpoints
-  'favicon', 'favicon-16x16', 'favicon-32x32', 'favicon.ico',
-  'robots', 'robots.txt',
-  'sitemap', 'sitemap.xml',
+  // ---------------------------------------------------------------------------
+  // "weird" values that should never be real identities
+  // ---------------------------------------------------------------------------
+  "null",
+  "undefined",
+
+  // ---------------------------------------------------------------------------
+  // Library names people commonly try to claim (avoid confusion)
+  // ---------------------------------------------------------------------------
+  "next",
+  "nextjs",
+  "next-js",
+  "nextauth",
+  "next-auth",
+  "authjs",
+  "auth-js",
 ]);
 
 export function isReservedHandle(h: string): boolean {

@@ -144,7 +144,8 @@ export function assertValidHandle(input: string): string {
  * Best-effort handle candidate from arbitrary input (name/email/etc.).
  *
  * This is client-safe and does not check uniqueness/availability.
- * Use the handle-registry helpers server-side for uniqueness/availability suggestions.
+ * Returns an empty string when no meaningful suggestion can be derived.
+ * Server-side availability/claiming is handled by `src/lib/handle-registry.ts`.
  */
 export function makeHandleCandidate(seed: string): string {
   let s = normalizeHandle(seed);
@@ -159,31 +160,25 @@ export function makeHandleCandidate(seed: string): string {
   // Keep only a–z, 0–9, hyphen.
   s = s.replace(/[^a-z0-9-]/g, "").replace(/-+/g, "-").replace(/^-+|-+$/g, "");
 
-  if (!s) s = "member";
+  // If we can't derive anything meaningful, do not suggest a handle.
+  // The UI can show a hint like “Type a name/handle”.
+  if (!s) return "";
 
-  // Avoid immediate failure for reserved handles.
-  if (isReservedHandle(s)) s = `${s}-1`;
-
-  // Enforce max length.
+  // Enforce max length early.
   if (s.length > MAX_HANDLE_LEN) {
     s = s.slice(0, MAX_HANDLE_LEN).replace(/-+$/g, "");
   }
 
-  // Ensure minimum length (edge-case after trimming).
-  if (s.length < MIN_HANDLE_LEN) {
-    s = (s + "-member").slice(0, MAX_HANDLE_LEN).replace(/-+$/g, "");
-  }
+  // If it's too short after normalization, do not suggest.
+  if (s.length < MIN_HANDLE_LEN) return "";
 
-  // If trimming reintroduced a reserved value, nudge again.
-  if (isReservedHandle(s)) {
-    s = `${s}-1`.slice(0, MAX_HANDLE_LEN).replace(/-+$/g, "");
-  }
+  // Prefer the plain candidate when valid + not reserved.
+  if (isReservedHandle(s)) return "";
 
   const v = validateNormalizedHandle(s);
   if (v.ok) return v.value;
 
-  // Last resort: a guaranteed-valid fallback.
-  return "member";
+  return "";
 }
 
 /**

@@ -70,9 +70,6 @@ enum HandleOwnerType {
 }
 
 enum HandleStatus {
-  /// Currently available handle to be registered.
-  AVAILABLE
-
   /// Currently assigned and resolvable in routes.
   ACTIVE
 
@@ -274,7 +271,15 @@ model MfaBackupCode {
 /// - Deletion: set status=RETIRED and set retiredAt=now; never becomes available.
 model Handle {
   id            String         @id @default(cuid())
+
+  /// Canonical display value used in URLs (may include hyphens).
   name          String         @unique @db.VarChar(32)
+
+  /// Hyphen-insensitive uniqueness key to prevent confusing collisions.
+  /// Example: "saulo-santos" and "saulosantos" both map to key "saulosantos".
+  /// This must be computed in application logic as: `name.replaceAll("-", "")`.
+  key           String         @unique @db.VarChar(32)
+
   status        HandleStatus   @default(ACTIVE)
 
   /// Last owner info to support short reclaim windows.

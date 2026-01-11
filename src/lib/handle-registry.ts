@@ -1,11 +1,11 @@
 import "server-only";
 
-import { Prisma } from "@prisma/client";
+import { HandleOwnerType, HandleStatus, Prisma } from "@prisma/client";
 
 import { db } from "@/lib/database";
 import type { ApiError, Result } from "@/lib/api-shapes";
 import { err, ok } from "@/lib/api-shapes";
-import { makeHandleCandidate, parseHandle } from "@/lib/handle";
+import { parseHandle } from "@/lib/handle";
 
 /**
  * Server-only handle lifecycle helpers.
@@ -18,14 +18,20 @@ import { makeHandleCandidate, parseHandle } from "@/lib/handle";
  * - ACTIVE: resolves (current owner is the `HandleOwner` row for the handle).
  * - RELEASED: temporarily unavailable; previous owner may reclaim after cooldown.
  * - RETIRED: never claimable.
+ *
+ * Date semantics:
+ * - `reclaimUntil` and `availableAt` being NULL indicates missing/invalid lifecycle data.
+ * - Such handles are treated as unavailable until dates are set properly.
  */
-
-export type HandleOwnerType = "USER" | "COMMUNITY";
 
 export type HandleOwner = {
   ownerType: HandleOwnerType;
   ownerId: string;
 };
+
+function handleKey(name: string): string {
+  return name.replace(/-/g, "");
+}
 
 export type HandleErrorCode =
   | "HANDLE_INVALID"
@@ -40,17 +46,63 @@ type HandleProblemMeta = {
   availableAt?: Date;
 };
 
-export type HandleProblem = ApiError<HandleErrorCode, 400 | 409, HandleProblemMeta> & HandleProblemMeta;
-
+export type HandleProblem = ApiError<HandleErrorCode, 400 | 409, HandleProblemMeta>;
 export type HandleResult<T> = Result<T, HandleProblem>;
 
+/**
+ * Cooldown period: time before the previous owner can reclaim.
+ * This should be configurable based on business requirements.
+ */
 export const DEFAULT_COOLDOWN_DAYS = 7;
+
+/**
+ * Reclaim period: additional time after cooldown where only the previous owner can claim.
+ * This should be configurable based on business requirements.
+ */
+
 export const DEFAULT_RECLAIM_DAYS = 30;
 
+const handleRowSelect = Prisma.validator<Prisma.HandleSelect>()({
+  id: true,
+  name: true,
+  key: true,
+  status: true,
+  lastOwnerType: true,
+  lastOwnerId: true,
+  reclaimUntil: true,
+  availableAt: true,
+  owner: {
+    select: {
+      ownerType: true,
+      ownerId: true,
+    },
+  },
+});
+
+type HandleRow = Prisma.HandleGetPayload<{ select: typeof handleRowSelect }>;
+
+/**
+ * Add days to a date (UTC-safe).
+ */
 function addDays(d: Date, days: number): Date {
   const out = new Date(d);
   out.setUTCDate(out.getUTCDate() + days);
   return out;
+}
+
+/**
+ * Attach metadata to a HandleProblem.
+ */
+function withMeta(base: HandleProblem, meta?: HandleProblemMeta): HandleProblem {
+  const reclaimUntil = meta?.reclaimUntil;
+  const availableAt = meta?.availableAt;
+
+  if (!reclaimUntil && !availableAt) return base;
+
+  return {
+    ...base,
+    meta: { reclaimUntil, availableAt },
+  };
 }
 
 function invalidHandle(message: string): HandleProblem {
@@ -78,78 +130,77 @@ function retired(): HandleProblem {
 }
 
 function cooldown(meta: HandleProblemMeta): HandleProblem {
-  return {
-    code: "HANDLE_COOLDOWN",
-    message: "Handle is cooling down.",
-    status: 409,
+  return withMeta(
+    {
+      code: "HANDLE_COOLDOWN",
+      message: "Handle is cooling down.",
+      status: 409,
+    },
     meta,
-    ...meta,
-  };
+  );
 }
 
 function reserved(meta: HandleProblemMeta): HandleProblem {
-  return {
-    code: "HANDLE_RESERVED_FOR_PREVIOUS_OWNER",
-    message: "Handle is reserved for the previous owner.",
-    status: 409,
+  return withMeta(
+    {
+      code: "HANDLE_RESERVED_FOR_PREVIOUS_OWNER",
+      message: "Handle is reserved for the previous owner.",
+      status: 409,
+    },
     meta,
-    ...meta,
-  };
+  );
 }
 
 function notAvailable(meta: HandleProblemMeta = {}): HandleProblem {
-  return {
-    code: "HANDLE_NOT_AVAILABLE",
-    message: "Handle is not available.",
-    status: 409,
+  return withMeta(
+    {
+      code: "HANDLE_NOT_AVAILABLE",
+      message: "Handle is not available.",
+      status: 409,
+    },
     meta,
-    ...meta,
-  };
+  );
 }
 
-type HandleRow = {
-  id: string;
-  status: "ACTIVE" | "RELEASED" | "RETIRED";
-  lastOwnerType: HandleOwnerType | null;
-  lastOwnerId: string | null;
-  reclaimUntil: Date | null;
-  availableAt: Date | null;
-};
-
-async function currentOwnerForHandleId(
-  client: Prisma.TransactionClient | typeof db,
-  handleId: string,
-): Promise<HandleOwner | null> {
-  const row = await client.handleOwner.findUnique({
-    where: { handleId },
-    select: { ownerType: true, ownerId: true },
-  });
-
-  return row ? { ownerType: row.ownerType, ownerId: row.ownerId } : null;
-}
-
+/**
+ * Check if the claimant is the same as the last owner.
+ */
 function sameLastOwner(row: HandleRow, claimant: HandleOwner): boolean {
   return row.lastOwnerType === claimant.ownerType && row.lastOwnerId === claimant.ownerId;
 }
 
+/**
+ * Evaluate whether a handle can be claimed by a specific owner.
+ * This is the core business logic for handle availability.
+ */
 function evaluateClaimability(args: {
   row: HandleRow | null;
   now: Date;
   claimant: HandleOwner;
-  currentOwner: HandleOwner | null;
+  activeOwner: HandleOwner | null;
 }): HandleResult<null> {
-  const { row, now, claimant, currentOwner } = args;
+  const { row, now, claimant, activeOwner } = args;
 
   if (!row) return ok(null);
 
-  if (row.status === "RETIRED") return err(retired());
+  if (row.status === HandleStatus.RETIRED) return err(retired());
 
-  if (row.status === "ACTIVE") {
-    // ACTIVE is only claimable by the current owner (implied by handleId foreign keys).
-    if (!currentOwner) return err(notAvailable());
-    return currentOwner.ownerType === claimant.ownerType && currentOwner.ownerId === claimant.ownerId
+  if (row.status === HandleStatus.ACTIVE) {
+    // ACTIVE is only claimable by the current owner (enforced by HandleOwner mapping).
+    if (!activeOwner) return err(notAvailable());
+
+    return activeOwner.ownerType === claimant.ownerType && activeOwner.ownerId === claimant.ownerId
       ? ok(null)
       : err(taken());
+  }
+
+  if (row.status !== HandleStatus.RELEASED) {
+    return err(
+      notAvailable({
+        reclaimUntil: row.reclaimUntil ?? undefined,
+        availableAt: row.availableAt ?? undefined,
+      }),
+    );
   }
 
   // RELEASED
@@ -157,6 +208,7 @@ function evaluateClaimability(args: {
   const availableAt = row.availableAt ?? undefined;
 
   // No timing info means treat as not available (conservative).
+  // This indicates potential data integrity issue - consider logging.
   if (!row.reclaimUntil || !row.availableAt) {
     return err(notAvailable({ reclaimUntil, availableAt }));
   }
@@ -175,55 +227,38 @@ function evaluateClaimability(args: {
   return ok(null);
 }
 
-function selectHandleRow() {
-  return {
-    id: true,
-    status: true,
-    lastOwnerType: true,
-    lastOwnerId: true,
-    reclaimUntil: true,
-    availableAt: true,
-  } as const;
-}
-
 export async function resolveUserIdFromHandle(raw: string): Promise<string | null> {
   const parsed = parseHandle(raw);
   if (!parsed.ok) return null;
 
-  const handle = await db.handle.findUnique({
+  const row = await db.handle.findUnique({
     where: { name: parsed.value },
-    select: { id: true, status: true },
+    select: {
+      status: true,
+      owner: { select: { ownerType: true, ownerId: true } },
+    },
   });
 
-  if (!handle || handle.status !== "ACTIVE") return null;
-
-  const owner = await db.handleOwner.findUnique({
-    where: { handleId: handle.id },
-    select: { ownerType: true, ownerId: true },
-  });
-
-  if (!owner || owner.ownerType !== "USER") return null;
-  return owner.ownerId;
+  if (!row || row.status !== HandleStatus.ACTIVE) return null;
+  if (!row.owner || row.owner.ownerType !== HandleOwnerType.USER) return null;
+  return row.owner.ownerId;
 }
 
 export async function resolveCommunityIdFromHandle(raw: string): Promise<string | null> {
   const parsed = parseHandle(raw);
   if (!parsed.ok) return null;
 
-  const handle = await db.handle.findUnique({
+  const row = await db.handle.findUnique({
     where: { name: parsed.value },
-    select: { id: true, status: true },
+    select: {
+      status: true,
+      owner: { select: { ownerType: true, ownerId: true } },
+    },
   });
 
-  if (!handle || handle.status !== "ACTIVE") return null;
-
-  const owner = await db.handleOwner.findUnique({
-    where: { handleId: handle.id },
-    select: { ownerType: true, ownerId: true },
-  });
-
-  if (!owner || owner.ownerType !== "COMMUNITY") return null;
-  return owner.ownerId;
+  if (!row || row.status !== HandleStatus.ACTIVE) return null;
+  if (!row.owner || row.owner.ownerType !== HandleOwnerType.COMMUNITY) return null;
+  return row.owner.ownerId;
 }
 
 /**
@@ -233,35 +268,38 @@ export async function resolveCommunityIdFromHandle(raw: string): Promise<string 
  * - onboarding validation
  * - availability checks
  */
-export async function checkHandle(args: {
-  handle: string;
-  owner: HandleOwner;
-}): Promise<HandleResult<{ handle: string }>> {
+export async function checkHandle(args: { handle: string; owner: HandleOwner }): Promise<HandleResult<{ handle: string }>> {
   const parsed = parseHandle(args.handle);
   if (!parsed.ok) return err(invalidHandle(parsed.error.message));
 
-  const handle = parsed.value;
+  const key = handleKey(parsed.value);
+  const row = await db.handle.findUnique({
+    where: { key },
+    select: handleRowSelect,
+  });
 
-  const row = (await db.handle.findUnique({
-    where: { name: handle },
-    select: selectHandleRow(),
-  })) as HandleRow | null;
+  // Hyphen-insensitive uniqueness: if a different canonical name already exists for this key,
+  // treat this input as taken to avoid confusing collisions.
+  if (row && row.name !== parsed.value) return err(taken());
 
-  const currentOwner = row && row.status === "ACTIVE" ? await currentOwnerForHandleId(db, row.id) : null;
+  const activeOwner =
+    row && row.status === HandleStatus.ACTIVE && row.owner
+      ? { ownerType: row.owner.ownerType, ownerId: row.owner.ownerId }
+      : null;
 
   const claimable = evaluateClaimability({
     row,
     now: new Date(),
     claimant: args.owner,
-    currentOwner,
+    activeOwner,
   });
   if (!claimable.ok) return claimable;
 
-  return ok({ handle });
+  return ok({ handle: parsed.value });
 }
 
 /**
- * Validate a handle for a new owner when the owner's id is not known yet.
+ * Check if a handle is publicly available (for new owners without a known ID yet).
  *
  * This is used during creation flows (e.g. community creation) where Prisma will
  * generate the owner id (cuid) during the create.
@@ -273,40 +311,51 @@ export async function checkHandle(args: {
  *
  * We do NOT attempt to grant reclaim-window exceptions without a concrete ownerId.
  */
-export async function checkHandleForNewOwner(
+export async function checkHandlePubliclyAvailable(
   args: { handle: string },
   client: Prisma.TransactionClient | typeof db = db,
 ): Promise<HandleResult<{ handle: string }>> {
   const parsed = parseHandle(args.handle);
   if (!parsed.ok) return err(invalidHandle(parsed.error.message));
 
-  const handle = parsed.value;
+  const key = handleKey(parsed.value);
+  const row = await client.handle.findUnique({
+    where: { key },
+    select: {
+      name: true,
+      status: true,
+      reclaimUntil: true,
+      availableAt: true,
+    },
+  });
 
-  const row = (await client.handle.findUnique({
-    where: { name: handle },
-    select: selectHandleRow(),
-  })) as HandleRow | null;
+  // Hyphen-insensitive uniqueness: if a different canonical name already exists for this key,
+  // treat this input as taken to avoid confusing collisions.
+  if (row && row.name !== parsed.value) return err(taken());
 
-  if (!row) return ok({ handle });
+  if (!row) return ok({ handle: parsed.value });
 
-  if (row.status === "RETIRED") return err(retired());
-  if (row.status === "ACTIVE") return err(taken());
+  if (row.status === HandleStatus.RETIRED) return err(retired());
+  if (row.status === HandleStatus.ACTIVE) return err(taken());
 
-  // RELEASED
   const reclaimUntil = row.reclaimUntil ?? undefined;
   const availableAt = row.availableAt ?? undefined;
 
+  if (row.status !== HandleStatus.RELEASED) {
+    return err(notAvailable({ reclaimUntil, availableAt }));
+  }
+
+  // RELEASED
   if (!row.availableAt) {
     return err(notAvailable({ reclaimUntil, availableAt }));
   }
 
-  const now = new Date();
-  if (now < row.availableAt) {
+  if (new Date() < row.availableAt) {
     // Not public yet (includes cooldown + reclaim window).
     return err(notAvailable({ reclaimUntil, availableAt }));
   }
 
-  return ok({ handle });
+  return ok({ handle: parsed.value });
 }
 
 /**
@@ -322,7 +371,8 @@ export async function claimHandle(args: {
   if (!parsed.ok) return err(invalidHandle(parsed.error.message));
 
   const desired = parsed.value;
-  const owner: HandleOwner = { ownerType: args.ownerType, ownerId: args.ownerId };
+  const desiredKey = handleKey(desired);
+  const claimant: HandleOwner = { ownerType: args.ownerType, ownerId: args.ownerId };
 
   return db.$transaction(async (tx) => {
     // Current mapping for this owner (enforced by @@unique([ownerType, ownerId])).
@@ -333,20 +383,25 @@ export async function claimHandle(args: {
 
     const currentHandleId = currentMapping?.handleId ?? null;
 
-    // Fast path: already owns the desired handle.
-    const desiredExisting = await tx.handle.findUnique({ where: { name: desired }, select: { id: true } });
-    if (currentHandleId && desiredExisting && currentHandleId === desiredExisting.id) {
-      return ok({ handle: desired });
+    // Load desired row once (hyphen-insensitive uniqueness).
+    let desiredRow = await tx.handle.findUnique({ where: { key: desiredKey }, select: handleRowSelect });
+
+    // Fast path: already mapped to desired.
+    if (currentHandleId && desiredRow && currentHandleId === desiredRow.id) {
+      return ok({ handle: desiredRow.name });
     }
 
-    // Evaluate desired row under the transaction.
-    const desiredRow = (await tx.handle.findUnique({
-      where: { name: desired },
-      select: selectHandleRow(),
-    })) as HandleRow | null;
+    const activeOwner =
+      desiredRow && desiredRow.status === HandleStatus.ACTIVE && desiredRow.owner
+        ? { ownerType: desiredRow.owner.ownerType, ownerId: desiredRow.owner.ownerId }
+        : null;
 
-    const currentOwner = desiredRow && desiredRow.status === "ACTIVE" ? await currentOwnerForHandleId(tx, desiredRow.id) : null;
-    const claimable = evaluateClaimability({ row: desiredRow, now: new Date(), claimant: owner, currentOwner });
+    const claimable = evaluateClaimability({
+      row: desiredRow,
+      now: new Date(),
+      claimant,
+      activeOwner,
+    });
     if (!claimable.ok) return claimable;
 
     const now = new Date();
@@ -355,45 +410,80 @@ export async function claimHandle(args: {
     if (currentHandleId) {
       const reclaimUntil = addDays(now, DEFAULT_COOLDOWN_DAYS);
       const availableAt = addDays(reclaimUntil, DEFAULT_RECLAIM_DAYS);
-
       await tx.handle.updateMany({
-        where: { id: currentHandleId, status: "ACTIVE" },
+        where: { id: currentHandleId, status: HandleStatus.ACTIVE },
         data: {
-          status: "RELEASED",
+          status: HandleStatus.RELEASED,
           lastOwnerType: args.ownerType,
           lastOwnerId: args.ownerId,
           reclaimUntil,
           availableAt,
         },
       });
-
       await tx.handleOwner.deleteMany({
         where: { handleId: currentHandleId, ownerType: args.ownerType, ownerId: args.ownerId },
       });
     }
 
-    // Ensure desired handle row exists.
+    // Ensure desired handle exists.
     if (!desiredRow) {
       try {
-        await tx.handle.create({
-          data: { name: desired, status: "ACTIVE" },
+        desiredRow = await tx.handle.create({
+          data: { name: desired, key: desiredKey, status: HandleStatus.ACTIVE },
+          select: handleRowSelect,
         });
       } catch (e) {
         // Another transaction may have created it first.
         if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
-          // fall through
+          desiredRow = await tx.handle.findUnique({ where: { key: desiredKey }, select: handleRowSelect });
+
+          // Re-evaluate claimability after the race condition.
+          if (!desiredRow) {
+            return err(notAvailable());
+          }
+
+          const newActiveOwner =
+            desiredRow.status === HandleStatus.ACTIVE && desiredRow.owner
+              ? { ownerType: desiredRow.owner.ownerType, ownerId: desiredRow.owner.ownerId }
+              : null;
+
+          const recheckClaimable = evaluateClaimability({
+            row: desiredRow,
+            now: new Date(),
+            claimant,
+            activeOwner: newActiveOwner,
+          });
+          if (!recheckClaimable.ok) return recheckClaimable;
         } else {
           throw e;
         }
       }
     }
 
+    if (!desiredRow) {
+      return err(notAvailable());
+    }
+
+    // Hyphen-insensitive uniqueness: if this key exists with a different canonical name,
+    // treat it as taken unless it is already owned by this claimant.
+    if (desiredRow.name !== desired) {
+      const collisionOwner = desiredRow.owner
+        ? { ownerType: desiredRow.owner.ownerType, ownerId: desiredRow.owner.ownerId }
+        : null;
+
+      if (!collisionOwner) return err(taken());
+      if (collisionOwner.ownerType !== args.ownerType || collisionOwner.ownerId !== args.ownerId) return err(taken());
+
+      // Same owner: no-op, return canonical name.
+      return ok({ handle: desiredRow.name });
+    }
+
     // If the desired row exists and is RELEASED, activate it.
-    if (desiredRow && desiredRow.status === "RELEASED") {
+    if (desiredRow.status === HandleStatus.RELEASED) {
       const updated = await tx.handle.updateMany({
-        where: { name: desired, status: "RELEASED" },
+        where: { id: desiredRow.id, status: HandleStatus.RELEASED },
         data: {
-          status: "ACTIVE",
+          status: HandleStatus.ACTIVE,
           reclaimUntil: null,
           availableAt: null,
           lastOwnerType: null,
@@ -402,20 +492,27 @@ export async function claimHandle(args: {
       });
 
       if (updated.count === 0) {
+        // Another transaction activated it first.
         return err(taken());
       }
+
+      desiredRow = await tx.handle.findUnique({ where: { id: desiredRow.id }, select: handleRowSelect });
+      if (!desiredRow) return err(notAvailable());
     }
 
-    const claimed = await tx.handle.findUnique({ where: { name: desired }, select: { id: true, status: true } });
-    if (!claimed || claimed.status !== "ACTIVE") {
-      return err(notAvailable());
+    if (desiredRow.status !== HandleStatus.ACTIVE) {
+      return err(
+        notAvailable({
+          reclaimUntil: desiredRow.reclaimUntil ?? undefined,
+          availableAt: desiredRow.availableAt ?? undefined,
+        }),
+      );
     }
 
     // Enforce canonical ownership: if someone else owns it, fail.
-    const existingOwner = await tx.handleOwner.findUnique({
-      where: { handleId: claimed.id },
-      select: { ownerType: true, ownerId: true },
-    });
+    const existingOwner = desiredRow.owner
+      ? { ownerType: desiredRow.owner.ownerType, ownerId: desiredRow.owner.ownerId }
+      : null;
 
     if (existingOwner && (existingOwner.ownerType !== args.ownerType || existingOwner.ownerId !== args.ownerId)) {
       return err(taken());
@@ -424,12 +521,12 @@ export async function claimHandle(args: {
     // Create or update the canonical owner mapping.
     // handleId is the PK (one owner per handle). ownerType+ownerId is unique (one handle per owner).
     await tx.handleOwner.upsert({
-      where: { handleId: claimed.id },
-      create: { handleId: claimed.id, ownerType: args.ownerType, ownerId: args.ownerId },
+      where: { handleId: desiredRow.id },
+      create: { handleId: desiredRow.id, ownerType: args.ownerType, ownerId: args.ownerId },
       update: { ownerType: args.ownerType, ownerId: args.ownerId },
     });
 
-    return ok({ handle: desired });
+    return ok({ handle: desiredRow.name });
   });
 }
 
@@ -437,19 +534,18 @@ export async function claimHandle(args: {
  * Retire a handle permanently.
  * This is a rare admin-only operation.
  */
-export async function retireHandle(args: {
-  handle: string;
-}): Promise<HandleResult<{ handle: string }>> {
+export async function retireHandle(args: { handle: string }): Promise<HandleResult<{ handle: string }>> {
   const parsed = parseHandle(args.handle);
   if (!parsed.ok) return err(invalidHandle(parsed.error.message));
 
   const name = parsed.value;
+  const key = handleKey(name);
 
   await db.handle.upsert({
-    where: { name },
-    create: { name, status: "RETIRED" },
+    where: { key },
+    create: { name, key, status: HandleStatus.RETIRED },
     update: {
-      status: "RETIRED",
+      status: HandleStatus.RETIRED,
       reclaimUntil: null,
       availableAt: null,
       lastOwnerType: null,
@@ -458,36 +554,4 @@ export async function retireHandle(args: {
   });
 
   return ok({ handle: name });
-}
-
-/**
- * Generate a globally-unique, publicly-claimable handle suggestion.
- * Uses `makeHandleCandidate(seed)` and appends numeric suffixes when needed.
- */
-export async function ensureUniqueGlobalHandle(seed: string): Promise<string> {
-  const base = makeHandleCandidate(seed);
-
-  const isPubliclyAvailable = async (candidate: string): Promise<boolean> => {
-    const row = await db.handle.findUnique({
-      where: { name: candidate },
-      select: { status: true, availableAt: true },
-    });
-
-    if (!row) return true;
-    if (row.status === "ACTIVE") return false;
-    if (row.status === "RETIRED") return false;
-
-    // RELEASED: public only after availableAt.
-    if (!row.availableAt) return false;
-    return new Date() >= row.availableAt;
-  };
-
-  if (await isPubliclyAvailable(base)) return base;
-
-  for (let i = 1; i <= 50; i++) {
-    const cand = `${base}-${i}`;
-    if (await isPubliclyAvailable(cand)) return cand;
-  }
-
-  return `${base}-${Date.now()}`;
 }
