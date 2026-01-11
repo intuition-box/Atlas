@@ -183,23 +183,25 @@ export type AttestationListInput = z.infer<typeof AttestationListSchema>;
 // -----------------------------------------------------------------------------
 
 export const CommunityCreateSchema = z.object({
-  name: NonEmptyString.max(80),
-  description: z.string().trim().max(500).nullable().optional(),
+  name: NonEmptyString.max(120),
+  description: z.string().trim().max(1000).nullable().optional(),
   avatarUrl: OptionalUrl.nullable().optional(),
   handle: HandleSchema,
   isApplicationOpen: z.coerce.boolean().optional(),
-  applicationFormSchema: jsonOk(z.unknown()).optional(),
-  orbitConfig: jsonOk(z.unknown()).optional(),
+  isPublicDirectory: z.coerce.boolean().optional(),
+  applicationConfig: jsonOk(z.unknown()).nullable().optional(),
+  orbitConfig: jsonOk(z.unknown()).nullable().optional(),
 });
 
 export const CommunityUpdateSchema = z.object({
   communityId: Id,
-  name: NonEmptyString.max(80).optional(),
-  description: z.string().trim().max(500).nullable().optional(),
+  name: NonEmptyString.max(120).optional(),
+  description: z.string().trim().max(1000).nullable().optional(),
   avatarUrl: OptionalUrl.nullable().optional(),
   isApplicationOpen: z.coerce.boolean().optional(),
-  applicationFormSchema: jsonOk(z.unknown()).optional(),
-  orbitConfig: jsonOk(z.unknown()).optional(),
+  isPublicDirectory: z.coerce.boolean().optional(),
+  applicationConfig: jsonOk(z.unknown()).nullable().optional(),
+  orbitConfig: jsonOk(z.unknown()).nullable().optional(),
 });
 
 export const CommunityGetSchema = z

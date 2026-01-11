@@ -3,6 +3,7 @@ import "server-only";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import NextAuth from "next-auth";
 import Discord from "next-auth/providers/discord";
+import { HandleOwnerType } from "@prisma/client";
 
 import { db } from "@/lib/database";
 import { ROUTES } from "@/lib/routes";
@@ -85,18 +86,27 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       session.user.id = user.id;
 
       // AdapterUser typing does not include our custom columns, so refetch.
-      const dbUser = await db.user.findUnique({
-        where: { id: user.id },
-        select: {
-          avatarUrl: true,
-          image: true,
-          // Prefer a single query: load the related handle name if present.
-          handleRecord: { select: { name: true } },
-        },
-      });
+      const [dbUser, owner] = await Promise.all([
+        db.user.findUnique({
+          where: { id: user.id },
+          select: {
+            avatarUrl: true,
+            image: true,
+          },
+        }),
+        db.handleOwner.findUnique({
+          where: {
+            ownerType_ownerId: {
+              ownerType: HandleOwnerType.USER,
+              ownerId: user.id,
+            },
+          },
+          select: { handle: { select: { name: true } } },
+        }),
+      ]);
 
       session.user.avatarUrl = dbUser?.avatarUrl ?? dbUser?.image ?? user.image ?? null;
-      session.user.handle = dbUser?.handleRecord?.name ?? null;
+      session.user.handle = owner?.handle.name ?? null;
       session.user.onboarded = Boolean(session.user.handle);
 
       return session;

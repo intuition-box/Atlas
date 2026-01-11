@@ -2,12 +2,28 @@ import "server-only";
 
 import { redirect } from "next/navigation";
 import type { Session } from "next-auth";
+import { HandleOwnerType } from "@prisma/client";
 
 import { auth } from "@/lib/auth";
+import { db } from "@/lib/database";
 import { ROUTES } from "@/lib/routes";
 
 import type { ApiError, Result } from "@/lib/api-shapes";
 import { err, ok } from "@/lib/api-shapes";
+
+async function resolveUserHandleName(userId: string): Promise<string | undefined> {
+  const row = await db.handleOwner.findUnique({
+    where: {
+      ownerType_ownerId: {
+        ownerType: HandleOwnerType.USER,
+        ownerId: userId,
+      },
+    },
+    select: { handle: { select: { name: true } } },
+  });
+
+  return row?.handle.name ?? undefined;
+}
 
 /**
  * Server-only auth/onboarding guards.
@@ -39,7 +55,7 @@ async function checkAuth(): Promise<AuthResult<AuthContext>> {
   return ok({
     session,
     userId,
-    handle: session.user.handle ?? undefined,
+    handle: await resolveUserHandleName(userId),
     onboarded: Boolean(session.user.onboarded),
   });
 }

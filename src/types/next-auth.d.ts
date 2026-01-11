@@ -12,6 +12,7 @@ declare module "next-auth" {
     user: DefaultSession["user"] & {
       id: string;
       avatarUrl: string | null;
+      // Canonical handle name (derived server-side via HandleOwner -> Handle).
       handle: string | null;
       onboarded: boolean;
       authAt?: string | null;
@@ -20,7 +21,6 @@ declare module "next-auth" {
 
   interface User extends DefaultUser {
     avatarUrl?: string | null;
-    handleId?: string | null;
   }
 }
 
