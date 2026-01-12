@@ -22,8 +22,11 @@ export default function OrbitTooltip(props: {
   const { member, x, y, containerWidth, containerHeight } = props;
 
   const pad = 10;
-  const w = 280;
+  const idealW = 280;
   const h = member.tags?.length ? 92 : 74;
+
+  const maxW = Math.max(0, containerWidth - pad * 2);
+  const w = Math.min(idealW, maxW);
 
   const left = Math.max(pad, Math.min(x + 12, containerWidth - w - pad));
   const top = Math.max(pad, Math.min(y + 12, containerHeight - h - pad));
@@ -32,6 +35,8 @@ export default function OrbitTooltip(props: {
 
   return (
     <div
+      role="tooltip"
+      aria-label={member.name}
       className="pointer-events-none absolute z-10 rounded-xl border border-border bg-background/85 p-3 text-sm text-foreground shadow-sm backdrop-blur"
       style={{ left, top, width: w }}
     >
