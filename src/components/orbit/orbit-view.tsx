@@ -32,11 +32,8 @@ export default function OrbitView({ members, centerTitle, centerSubtitle }: Prop
 
   const [hover, setHover] = useState<Hover>(null);
 
-  const [levelOn, setLevelOn] = useState<Record<Level, boolean>>({
-    ADVOCATE: true,
-    CONTRIBUTOR: true,
-    PARTICIPANT: true,
-    EXPLORER: true,
+  const [levelOn, setLevelOn] = useState<Record<Level, boolean>>(() => {
+    return Object.fromEntries(LEVELS.map((lvl) => [lvl, true])) as Record<Level, boolean>;
   });
 
   const [tagQuery, setTagQuery] = useState("");
@@ -47,13 +44,20 @@ export default function OrbitView({ members, centerTitle, centerSubtitle }: Prop
 
     return members.filter((m) => {
       const lvl = m.orbitLevel as Level;
+      if (!(lvl in levelOn)) return false;
       if (!levelOn[lvl]) return false;
       if (!q) return true;
 
-      const tags = (m.tags ?? []).map((t) => t.toLowerCase());
-      return tags.some((t) => t.includes(q));
+      for (const raw of m.tags ?? []) {
+        if (raw.toLowerCase().includes(q)) return true;
+      }
+      return false;
     });
   }, [members, levelOn, tagQuery]);
+
+  useEffect(() => {
+    setHover(null);
+  }, [tagQuery, levelOn]);
 
   const shownCount = filteredMembers.length;
 
@@ -121,7 +125,10 @@ export default function OrbitView({ members, centerTitle, centerSubtitle }: Prop
           <button
             type="button"
             className="h-8 rounded-lg border border-border bg-background px-2 text-xs text-foreground/80 transition-opacity hover:text-foreground"
-            onClick={() => setResetToken((x) => x + 1)}
+            onClick={() => {
+              setHover(null);
+              setResetToken((x) => x + 1);
+            }}
             title="Reset zoom and pan"
           >
             Fit to view
