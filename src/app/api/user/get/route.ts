@@ -5,6 +5,7 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { errJson, okJson } from "@/lib/api-server";
 import { db } from "@/lib/database";
+import { resolveHandleNameForOwner, resolveUserIdFromHandle } from "@/lib/handle-registry";
 
 export const runtime = "nodejs";
 
@@ -47,33 +48,26 @@ export async function GET(req: NextRequest) {
     }
 
     const input = parsed.data;
+    const handleInput = input.handle; // raw user input
 
     // Default to self only when no identifier is provided.
-    if (!input.userId && !input.handle) {
+    if (!input.userId && !handleInput) {
       if (!actorId) {
         return errJson({ code: "UNAUTHORIZED", message: "Sign in required", status: 401 });
       }
     }
 
-    let targetUserId: string | null = input.userId ?? actorId;
-    let handleName: string | null = null;
+    // Resolve target user id (prefer explicit ids; support handle for public lookup).
+    let targetUserId: string | null = input.userId ?? null;
 
-    if (!targetUserId && input.handle) {
-      const owner = await db.handleOwner.findFirst({
-        where: {
-          ownerType: HandleOwnerType.USER,
-          handle: { name: input.handle },
-        },
-        select: { ownerId: true, handle: { select: { name: true } } },
-      });
-
-      if (!owner) {
-        return errJson({ code: "NOT_FOUND", message: "User not found", status: 404 });
-      }
-
-      targetUserId = owner.ownerId;
-      handleName = owner.handle.name;
+    if (!targetUserId && handleInput) {
+      const resolved = await resolveUserIdFromHandle(handleInput);
+      if (!resolved.ok) return errJson(resolved.error);
+      targetUserId = resolved.value;
     }
+
+    // Default to self when no identifier is provided.
+    if (!targetUserId) targetUserId = actorId;
 
     if (!targetUserId) {
       return errJson({ code: "UNAUTHORIZED", message: "Sign in required", status: 401 });
@@ -92,15 +86,7 @@ export async function GET(req: NextRequest) {
       return errJson({ code: "NOT_FOUND", message: "User not found", status: 404 });
     }
 
-    // If we didn’t resolve by handle, fetch the canonical handle name (if any).
-    if (!handleName) {
-      const owner = await db.handleOwner.findFirst({
-        where: { ownerType: HandleOwnerType.USER, ownerId: user.id },
-        select: { handle: { select: { name: true } } },
-      });
-
-      handleName = owner?.handle.name ?? null;
-    }
+    const handleName = await resolveHandleNameForOwner({ ownerType: HandleOwnerType.USER, ownerId: user.id });
 
     return okJson<GetUserOk>({
       user: {

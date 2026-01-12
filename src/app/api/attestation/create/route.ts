@@ -4,16 +4,23 @@ import { AttestationType, MembershipStatus, ScoringType } from "@prisma/client";
 import { db } from "@/lib/database";
 import { auth } from "@/lib/auth";
 import { errJson, okJson } from "@/lib/api-server";
+import { resolveCommunityIdFromHandle, resolveUserIdFromHandle } from "@/lib/handle-registry";
 import { requireCsrf } from "@/lib/security/csrf";
 import type { NextRequest } from "next/server";
 
 export const runtime = "nodejs";
 
 const BodySchema = z.object({
-  communityId: z.string().trim().min(1),
-  toUserId: z.string().trim().min(1),
+  // Prefer ids when provided; handles are supported for convenience.
+  communityId: z.string().trim().min(1).optional(),
+  communityHandle: z.string().trim().min(1).optional(),
+
+  toUserId: z.string().trim().min(1).optional(),
+  toHandle: z.string().trim().min(1).optional(),
+
   // Optional note shown to the receiver / community.
   note: z.string().trim().min(1).max(500).optional(),
+
   // Attestation type (Prisma enum).
   type: z.nativeEnum(AttestationType),
 });
@@ -51,7 +58,25 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const { communityId, toUserId, note, type } = parsed.data;
+    const { note, type } = parsed.data;
+
+    let communityId = parsed.data.communityId ?? null;
+    if (!communityId && parsed.data.communityHandle) {
+      const resolved = await resolveCommunityIdFromHandle(parsed.data.communityHandle);
+      if (!resolved.ok) return errJson(resolved.error);
+      communityId = resolved.value;
+    }
+
+    let toUserId = parsed.data.toUserId ?? null;
+    if (!toUserId && parsed.data.toHandle) {
+      const resolved = await resolveUserIdFromHandle(parsed.data.toHandle);
+      if (!resolved.ok) return errJson(resolved.error);
+      toUserId = resolved.value;
+    }
+
+    if (!communityId || !toUserId) {
+      return errJson({ code: "INVALID_REQUEST", message: "Invalid request", status: 400 });
+    }
 
     if (toUserId === userId) {
       return errJson({

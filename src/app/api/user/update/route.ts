@@ -5,6 +5,7 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { errJson, okJson } from "@/lib/api-server";
 import { db } from "@/lib/database";
+import { resolveHandleNameForOwner } from "@/lib/handle-registry";
 import { requireCsrf } from "@/lib/security/csrf";
 
 export const runtime = "nodejs";
@@ -41,7 +42,6 @@ const UpdateUserSchema = z
   .object({
     name: z.string().trim().min(1, "Name is required").max(80, "Name is too long").optional(),
     image: z.string().url("Invalid image url").nullable().optional(),
-
     headline: z.string().trim().min(1, "Headline is required").max(120, "Headline is too long").nullable().optional(),
     bio: z.string().trim().min(1, "Bio is required").max(2000, "Bio is too long").nullable().optional(),
     location: z.string().trim().min(1, "Location is required").max(120, "Location is too long").nullable().optional(),
@@ -109,40 +109,45 @@ export async function POST(req: NextRequest) {
 
     const input = parsed.data;
 
-    const updated = await db.user.update({
-      where: { id: userId },
-      data: {
-        ...(input.name !== undefined ? { name: input.name } : {}),
-        ...(input.image !== undefined ? { image: input.image } : {}),
-        ...(input.headline !== undefined ? { headline: input.headline } : {}),
-        ...(input.bio !== undefined ? { bio: input.bio } : {}),
-        ...(input.location !== undefined ? { location: input.location } : {}),
-        ...(input.links !== undefined ? { links: input.links } : {}),
-        ...(input.skills !== undefined ? { skills: input.skills } : {}),
-        ...(input.tags !== undefined ? { tags: input.tags } : {}),
-      },
-      select: {
-        id: true,
-        name: true,
-        image: true,
-        headline: true,
-        bio: true,
-        location: true,
-        links: true,
-        skills: true,
-        tags: true,
-      },
-    });
+    const { updated, handleName } = await db.$transaction(async (tx) => {
+      const [updated, handleName] = await Promise.all([
+        tx.user.update({
+          where: { id: userId },
+          data: {
+            ...(input.name !== undefined ? { name: input.name } : {}),
+            ...(input.image !== undefined ? { image: input.image } : {}),
+            ...(input.headline !== undefined ? { headline: input.headline } : {}),
+            ...(input.bio !== undefined ? { bio: input.bio } : {}),
+            ...(input.location !== undefined ? { location: input.location } : {}),
+            ...(input.links !== undefined ? { links: input.links } : {}),
+            ...(input.skills !== undefined ? { skills: input.skills } : {}),
+            ...(input.tags !== undefined ? { tags: input.tags } : {}),
+          },
+          select: {
+            id: true,
+            name: true,
+            image: true,
+            headline: true,
+            bio: true,
+            location: true,
+            links: true,
+            skills: true,
+            tags: true,
+          },
+        }),
+        resolveHandleNameForOwner(
+          { ownerType: HandleOwnerType.USER, ownerId: userId },
+          tx,
+        ),
+      ]);
 
-    const owner = await db.handleOwner.findFirst({
-      where: { ownerType: HandleOwnerType.USER, ownerId: updated.id },
-      select: { handle: { select: { name: true } } },
+      return { updated, handleName };
     });
 
     return okJson<UpdateUserOk>({
       user: {
         id: updated.id,
-        handle: owner?.handle.name ?? null,
+        handle: handleName,
         name: updated.name,
         image: updated.image,
         headline: updated.headline,

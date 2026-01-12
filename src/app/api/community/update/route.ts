@@ -10,6 +10,7 @@ import type { NextRequest } from "next/server";
 import { auth } from "@/lib/auth";
 import { errJson, okJson } from "@/lib/api-server";
 import { db } from "@/lib/database";
+import { resolveHandleNameForOwner } from "@/lib/handle-registry";
 import { requireCsrf } from "@/lib/security/csrf";
 import { CommunityUpdateSchema } from "@/lib/validations";
 
@@ -151,21 +152,16 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      const owner = await tx.handleOwner.findUnique({
-        where: {
-          ownerType_ownerId: {
-            ownerType: HandleOwnerType.COMMUNITY,
-            ownerId: community.id,
-          },
-        },
-        select: { handle: { select: { name: true } } },
-      });
+      const handleName = await resolveHandleNameForOwner(
+        { ownerType: HandleOwnerType.COMMUNITY, ownerId: community.id },
+        tx,
+      );
 
-      if (!owner) {
+      if (!handleName) {
         return { kind: "not_found" } as const;
       }
 
-      return { kind: "ok", community, handleName: owner.handle.name } as const;
+      return { kind: "ok", community, handleName } as const;
     });
 
     if (txResult.kind === "not_found") {

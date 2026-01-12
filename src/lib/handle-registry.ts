@@ -44,7 +44,15 @@ type HandleProblemMeta = {
 };
 
 export type HandleProblem = ApiError<HandleErrorCode, 400 | 409, HandleProblemMeta>;
+
 export type HandleResult<T> = Result<T, HandleProblem>;
+
+// --- Handle-to-ID resolver canonical error types ---
+export type HandleResolveErrorCode = "HANDLE_INVALID" | "USER_NOT_FOUND" | "COMMUNITY_NOT_FOUND";
+
+export type HandleResolveProblem = ApiError<HandleResolveErrorCode, 400 | 404>;
+
+export type HandleResolveResult<T> = Result<T, HandleResolveProblem>;
 
 /**
  * Cooldown period: time before the previous owner can reclaim.
@@ -99,6 +107,23 @@ function withMeta(base: HandleProblem, meta?: HandleProblemMeta): HandleProblem 
   return {
     ...base,
     meta: { reclaimUntil, availableAt },
+  };
+}
+
+
+function userNotFound(): HandleResolveProblem {
+  return {
+    code: "USER_NOT_FOUND",
+    message: "User not found",
+    status: 404
+  };
+}
+
+function communityNotFound(): HandleResolveProblem {
+  return {
+    code: "COMMUNITY_NOT_FOUND",
+    message: "Community not found",
+    status: 404
   };
 }
 
@@ -224,9 +249,9 @@ function evaluateClaimability(args: {
   return ok(null);
 }
 
-export async function resolveUserIdFromHandle(raw: string): Promise<string | null> {
+export async function resolveUserIdFromHandle(raw: string): Promise<HandleResolveResult<string>> {
   const parsed = parseHandle(raw);
-  if (!parsed.ok) return null;
+  if (!parsed.ok) return err(invalidHandle(parsed.error.message) as HandleResolveProblem);
 
   const row = await db.handle.findUnique({
     where: { name: parsed.value },
@@ -236,14 +261,14 @@ export async function resolveUserIdFromHandle(raw: string): Promise<string | nul
     },
   });
 
-  if (!row || row.status !== HandleStatus.ACTIVE) return null;
-  if (!row.owner || row.owner.ownerType !== HandleOwnerType.USER) return null;
-  return row.owner.ownerId;
+  if (!row || row.status !== HandleStatus.ACTIVE) return err(userNotFound());
+  if (!row.owner || row.owner.ownerType !== HandleOwnerType.USER) return err(userNotFound());
+  return ok(row.owner.ownerId);
 }
 
-export async function resolveCommunityIdFromHandle(raw: string): Promise<string | null> {
+export async function resolveCommunityIdFromHandle(raw: string): Promise<HandleResolveResult<string>> {
   const parsed = parseHandle(raw);
-  if (!parsed.ok) return null;
+  if (!parsed.ok) return err(invalidHandle(parsed.error.message) as HandleResolveProblem);
 
   const row = await db.handle.findUnique({
     where: { name: parsed.value },
@@ -253,11 +278,12 @@ export async function resolveCommunityIdFromHandle(raw: string): Promise<string 
     },
   });
 
-  if (!row || row.status !== HandleStatus.ACTIVE) return null;
-  if (!row.owner || row.owner.ownerType !== HandleOwnerType.COMMUNITY) return null;
-  return row.owner.ownerId;
+  if (!row || row.status !== HandleStatus.ACTIVE) return err(communityNotFound());
+  if (!row.owner || row.owner.ownerType !== HandleOwnerType.COMMUNITY) return err(communityNotFound());
+  return ok(row.owner.ownerId);
 }
 
+// Single owner (common case)
 export async function resolveHandleNameForOwner(
   args: { ownerType: HandleOwnerType; ownerId: string },
   client: Prisma.TransactionClient | typeof db = db,
@@ -272,18 +298,30 @@ export async function resolveHandleNameForOwner(
   return row.handle.name;
 }
 
-export async function resolveUserHandleName(
-  userId: string,
+// Batch (list routes)
+export async function resolveHandleNamesForOwners(
+  args: { ownerType: HandleOwnerType; ownerIds: string[] },
   client: Prisma.TransactionClient | typeof db = db,
-): Promise<string | null> {
-  return resolveHandleNameForOwner({ ownerType: HandleOwnerType.USER, ownerId: userId }, client);
-}
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (args.ownerIds.length === 0) return out;
 
-export async function resolveCommunityHandleName(
-  communityId: string,
-  client: Prisma.TransactionClient | typeof db = db,
-): Promise<string | null> {
-  return resolveHandleNameForOwner({ ownerType: HandleOwnerType.COMMUNITY, ownerId: communityId }, client);
+  const rows = await client.handleOwner.findMany({
+    where: {
+      ownerType: args.ownerType,
+      ownerId: { in: args.ownerIds },
+    },
+    select: {
+      ownerId: true,
+      handle: { select: { name: true, status: true } },
+    },
+  });
+
+  for (const r of rows) {
+    if (r.handle.status === HandleStatus.ACTIVE) out.set(r.ownerId, r.handle.name);
+  }
+
+  return out;
 }
 
 /**

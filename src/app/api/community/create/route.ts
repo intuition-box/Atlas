@@ -1,7 +1,6 @@
 import {
   CommunityConfigType,
   HandleOwnerType,
-  HandleStatus,
   MembershipRole,
   MembershipStatus,
   Prisma,
@@ -10,8 +9,9 @@ import type { NextRequest } from "next/server";
 
 import { auth } from "@/lib/auth";
 import { errJson, okJson } from "@/lib/api-server";
+import type { ApiError, ApiIssue } from "@/lib/api-shapes";
 import { db } from "@/lib/database";
-import { checkHandleForNewOwner } from "@/lib/handle-registry";
+import { checkHandlePubliclyAvailable, claimHandle } from "@/lib/handle-registry";
 import { requireCsrf } from "@/lib/security/csrf";
 import { CommunityCreateSchema } from "@/lib/validations";
 
@@ -31,17 +31,35 @@ type CreateCommunityOk = {
   };
 };
 
-type CreatedCommunity = {
-  id: string;
-  name: string;
-  description: string | null;
-  avatarUrl: string | null;
-  isMembershipOpen: boolean;
-  isPublicDirectory: boolean;
-  membershipConfig: unknown;
-  orbitConfig: unknown;
-  handleName: string;
-};
+function isApiIssue(x: unknown): x is ApiIssue {
+  if (typeof x !== "object" || x === null) return false;
+  const v = x as Record<string, unknown>;
+  if (!Array.isArray(v.path)) return false;
+  if (typeof v.message !== "string") return false;
+  // Path segments must be string | number (no symbols)
+  for (const seg of v.path) {
+    if (typeof seg !== "string" && typeof seg !== "number") return false;
+  }
+  return true;
+}
+
+function isApiErrorShape(e: unknown): e is ApiError<string, number, unknown> {
+  if (typeof e !== "object" || e === null) return false;
+  const v = e as Record<string, unknown>;
+
+  if (typeof v.code !== "string") return false;
+  if (typeof v.message !== "string") return false;
+  if (typeof v.status !== "number") return false;
+
+  if (v.issues !== undefined) {
+    if (!Array.isArray(v.issues)) return false;
+    for (const iss of v.issues) {
+      if (!isApiIssue(iss)) return false;
+    }
+  }
+
+  return true;
+}
 
 function prismaJson(
   v: unknown | null | undefined,
@@ -93,15 +111,15 @@ export async function POST(req: NextRequest) {
     const input = parsed.data;
     const now = new Date();
 
-    // Validate handle lifecycle + normalize.
-    const handleRes = await checkHandleForNewOwner({ handle: input.handle });
+    // Validate handle availability + normalize.
+    const handleRes = await checkHandlePubliclyAvailable({ handle: input.handle });
     if (!handleRes.ok) return errJson(handleRes.error);
 
     const handleName = handleRes.value.handle;
 
     // Create community + handle + owner membership atomically.
     // If handle-name uniqueness collides, re-check to return the correct lifecycle error.
-    let created: CreatedCommunity;
+    let created: CreateCommunityOk;
 
     try {
       created = await db.$transaction(async (tx) => {
@@ -139,57 +157,17 @@ export async function POST(req: NextRequest) {
           },
         });
 
-        // Create or activate the Handle row, then create the canonical owner mapping.
-        // We validated lifecycle before entering the tx, but we re-check here to be race-safe.
-        let handleId: string;
-
-        const existing = await tx.handle.findUnique({
-          where: { name: handleName },
-          select: { id: true, status: true },
+        // Claim the handle for this community (race-safe).
+        const claimed = await claimHandle(tx, {
+          ownerType: HandleOwnerType.COMMUNITY,
+          ownerId: community.id,
+          handle: handleName,
         });
 
-        if (!existing) {
-          const createdHandle = await tx.handle.create({
-            data: {
-              name: handleName,
-              status: HandleStatus.ACTIVE,
-            },
-            select: { id: true },
-          });
-          handleId = createdHandle.id;
-        } else {
-          if (existing.status === HandleStatus.ACTIVE) {
-            // Another transaction claimed it after our pre-check.
-            throw new Error("HANDLE_TAKEN");
-          }
-          if (existing.status === HandleStatus.RETIRED) {
-            throw new Error("HANDLE_RETIRED");
-          }
-
-          // RELEASED and claimable: activate and clear release metadata.
-          await tx.handle.update({
-            where: { id: existing.id },
-            data: {
-              status: HandleStatus.ACTIVE,
-              reclaimUntil: null,
-              availableAt: null,
-              lastOwnerType: null,
-              lastOwnerId: null,
-            },
-            select: { id: true },
-          });
-
-          handleId = existing.id;
+        if (!claimed.ok) {
+          // Bubble up the canonical handle-registry problem.
+          throw claimed.error;
         }
-
-        await tx.handleOwner.create({
-          data: {
-            handleId,
-            ownerType: HandleOwnerType.COMMUNITY,
-            ownerId: community.id,
-          },
-          select: { handleId: true },
-        });
 
         if (input.membershipConfig !== undefined) {
           await tx.communityConfigRevision.create({
@@ -217,40 +195,33 @@ export async function POST(req: NextRequest) {
           });
         }
 
-        return { ...community, handleName };
+        return {
+          community: {
+            ...community,
+            handle: claimed.value.handle,
+            membershipConfig: (community.membershipConfig as unknown) ?? null,
+            orbitConfig: (community.orbitConfig as unknown) ?? null,
+          },
+        };
       });
     } catch (e) {
-      if (e instanceof Error && (e.message === "HANDLE_TAKEN" || e.message === "HANDLE_RETIRED")) {
-        // Surface the lifecycle error when possible.
-        const again = await checkHandleForNewOwner({ handle: input.handle });
-        if (!again.ok) return errJson(again.error);
-
-        return errJson({ code: "HANDLE_TAKEN", message: "Handle is not available", status: 409 });
+      if (isApiErrorShape(e)) {
+        return errJson(e);
       }
 
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
-        const again = await checkHandleForNewOwner({ handle: input.handle });
+        // Unique constraint hit (either `Handle.name` or `Handle.key`). Re-check lifecycle for a canonical problem.
+        const again = await checkHandlePubliclyAvailable({ handle: input.handle });
         if (!again.ok) return errJson(again.error);
 
+        // Should be rare: if we still can't explain it, fall back to a safe generic.
         return errJson({ code: "HANDLE_TAKEN", message: "Handle is not available", status: 409 });
       }
 
       throw e;
     }
 
-    return okJson<CreateCommunityOk>({
-      community: {
-        id: created.id,
-        handle: created.handleName,
-        name: created.name,
-        description: created.description,
-        avatarUrl: created.avatarUrl,
-        isMembershipOpen: created.isMembershipOpen,
-        isPublicDirectory: created.isPublicDirectory,
-        membershipConfig: (created.membershipConfig as unknown) ?? null,
-        orbitConfig: (created.orbitConfig as unknown) ?? null,
-      },
-    });
+    return okJson<CreateCommunityOk>(created);
   } catch {
     return errJson({ code: "INTERNAL_ERROR", message: "Something went wrong", status: 500 });
   }

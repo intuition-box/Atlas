@@ -6,16 +6,40 @@ import { MembershipRole, MembershipStatus } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { errJson, okJson } from "@/lib/api-server";
 import { db } from "@/lib/database";
+import { resolveCommunityIdFromHandle, resolveUserIdFromHandle } from "@/lib/handle-registry";
 import { requireCsrf } from "@/lib/security/csrf";
 import { recomputeMemberScores } from "@/lib/scoring";
 
 export const runtime = "nodejs";
 
-const BodySchema = z.object({
-  applicationId: z.string().trim().min(1),
-  decision: z.enum(["APPROVE", "REJECT"] as const),
-  note: z.string().trim().min(1).max(500).optional(),
-});
+const BodySchema = z
+  .object({
+    // Prefer ids. Handles are supported for user-facing flows.
+    applicationId: z.string().trim().min(1).optional(),
+
+    communityId: z.string().trim().min(1).optional(),
+    communityHandle: z.string().trim().min(1).optional(),
+
+    userId: z.string().trim().min(1).optional(),
+    userHandle: z.string().trim().min(1).optional(),
+
+    decision: z.enum(["APPROVE", "REJECT"] as const),
+    note: z.string().trim().min(1).max(500).optional(),
+  })
+  .superRefine((v, ctx) => {
+    if (v.applicationId) return;
+
+    const hasCommunity = Boolean(v.communityId || v.communityHandle);
+    const hasUser = Boolean(v.userId || v.userHandle);
+
+    if (!hasCommunity || !hasUser) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["applicationId"],
+        message: "applicationId or (community + user) is required",
+      });
+    }
+  });
 
 type ReviewOk = {
   membership: {
@@ -58,20 +82,50 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const { applicationId, decision, note } = parsed.data;
+    const { decision, note } = parsed.data;
 
-    const app = await db.application.findUnique({
-      where: { id: applicationId },
-      select: {
-        id: true,
-        communityId: true,
-        userId: true,
-        status: true,
-      },
-    });
+    let app:
+      | {
+          id: string;
+          communityId: string;
+          userId: string;
+          status: MembershipStatus;
+        }
+      | null = null;
+
+    if (parsed.data.applicationId) {
+      app = await db.application.findUnique({
+        where: { id: parsed.data.applicationId },
+        select: { id: true, communityId: true, userId: true, status: true },
+      });
+    } else {
+      let communityId = parsed.data.communityId ?? null;
+      if (!communityId && parsed.data.communityHandle) {
+        const resolved = await resolveCommunityIdFromHandle(parsed.data.communityHandle);
+        if (!resolved.ok) return errJson(resolved.error);
+        communityId = resolved.value;
+      }
+
+      let targetUserId = parsed.data.userId ?? null;
+      if (!targetUserId && parsed.data.userHandle) {
+        const resolved = await resolveUserIdFromHandle(parsed.data.userHandle);
+        if (!resolved.ok) return errJson(resolved.error);
+        targetUserId = resolved.value;
+      }
+
+      if (!communityId || !targetUserId) {
+        return errJson({ code: "INVALID_REQUEST", message: "Invalid request", status: 400 });
+      }
+
+      app = await db.application.findFirst({
+        where: { communityId, userId: targetUserId },
+        select: { id: true, communityId: true, userId: true, status: true },
+        orderBy: { createdAt: "desc" },
+      });
+    }
 
     if (!app) {
-      return errJson({ code: "NOT_FOUND", message: "Application not found", status: 404 });
+      return errJson({ code: "NOT_FOUND", message: "Membership request not found", status: 404 });
     }
 
     // Reviewer must be an approved member with review privileges.

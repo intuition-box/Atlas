@@ -1,6 +1,5 @@
 import {
   HandleOwnerType,
-  HandleStatus,
   MembershipRole,
   MembershipStatus,
   Prisma,
@@ -11,7 +10,7 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { errJson, okJson } from "@/lib/api-server";
 import { db } from "@/lib/database";
-import { DEFAULT_COOLDOWN_DAYS, DEFAULT_RECLAIM_DAYS } from "@/lib/handle-registry";
+import { releaseOwnerHandle } from "@/lib/handle-registry";
 import { requireCsrf } from "@/lib/security/csrf";
 
 export const runtime = "nodejs";
@@ -23,12 +22,6 @@ type DeleteCommunityOk = {
 const DeleteCommunitySchema = z.object({
   communityId: z.string().min(1, "communityId is required"),
 });
-
-function addDays(d: Date, days: number): Date {
-  const out = new Date(d);
-  out.setUTCDate(out.getUTCDate() + days);
-  return out;
-}
 
 export async function POST(req: NextRequest) {
   try {
@@ -81,79 +74,30 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const now = new Date();
-    const reclaimUntil = addDays(now, DEFAULT_COOLDOWN_DAYS);
-    const availableAt = addDays(reclaimUntil, DEFAULT_RECLAIM_DAYS);
-
-    await db.$transaction(async (tx) => {
-      const mapping = await tx.handleOwner.findUnique({
-        where: {
-          ownerType_ownerId: {
-            ownerType: HandleOwnerType.COMMUNITY,
-            ownerId: communityId,
-          },
-        },
-        select: { handleId: true },
+    const txResult = await db.$transaction(async (tx) => {
+      const released = await releaseOwnerHandle(tx, {
+        ownerType: HandleOwnerType.COMMUNITY,
+        ownerId: communityId,
       });
 
-      if (!mapping) {
-        // This should never happen; keep error code stable for clients.
-        throw new Error("HANDLE_MAPPING_MISSING");
-      }
+      if (!released.ok) return released;
 
-      const released = await tx.handle.updateMany({
-        where: {
-          id: mapping.handleId,
-          status: HandleStatus.ACTIVE,
-        },
-        data: {
-          status: HandleStatus.RELEASED,
-          lastOwnerType: HandleOwnerType.COMMUNITY,
-          lastOwnerId: communityId,
-          reclaimUntil,
-          availableAt,
-        },
-      });
-
-      if (released.count !== 1) {
-        throw new Error("HANDLE_RELEASE_FAILED");
-      }
-
-      await tx.handleOwner.deleteMany({
-        where: {
-          handleId: mapping.handleId,
-          ownerType: HandleOwnerType.COMMUNITY,
-          ownerId: communityId,
-        },
-      });
-
-      // Cleanup rows that might use RESTRICT in some schemas.
       await tx.application.deleteMany({ where: { communityId } });
       await tx.membership.deleteMany({ where: { communityId } });
       await tx.scoringEvent.deleteMany({ where: { communityId } });
       await tx.attestation.deleteMany({ where: { communityId } });
 
       await tx.community.delete({ where: { id: communityId } });
+
+      return { ok: true as const };
     });
+
+    if ("ok" in txResult && txResult.ok === false) {
+      return errJson(txResult.error);
+    }
 
     return okJson<DeleteCommunityOk>({ communityId });
   } catch (e) {
-    if (e instanceof Error && e.message === "HANDLE_MAPPING_MISSING") {
-      return errJson({
-        code: "HANDLE_NOT_AVAILABLE",
-        message: "Community handle mapping is missing. Please try again.",
-        status: 409,
-      });
-    }
-
-    if (e instanceof Error && e.message === "HANDLE_RELEASE_FAILED") {
-      return errJson({
-        code: "HANDLE_NOT_AVAILABLE",
-        message: "Community handle could not be released. Please try again.",
-        status: 409,
-      });
-    }
-
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2025") {
       return errJson({ code: "NOT_FOUND", message: "Community not found", status: 404 });
     }

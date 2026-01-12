@@ -10,6 +10,7 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { errJson, okJson } from "@/lib/api-server";
 import { db } from "@/lib/database";
+import { resolveCommunityIdFromHandle, resolveUserIdFromHandle } from "@/lib/handle-registry";
 import { requireCsrf } from "@/lib/security/csrf";
 
 export const runtime = "nodejs";
@@ -32,26 +33,47 @@ const ALLOWED_ROLES = new Set<MembershipRole>([
 
 const SetMembershipRoleSchema = z
   .object({
-    membershipId: z.string().min(1).optional(),
-    userId: z.string().min(1).optional(),
-    communityId: z.string().min(1).optional(),
+    membershipId: z.string().trim().min(1).optional(),
+
+    // Prefer ids; allow handles for user-facing flows.
+    userId: z.string().trim().min(1).optional(),
+    userHandle: z.string().trim().min(1).optional(),
+
+    communityId: z.string().trim().min(1).optional(),
+    communityHandle: z.string().trim().min(1).optional(),
+
     role: z.nativeEnum(MembershipRole),
   })
-  .refine(
-    (v) => Boolean(v.membershipId || (v.userId && v.communityId)),
-    {
-      message: "membershipId or (userId + communityId) is required",
-      path: ["membershipId"],
-    },
-  )
-  .refine((v) => ALLOWED_ROLES.has(v.role), {
-    message: "Role is not assignable via this endpoint",
-    path: ["role"],
-  })
-  .refine((v) => v.role !== MembershipRole.OWNER, {
+  .superRefine((v, ctx) => {
+    // Addressing: membershipId OR (user + community)
+    if (!v.membershipId) {
+      const hasUser = Boolean(v.userId || v.userHandle);
+      const hasCommunity = Boolean(v.communityId || v.communityHandle);
+      if (!hasUser || !hasCommunity) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["membershipId"],
+          message: "membershipId or (user + community) is required",
+        });
+      }
+    }
+
+    if (!ALLOWED_ROLES.has(v.role)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["role"],
+        message: "Role is not assignable via this endpoint",
+      });
+    }
+
     // Ownership transfer should be its own explicit flow.
-    message: "OWNER role cannot be assigned via this endpoint",
-    path: ["role"],
+    if (v.role === MembershipRole.OWNER) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["role"],
+        message: "OWNER role cannot be assigned via this endpoint",
+      });
+    }
   });
 
 export async function POST(req: NextRequest) {
@@ -83,6 +105,31 @@ export async function POST(req: NextRequest) {
 
     const input = parsed.data;
 
+    let userId = input.userId ?? null;
+    let communityId = input.communityId ?? null;
+
+    if (!input.membershipId) {
+      if (!communityId && input.communityHandle) {
+        const resolved = await resolveCommunityIdFromHandle(input.communityHandle);
+        if (!resolved.ok) return errJson(resolved.error);
+        communityId = resolved.value;
+      }
+
+      if (!userId && input.userHandle) {
+        const resolved = await resolveUserIdFromHandle(input.userHandle);
+        if (!resolved.ok) return errJson(resolved.error);
+        userId = resolved.value;
+      }
+    }
+
+    // From here on, if we are not addressing by membershipId, ids must be present.
+    const targetUserId = input.membershipId ? null : userId;
+    const targetCommunityId = input.membershipId ? null : communityId;
+
+    if (!input.membershipId && (!targetUserId || !targetCommunityId)) {
+      return errJson({ code: "INVALID_REQUEST", message: "Invalid request", status: 400 });
+    }
+
     const result = await db.$transaction(async (tx) => {
       const membership = input.membershipId
         ? await tx.membership.findUnique({
@@ -98,8 +145,8 @@ export async function POST(req: NextRequest) {
         : await tx.membership.findUnique({
             where: {
               userId_communityId: {
-                userId: input.userId!,
-                communityId: input.communityId!,
+                userId: targetUserId!,
+                communityId: targetCommunityId!,
               },
             },
             select: {
@@ -158,13 +205,11 @@ export async function POST(req: NextRequest) {
       });
 
       // Audit / preferences feed (best-effort): record a membership role change.
-      const typeFromEnum = (name: string): ScoringType | undefined =>
-        (ScoringType as any)[name] as ScoringType | undefined;
-
+      const scoringTypes = ScoringType as unknown as Record<string, ScoringType>;
       const type =
-        typeFromEnum("MEMBERSHIP_ROLE_CHANGED") ??
-        typeFromEnum("ROLE_CHANGED") ??
-        typeFromEnum("MEMBERSHIP_CHANGED");
+        scoringTypes.MEMBERSHIP_ROLE_CHANGED ??
+        scoringTypes.ROLE_CHANGED ??
+        scoringTypes.MEMBERSHIP_CHANGED;
 
       if (type) {
         await tx.scoringEvent.create({

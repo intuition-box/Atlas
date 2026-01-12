@@ -10,6 +10,7 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { errJson, okJson } from "@/lib/api-server";
 import { db } from "@/lib/database";
+import { resolveCommunityIdFromHandle, resolveUserIdFromHandle } from "@/lib/handle-registry";
 import { requireCsrf } from "@/lib/security/csrf";
 
 export const runtime = "nodejs";
@@ -26,15 +27,25 @@ type SetMembershipStatusOk = {
 
 const SetMembershipStatusSchema = z
   .object({
-    membershipId: z.string().min(1).optional(),
-    userId: z.string().min(1).optional(),
-    communityId: z.string().min(1).optional(),
+    membershipId: z.string().trim().min(1).optional(),
+
+    // Prefer ids; allow handles for user-facing flows.
+    userId: z.string().trim().min(1).optional(),
+    userHandle: z.string().trim().min(1).optional(),
+
+    communityId: z.string().trim().min(1).optional(),
+    communityHandle: z.string().trim().min(1).optional(),
+
     status: z.nativeEnum(MembershipStatus),
   })
   .refine(
-    (v) => Boolean(v.membershipId || (v.userId && v.communityId)),
+    (v) =>
+      Boolean(
+        v.membershipId ||
+          ((v.userId || v.userHandle) && (v.communityId || v.communityHandle)),
+      ),
     {
-      message: "membershipId or (userId + communityId) is required",
+      message: "membershipId or (user + community) is required",
       path: ["membershipId"],
     },
   );
@@ -69,6 +80,30 @@ export async function POST(req: NextRequest) {
     const input = parsed.data;
     const now = new Date();
 
+    let userId = input.userId ?? null;
+    let communityId = input.communityId ?? null;
+
+    if (!input.membershipId) {
+      if (!communityId && input.communityHandle) {
+        const resolved = await resolveCommunityIdFromHandle(input.communityHandle);
+        if (!resolved.ok) return errJson(resolved.error);
+        communityId = resolved.value;
+      }
+
+      if (!userId && input.userHandle) {
+        const resolved = await resolveUserIdFromHandle(input.userHandle);
+        if (!resolved.ok) return errJson(resolved.error);
+        userId = resolved.value;
+      }
+    }
+
+    const targetUserId = input.membershipId ? null : userId;
+    const targetCommunityId = input.membershipId ? null : communityId;
+
+    if (!input.membershipId && (!targetUserId || !targetCommunityId)) {
+      return errJson({ code: "INVALID_REQUEST", message: "Invalid request", status: 400 });
+    }
+
     const result = await db.$transaction(async (tx) => {
       const membership = input.membershipId
         ? await tx.membership.findUnique({
@@ -85,8 +120,8 @@ export async function POST(req: NextRequest) {
         : await tx.membership.findUnique({
             where: {
               userId_communityId: {
-                userId: input.userId!,
-                communityId: input.communityId!,
+                userId: targetUserId!,
+                communityId: targetCommunityId!,
               },
             },
             select: {
@@ -157,15 +192,14 @@ export async function POST(req: NextRequest) {
 
       // Audit / preferences feed (best-effort): record a membership status change.
       // We resolve enum members defensively so this route won’t break if naming differs.
-      const typeFromEnum = (name: string): ScoringType | undefined =>
-        (ScoringType as any)[name] as ScoringType | undefined;
+      const scoringTypes = ScoringType as unknown as Record<string, ScoringType>;
 
       const type =
         updated.status === MembershipStatus.BANNED
-          ? (typeFromEnum("MEMBERSHIP_BANNED") ?? typeFromEnum("BANNED"))
+          ? (scoringTypes.MEMBERSHIP_BANNED ?? scoringTypes.BANNED)
           : prevStatus === MembershipStatus.BANNED && updated.status === MembershipStatus.APPROVED
-            ? (typeFromEnum("MEMBERSHIP_UNBANNED") ?? typeFromEnum("UNBANNED"))
-            : (typeFromEnum("MEMBERSHIP_STATUS_CHANGED") ?? typeFromEnum("STATUS_CHANGED"));
+            ? (scoringTypes.MEMBERSHIP_UNBANNED ?? scoringTypes.UNBANNED)
+            : (scoringTypes.MEMBERSHIP_STATUS_CHANGED ?? scoringTypes.STATUS_CHANGED);
 
       if (type) {
         await tx.scoringEvent.create({

@@ -4,7 +4,10 @@ import { HandleOwnerType, MembershipStatus } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { errJson, okJson } from "@/lib/api-server";
 import { db } from "@/lib/database";
-import { resolveCommunityIdFromHandle } from "@/lib/handle-registry";
+import {
+  resolveCommunityIdFromHandle,
+  resolveHandleNameForOwner,
+} from "@/lib/handle-registry";
 import { CommunityGetSchema } from "@/lib/validations";
 
 export const runtime = "nodejs";
@@ -42,9 +45,13 @@ export async function GET(req: NextRequest) {
 
     const input = parsed.data;
 
-    const communityId =
-      input.communityId ??
-      (input.handle ? await resolveCommunityIdFromHandle(input.handle) : null);
+    let communityId = input.communityId ?? null;
+
+    if (!communityId && input.handle) {
+      const resolved = await resolveCommunityIdFromHandle(input.handle);
+      if (!resolved.ok) return errJson(resolved.error);
+      communityId = resolved.value;
+    }
 
     if (!communityId) {
       return errJson({ code: "NOT_FOUND", message: "Community not found", status: 404 });
@@ -88,24 +95,19 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const owner = await db.handleOwner.findUnique({
-      where: {
-        ownerType_ownerId: {
-          ownerType: HandleOwnerType.COMMUNITY,
-          ownerId: row.id,
-        },
-      },
-      select: { handle: { select: { name: true } } },
-    });
+    const handleName = await resolveHandleNameForOwner(
+      { ownerType: HandleOwnerType.COMMUNITY, ownerId: row.id },
+      db,
+    );
 
-    if (!owner) {
+    if (!handleName) {
       return errJson({ code: "NOT_FOUND", message: "Community not found", status: 404 });
     }
 
     return okJson<CommunityGetOk>({
       community: {
         id: row.id,
-        handle: owner.handle.name,
+        handle: handleName,
         name: row.name,
         description: row.description,
         avatarUrl: row.avatarUrl,

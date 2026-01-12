@@ -11,6 +11,7 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { errJson, okJson } from "@/lib/api-server";
 import { db } from "@/lib/database";
+import { resolveCommunityIdFromHandle, resolveUserIdFromHandle } from "@/lib/handle-registry";
 import { requireCsrf } from "@/lib/security/csrf";
 
 export const runtime = "nodejs";
@@ -26,11 +27,33 @@ type SetOrbitOk = {
   changed: boolean;
 };
 
-const SetOrbitSchema = z.object({
-  communityId: z.string().min(1, "communityId is required"),
-  userId: z.string().min(1, "userId is required"),
-  orbitLevelOverride: z.nativeEnum(OrbitLevel).nullable(),
-});
+const SetOrbitSchema = z
+  .object({
+    communityId: z.string().trim().min(1).optional(),
+    communityHandle: z.string().trim().min(1).optional(),
+
+    userId: z.string().trim().min(1).optional(),
+    userHandle: z.string().trim().min(1).optional(),
+
+    orbitLevelOverride: z.nativeEnum(OrbitLevel).nullable(),
+  })
+  .superRefine((v, ctx) => {
+    if (!v.communityId && !v.communityHandle) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["communityId"],
+        message: "communityId or communityHandle is required",
+      });
+    }
+
+    if (!v.userId && !v.userHandle) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["userId"],
+        message: "userId or userHandle is required",
+      });
+    }
+  });
 
 export async function POST(req: NextRequest) {
   try {
@@ -61,10 +84,28 @@ export async function POST(req: NextRequest) {
 
     const input = parsed.data;
 
+    let communityId = input.communityId ?? null;
+    if (!communityId && input.communityHandle) {
+      const resolved = await resolveCommunityIdFromHandle(input.communityHandle);
+      if (!resolved.ok) return errJson(resolved.error);
+      communityId = resolved.value;
+    }
+
+    let userId = input.userId ?? null;
+    if (!userId && input.userHandle) {
+      const resolved = await resolveUserIdFromHandle(input.userHandle);
+      if (!resolved.ok) return errJson(resolved.error);
+      userId = resolved.value;
+    }
+
+    if (!communityId || !userId) {
+      return errJson({ code: "INVALID_REQUEST", message: "Invalid request", status: 400 });
+    }
+
     const result = await db.$transaction(async (tx) => {
       // Actor must be an approved owner/admin of the community.
       const actorMembership = await tx.membership.findUnique({
-        where: { userId_communityId: { userId: actorId, communityId: input.communityId } },
+        where: { userId_communityId: { userId: actorId, communityId } },
         select: { status: true, role: true },
       });
 
@@ -81,7 +122,7 @@ export async function POST(req: NextRequest) {
 
       const membership = await tx.membership.findUnique({
         where: {
-          userId_communityId: { userId: input.userId, communityId: input.communityId },
+          userId_communityId: { userId, communityId },
         },
         select: {
           id: true,
@@ -118,19 +159,20 @@ export async function POST(req: NextRequest) {
 
       // Audit / preferences feed (best-effort): record an orbit override change.
       // We resolve the enum member defensively so this route stays compatible if the enum name changes.
+      const scoringTypes = ScoringType as unknown as Record<string, ScoringType>;
       const orbitOverrideType =
-        ((ScoringType as any).ORBIT_OVERRIDE as ScoringType | undefined) ??
-        ((ScoringType as any).ORBIT_LEVEL_OVERRIDE as ScoringType | undefined) ??
-        ((ScoringType as any).ORBIT_CHANGED as ScoringType | undefined);
+        scoringTypes.ORBIT_OVERRIDE ??
+        scoringTypes.ORBIT_LEVEL_OVERRIDE ??
+        scoringTypes.ORBIT_CHANGED;
 
       if (orbitOverrideType) {
         await tx.scoringEvent.create({
           data: {
-            communityId: input.communityId,
+            communityId,
             actorId,
             type: orbitOverrideType,
             metadata: {
-              subjectUserId: input.userId,
+              subjectUserId: userId,
               orbitLevelOverride: nextOverride,
             },
           },
@@ -161,7 +203,7 @@ export async function POST(req: NextRequest) {
           (mod as any).recomputeOrbitForCommunity;
 
         if (typeof recompute === "function") {
-          await recompute({ communityId: input.communityId });
+          await recompute({ communityId });
         }
       } catch {
         // Ignore recompute failures; membership override is already persisted.
@@ -169,7 +211,7 @@ export async function POST(req: NextRequest) {
 
       const fresh = await db.membership.findUnique({
         where: {
-          userId_communityId: { userId: input.userId, communityId: input.communityId },
+          userId_communityId: { userId, communityId },
         },
         select: {
           id: true,

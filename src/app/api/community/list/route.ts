@@ -5,6 +5,7 @@ import { z } from "zod";
 import { db } from "@/lib/database";
 import { auth } from "@/lib/auth";
 import { errJson, okJson } from "@/lib/api-server";
+import { resolveHandleNamesForOwners } from "@/lib/handle-registry";
 
 export const runtime = "nodejs";
 
@@ -128,20 +129,10 @@ export async function GET(req: NextRequest) {
       return okJson<CommunityListOk>({ communities: [], nextCursor });
     }
 
-    // Fetch canonical handles from HandleOwner mapping.
-    const owners = await db.handleOwner.findMany({
-      where: {
-        ownerType: HandleOwnerType.COMMUNITY,
-        ownerId: { in: page.map((c) => c.id) },
-      },
-      select: {
-        ownerId: true,
-        handle: { select: { name: true } },
-      },
+    const handleByCommunityId = await resolveHandleNamesForOwners({
+      ownerType: HandleOwnerType.COMMUNITY,
+      ownerIds: page.map((c) => c.id),
     });
-
-    const handleByCommunityId = new Map<string, string>();
-    for (const o of owners) handleByCommunityId.set(o.ownerId, o.handle.name);
 
     // Only return rows with a valid handle mapping.
     const communities: CommunityListItem[] = page

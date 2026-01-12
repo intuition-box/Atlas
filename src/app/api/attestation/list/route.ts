@@ -3,6 +3,11 @@ import { z } from "zod";
 
 import { AttestationType, HandleOwnerType, MembershipStatus } from "@prisma/client";
 
+import {
+  resolveCommunityIdFromHandle,
+  resolveHandleNamesForOwners,
+  resolveUserIdFromHandle,
+} from "@/lib/handle-registry";
 import { auth } from "@/lib/auth";
 import { errJson, okJson } from "@/lib/api-server";
 import { db } from "@/lib/database";
@@ -10,10 +15,16 @@ import { db } from "@/lib/database";
 export const runtime = "nodejs";
 
 const QuerySchema = z.object({
-  communityId: z.string().trim().min(1),
+  // Prefer ids when provided; handles are supported for convenience.
+  communityId: z.string().trim().min(1).optional(),
+  communityHandle: z.string().trim().min(1).optional(),
+
   // Filter by receiver / author.
   toUserId: z.string().trim().min(1).optional(),
   fromUserId: z.string().trim().min(1).optional(),
+  toHandle: z.string().trim().min(1).optional(),
+  fromHandle: z.string().trim().min(1).optional(),
+
   type: z.nativeEnum(AttestationType).optional(),
 
   take: z.coerce.number().int().min(1).max(100).optional(),
@@ -53,8 +64,13 @@ export async function GET(req: NextRequest) {
     const sp = req.nextUrl.searchParams;
     const parsed = QuerySchema.safeParse({
       communityId: sp.get("communityId") ?? undefined,
+      communityHandle: sp.get("communityHandle") ?? undefined,
+
       toUserId: sp.get("toUserId") ?? undefined,
       fromUserId: sp.get("fromUserId") ?? undefined,
+      toHandle: sp.get("toHandle") ?? undefined,
+      fromHandle: sp.get("fromHandle") ?? undefined,
+
       type: sp.get("type") ?? undefined,
       take: sp.get("take") ?? undefined,
       cursor: sp.get("cursor") ?? undefined,
@@ -72,8 +88,33 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    const { communityId, toUserId, fromUserId, type, cursor } = parsed.data;
+    const { type, cursor } = parsed.data;
     const take = parsed.data.take ?? 50;
+
+    let communityId = parsed.data.communityId ?? null;
+    if (!communityId && parsed.data.communityHandle) {
+      const resolved = await resolveCommunityIdFromHandle(parsed.data.communityHandle);
+      if (!resolved.ok) return errJson(resolved.error);
+      communityId = resolved.value;
+    }
+
+    let toUserId = parsed.data.toUserId ?? null;
+    if (!toUserId && parsed.data.toHandle) {
+      const resolved = await resolveUserIdFromHandle(parsed.data.toHandle);
+      if (!resolved.ok) return errJson(resolved.error);
+      toUserId = resolved.value;
+    }
+
+    let fromUserId = parsed.data.fromUserId ?? null;
+    if (!fromUserId && parsed.data.fromHandle) {
+      const resolved = await resolveUserIdFromHandle(parsed.data.fromHandle);
+      if (!resolved.ok) return errJson(resolved.error);
+      fromUserId = resolved.value;
+    }
+
+    if (!communityId) {
+      return errJson({ code: "INVALID_REQUEST", message: "Invalid request", status: 400 });
+    }
 
     // Community visibility gate: if not public, require membership.
     const community = await db.community.findUnique({
@@ -158,19 +199,10 @@ export async function GET(req: NextRequest) {
       new Set(page.flatMap((a) => [a.fromUserId, a.toUserId])),
     );
 
-    const owners = await db.handleOwner.findMany({
-      where: {
-        ownerType: HandleOwnerType.USER,
-        ownerId: { in: userIds },
-      },
-      select: {
-        ownerId: true,
-        handle: { select: { name: true } },
-      },
+    const handleByUserId = await resolveHandleNamesForOwners({
+      ownerType: HandleOwnerType.USER,
+      ownerIds: userIds,
     });
-
-    const handleByUserId = new Map<string, string>();
-    for (const o of owners) handleByUserId.set(o.ownerId, o.handle.name);
 
     const attestations: AttestationListItem[] = page.map((a) => {
       const fromHandle = handleByUserId.get(a.fromUserId) ?? null;

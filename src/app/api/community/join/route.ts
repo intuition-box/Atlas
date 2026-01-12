@@ -69,8 +69,13 @@ export async function POST(req: NextRequest): Promise<NextResponse<ApiEnvelope<J
 
   const input = parsed.data;
 
-  const communityId =
-    input.communityId ?? (input.handle ? await resolveCommunityIdFromHandle(input.handle) : null);
+  let communityId: string | null = input.communityId ?? null;
+
+  if (!communityId && input.handle) {
+    const resolved = await resolveCommunityIdFromHandle(input.handle);
+    if (!resolved.ok) return jsonError(resolved.error);
+    communityId = resolved.value;
+  }
 
   if (!communityId) {
     return jsonError({ code: "NOT_FOUND", message: "Community not found", status: 404 });

@@ -1,5 +1,3 @@
-
-
 import { HandleOwnerType, Prisma } from "@prisma/client";
 import type { NextRequest } from "next/server";
 import { z } from "zod";
@@ -10,7 +8,7 @@ import { db } from "@/lib/database";
 import { requireCsrf } from "@/lib/security/csrf";
 import { HandleSchema } from "@/lib/handle";
 
-import { claimHandle } from "@/lib/handle-registry";
+import { claimHandle, resolveHandleNameForOwner } from "@/lib/handle-registry";
 
 export const runtime = "nodejs";
 
@@ -29,6 +27,10 @@ type OnboardOk = {
   };
 };
 
+type TxResult =
+  | { ok: true; value: OnboardOk }
+  | { ok: false; error: Parameters<typeof errJson>[0] };
+
 function uniqStrings(values: string[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -41,11 +43,6 @@ function uniqStrings(values: string[]): string[] {
   }
   return out;
 }
-
-function normalizeHandle(raw: string): string {
-  return raw.trim().toLowerCase();
-}
-
 
 const OnboardSchema = z.object({
   handle: HandleSchema,
@@ -121,108 +118,87 @@ export async function POST(req: NextRequest) {
     }
 
     const input = parsed.data;
-    const desired = normalizeHandle(input.handle);
+    const handle = input.handle; // canonical from HandleSchema
 
-    // Onboarding should not overwrite an existing different handle.
-    const existingOwner = await db.handleOwner.findFirst({
-      where: { ownerType: HandleOwnerType.USER, ownerId: userId },
-      select: { handle: { select: { name: true } } },
-    });
+    const txResult: TxResult = await db.$transaction(async (tx) => {
+      // Onboarding should not overwrite an existing different handle.
+      const existingHandle = await resolveHandleNameForOwner(
+        { ownerType: HandleOwnerType.USER, ownerId: userId },
+        tx,
+      );
 
-    if (existingOwner && existingOwner.handle.name !== desired) {
-      return errJson({
-        code: "HANDLE_CONFLICT",
-        message: "User already has a handle",
-        status: 409,
-        meta: { currentHandle: existingOwner.handle.name },
+      if (existingHandle && existingHandle !== handle) {
+        return {
+          ok: false,
+          error: {
+            code: "HANDLE_CONFLICT",
+            message: "User already has a handle",
+            status: 409,
+            meta: { currentHandle: existingHandle },
+          },
+        };
+      }
+
+      // Claim (or re-claim) the handle using canonical policy + race-safe logic.
+      const claim = await claimHandle(tx, {
+        ownerType: HandleOwnerType.USER,
+        ownerId: userId,
+        handle,
       });
-    }
 
-    // Claim (or re-claim) the handle using canonical policy + race-safe logic.
-    const claim = await claimHandle({
-      ownerType: "USER",
-      ownerId: userId,
-      handle: input.handle,
-    });
+      if (!claim.ok) {
+        return { ok: false, error: claim.error };
+      }
 
-    if (!claim.ok) {
-      const status = claim.error.status ?? 409;
-      return errJson({
-        code: claim.error.code,
-        message: claim.error.message,
-        status,
-        meta: {
-          reclaimUntil: claim.error.reclaimUntil ?? undefined,
-          availableAt: claim.error.availableAt ?? undefined,
+      const handleName = claim.value.handle;
+
+      const updated = await tx.user.update({
+        where: { id: userId },
+        data: {
+          ...(input.name !== undefined ? { name: input.name } : {}),
+          ...(input.image !== undefined ? { image: input.image } : {}),
+          ...(input.headline !== undefined ? { headline: input.headline } : {}),
+          ...(input.bio !== undefined ? { bio: input.bio } : {}),
+          ...(input.location !== undefined ? { location: input.location } : {}),
+          ...(input.links !== undefined ? { links: input.links } : {}),
+          ...(input.skills !== undefined ? { skills: input.skills } : {}),
+          ...(input.tags !== undefined ? { tags: input.tags } : {}),
+        },
+        select: {
+          id: true,
+          name: true,
+          image: true,
+          headline: true,
+          bio: true,
+          location: true,
+          links: true,
+          skills: true,
+          tags: true,
         },
       });
-    }
 
-    const updated = await db.user.update({
-      where: { id: userId },
-      data: {
-        ...(input.name !== undefined ? { name: input.name } : {}),
-        ...(input.image !== undefined ? { image: input.image } : {}),
-        ...(input.headline !== undefined ? { headline: input.headline } : {}),
-        ...(input.bio !== undefined ? { bio: input.bio } : {}),
-        ...(input.location !== undefined ? { location: input.location } : {}),
-        ...(input.links !== undefined ? { links: input.links } : {}),
-        ...(input.skills !== undefined ? { skills: input.skills } : {}),
-        ...(input.tags !== undefined ? { tags: input.tags } : {}),
-      },
-      select: {
-        id: true,
-        name: true,
-        image: true,
-        headline: true,
-        bio: true,
-        location: true,
-        links: true,
-        skills: true,
-        tags: true,
-      },
+      return {
+        ok: true,
+        value: {
+          user: {
+            id: updated.id,
+            handle: handleName,
+            name: updated.name,
+            image: updated.image,
+            headline: updated.headline,
+            bio: updated.bio,
+            location: updated.location,
+            links: Array.isArray(updated.links) ? (updated.links as string[]) : [],
+            skills: Array.isArray(updated.skills) ? (updated.skills as string[]) : [],
+            tags: Array.isArray(updated.tags) ? (updated.tags as string[]) : [],
+          },
+        },
+      };
     });
 
-    // Fetch canonical handle name (source of truth).
-    const owner = await db.handleOwner.findFirst({
-      where: { ownerType: HandleOwnerType.USER, ownerId: updated.id },
-      select: { handle: { select: { name: true } } },
-    });
-
-    const handleName = owner?.handle.name;
-    if (!handleName) {
-      return errJson({ code: "INTERNAL_ERROR", message: "Handle claim missing", status: 500 });
-    }
-
-    return okJson<OnboardOk>({
-      user: {
-        id: updated.id,
-        handle: handleName,
-        name: updated.name,
-        image: updated.image,
-        headline: updated.headline,
-        bio: updated.bio,
-        location: updated.location,
-        links: Array.isArray(updated.links) ? (updated.links as string[]) : [],
-        skills: Array.isArray(updated.skills) ? (updated.skills as string[]) : [],
-        tags: Array.isArray(updated.tags) ? (updated.tags as string[]) : [],
-      },
-    });
+    if (!txResult.ok) return errJson(txResult.error);
+    return okJson<OnboardOk>(txResult.value);
   } catch (e) {
-    if (e && typeof e === "object" && "code" in e && typeof (e as any).code === "string") {
-      const code = (e as any).code as string;
-      const message = typeof (e as any).message === "string" ? (e as any).message : "Handle error";
-      const status = typeof (e as any).status === "number" ? (e as any).status : 409;
-      return errJson({
-        code,
-        message,
-        status,
-        meta: {
-          reclaimUntil: (e as any).reclaimUntil ?? undefined,
-          availableAt: (e as any).availableAt ?? undefined,
-        },
-      });
-    }
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2025") {
       return errJson({ code: "NOT_FOUND", message: "User not found", status: 404 });
     }

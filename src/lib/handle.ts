@@ -26,8 +26,8 @@ export const HANDLE_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
  * Hyphen-insensitive handle key used for collision prevention.
  *
  * Example:
- * - "saulo-santos" -> "saulosantos"
- * - "saulosantos" -> "saulosantos"
+ * - "ontological-paradox" -> "ontologicalparadox"
+ * - "ontologicalparadox" -> "ontologicalparadox"
  */
 export function handleKey(name: string): string {
   return name.replace(/-/g, "");

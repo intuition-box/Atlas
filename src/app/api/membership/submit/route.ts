@@ -6,6 +6,7 @@ import { MembershipRole, MembershipStatus, OrbitLevel } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { errJson, okJson } from "@/lib/api-server";
 import { db } from "@/lib/database";
+import { resolveCommunityIdFromHandle } from "@/lib/handle-registry";
 import { recomputeMemberScores } from "@/lib/scoring";
 import { requireCsrf } from "@/lib/security/csrf";
 import { MembershipSubmitSchema } from "@/lib/validations";
@@ -30,7 +31,22 @@ export async function POST(req: NextRequest) {
     if (csrf instanceof Response) return csrf;
 
     const json = await req.json().catch(() => null);
-    const parsed = await MembershipSubmitSchema.safeParseAsync(json);
+
+    // Prefer ids. If the client sends a handle, resolve it once here and validate the resolved payload.
+    let payload: unknown = json;
+    if (payload && typeof payload === "object") {
+      const v = payload as Record<string, unknown>;
+      const hasCommunityId = typeof v.communityId === "string" && v.communityId.trim().length > 0;
+      const communityHandle = typeof v.communityHandle === "string" ? v.communityHandle.trim() : "";
+
+      if (!hasCommunityId && communityHandle) {
+        const resolved = await resolveCommunityIdFromHandle(communityHandle);
+        if (!resolved.ok) return errJson(resolved.error);
+        payload = { ...v, communityId: resolved.value };
+      }
+    }
+
+    const parsed = await MembershipSubmitSchema.safeParseAsync(payload);
 
     if (!parsed.success) {
       return errJson({
@@ -45,9 +61,10 @@ export async function POST(req: NextRequest) {
     }
 
     const body = parsed.data;
+    const communityId = body.communityId;
 
     const community = await db.community.findUnique({
-      where: { id: body.communityId },
+      where: { id: communityId },
       select: { id: true, isMembershipOpen: true },
     });
 
@@ -64,7 +81,7 @@ export async function POST(req: NextRequest) {
     }
 
     const existingMember = await db.membership.findUnique({
-      where: { userId_communityId: { userId, communityId: body.communityId } },
+      where: { userId_communityId: { userId, communityId } },
       select: { status: true },
     });
 
@@ -89,10 +106,10 @@ export async function POST(req: NextRequest) {
     const result = await db.$transaction(async (tx) => {
       // Ensure membership exists (or is reset back to PENDING).
       await tx.membership.upsert({
-        where: { userId_communityId: { userId, communityId: body.communityId } },
+        where: { userId_communityId: { userId, communityId } },
         create: {
           userId,
-          communityId: body.communityId,
+          communityId,
           status: MembershipStatus.PENDING,
           role: MembershipRole.MEMBER,
           orbitLevel: OrbitLevel.EXPLORER,
@@ -106,15 +123,15 @@ export async function POST(req: NextRequest) {
       });
 
       const prev = await tx.application.findUnique({
-        where: { userId_communityId: { userId, communityId: body.communityId } },
+        where: { userId_communityId: { userId, communityId } },
         select: { id: true },
       });
 
       await tx.application.upsert({
-        where: { userId_communityId: { userId, communityId: body.communityId } },
+        where: { userId_communityId: { userId, communityId } },
         create: {
           userId,
-          communityId: body.communityId,
+          communityId,
           status: MembershipStatus.PENDING,
           answers: body.answers as unknown as Prisma.InputJsonValue,
         },
@@ -136,7 +153,7 @@ export async function POST(req: NextRequest) {
     // Best-effort: application submission itself shouldn't score, but membership state changes
     // and downstream calculations can depend on being in-sync.
     try {
-      await recomputeMemberScores({ communityId: body.communityId, userId });
+      await recomputeMemberScores({ communityId, userId });
     } catch {
       // Ignore scoring failures; submission is already committed.
     }
