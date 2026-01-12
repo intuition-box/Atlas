@@ -22,6 +22,17 @@ export const MAX_HANDLE_LEN = 32;
 /** Canonical handle regex: lowercase segments separated by single hyphens. */
 export const HANDLE_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
+/**
+ * Hyphen-insensitive handle key used for collision prevention.
+ *
+ * Example:
+ * - "saulo-santos" -> "saulosantos"
+ * - "saulosantos" -> "saulosantos"
+ */
+export function handleKey(name: string): string {
+  return name.replace(/-/g, "");
+}
+
 export type HandleValidationCode =
   | "HANDLE_TOO_SHORT"
   | "HANDLE_TOO_LONG"

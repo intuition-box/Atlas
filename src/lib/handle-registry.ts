@@ -5,7 +5,7 @@ import { HandleOwnerType, HandleStatus, Prisma } from "@prisma/client";
 import { db } from "@/lib/database";
 import type { ApiError, Result } from "@/lib/api-shapes";
 import { err, ok } from "@/lib/api-shapes";
-import { parseHandle } from "@/lib/handle";
+import { handleKey, parseHandle } from "@/lib/handle";
 
 /**
  * Server-only handle lifecycle helpers.
@@ -29,9 +29,6 @@ export type HandleOwner = {
   ownerId: string;
 };
 
-function handleKey(name: string): string {
-  return name.replace(/-/g, "");
-}
 
 export type HandleErrorCode =
   | "HANDLE_INVALID"
@@ -261,6 +258,34 @@ export async function resolveCommunityIdFromHandle(raw: string): Promise<string 
   return row.owner.ownerId;
 }
 
+export async function resolveHandleNameForOwner(
+  args: { ownerType: HandleOwnerType; ownerId: string },
+  client: Prisma.TransactionClient | typeof db = db,
+): Promise<string | null> {
+  const row = await client.handleOwner.findUnique({
+    where: { ownerType_ownerId: { ownerType: args.ownerType, ownerId: args.ownerId } },
+    select: { handle: { select: { name: true, status: true } } },
+  });
+
+  if (!row) return null;
+  if (row.handle.status !== HandleStatus.ACTIVE) return null;
+  return row.handle.name;
+}
+
+export async function resolveUserHandleName(
+  userId: string,
+  client: Prisma.TransactionClient | typeof db = db,
+): Promise<string | null> {
+  return resolveHandleNameForOwner({ ownerType: HandleOwnerType.USER, ownerId: userId }, client);
+}
+
+export async function resolveCommunityHandleName(
+  communityId: string,
+  client: Prisma.TransactionClient | typeof db = db,
+): Promise<string | null> {
+  return resolveHandleNameForOwner({ ownerType: HandleOwnerType.COMMUNITY, ownerId: communityId }, client);
+}
+
 /**
  * Validate a handle and return whether it is claimable by a given owner.
  *
@@ -362,11 +387,28 @@ export async function checkHandlePubliclyAvailable(
  * Claim (or switch to) a handle for a USER or COMMUNITY.
  * This updates the canonical `HandleOwner` mapping and the Handle lifecycle table in a single transaction.
  */
-export async function claimHandle(args: {
-  ownerType: HandleOwnerType;
-  ownerId: string;
-  handle: string;
-}): Promise<HandleResult<{ handle: string }>> {
+
+export type ClaimHandleOk = { handle: string; handleId: string };
+export type ClaimHandleResult = HandleResult<ClaimHandleOk>;
+
+
+/**
+ * Claim (or switch to) a handle for a USER or COMMUNITY.
+ *
+ * DEAD SIMPLE RULE:
+ * - If you're already in a transaction, pass `tx`.
+ * - If you're not, pass `db`.
+ *
+ * This keeps all Handle/HandleOwner lifecycle logic centralized here.
+ */
+export async function claimHandle(
+  client: Prisma.TransactionClient | typeof db,
+  args: {
+    ownerType: HandleOwnerType;
+    ownerId: string;
+    handle: string;
+  },
+): Promise<ClaimHandleResult> {
   const parsed = parseHandle(args.handle);
   if (!parsed.ok) return err(invalidHandle(parsed.error.message));
 
@@ -374,160 +416,195 @@ export async function claimHandle(args: {
   const desiredKey = handleKey(desired);
   const claimant: HandleOwner = { ownerType: args.ownerType, ownerId: args.ownerId };
 
-  return db.$transaction(async (tx) => {
-    // Current mapping for this owner (enforced by @@unique([ownerType, ownerId])).
-    const currentMapping = await tx.handleOwner.findUnique({
-      where: { ownerType_ownerId: { ownerType: args.ownerType, ownerId: args.ownerId } },
-      select: { handleId: true },
-    });
+  // Current mapping for this owner (enforced by @@unique([ownerType, ownerId])).
+  const currentMapping = await client.handleOwner.findUnique({
+    where: { ownerType_ownerId: { ownerType: args.ownerType, ownerId: args.ownerId } },
+    select: { handleId: true },
+  });
 
-    const currentHandleId = currentMapping?.handleId ?? null;
+  const currentHandleId = currentMapping?.handleId ?? null;
 
-    // Load desired row once (hyphen-insensitive uniqueness).
-    let desiredRow = await tx.handle.findUnique({ where: { key: desiredKey }, select: handleRowSelect });
+  // Load desired row once (hyphen-insensitive uniqueness).
+  let desiredRow = await client.handle.findUnique({ where: { key: desiredKey }, select: handleRowSelect });
 
-    // Fast path: already mapped to desired.
-    if (currentHandleId && desiredRow && currentHandleId === desiredRow.id) {
-      return ok({ handle: desiredRow.name });
-    }
+  // Fast path: already mapped to desired.
+  if (currentHandleId && desiredRow && currentHandleId === desiredRow.id) {
+    return ok({ handle: desiredRow.name, handleId: desiredRow.id });
+  }
 
-    const activeOwner =
-      desiredRow && desiredRow.status === HandleStatus.ACTIVE && desiredRow.owner
-        ? { ownerType: desiredRow.owner.ownerType, ownerId: desiredRow.owner.ownerId }
-        : null;
-
-    const claimable = evaluateClaimability({
-      row: desiredRow,
-      now: new Date(),
-      claimant,
-      activeOwner,
-    });
-    if (!claimable.ok) return claimable;
-
-    const now = new Date();
-
-    // Release current handle (if any): mark lifecycle + drop canonical owner mapping.
-    if (currentHandleId) {
-      const reclaimUntil = addDays(now, DEFAULT_COOLDOWN_DAYS);
-      const availableAt = addDays(reclaimUntil, DEFAULT_RECLAIM_DAYS);
-      await tx.handle.updateMany({
-        where: { id: currentHandleId, status: HandleStatus.ACTIVE },
-        data: {
-          status: HandleStatus.RELEASED,
-          lastOwnerType: args.ownerType,
-          lastOwnerId: args.ownerId,
-          reclaimUntil,
-          availableAt,
-        },
-      });
-      await tx.handleOwner.deleteMany({
-        where: { handleId: currentHandleId, ownerType: args.ownerType, ownerId: args.ownerId },
-      });
-    }
-
-    // Ensure desired handle exists.
-    if (!desiredRow) {
-      try {
-        desiredRow = await tx.handle.create({
-          data: { name: desired, key: desiredKey, status: HandleStatus.ACTIVE },
-          select: handleRowSelect,
-        });
-      } catch (e) {
-        // Another transaction may have created it first.
-        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
-          desiredRow = await tx.handle.findUnique({ where: { key: desiredKey }, select: handleRowSelect });
-
-          // Re-evaluate claimability after the race condition.
-          if (!desiredRow) {
-            return err(notAvailable());
-          }
-
-          const newActiveOwner =
-            desiredRow.status === HandleStatus.ACTIVE && desiredRow.owner
-              ? { ownerType: desiredRow.owner.ownerType, ownerId: desiredRow.owner.ownerId }
-              : null;
-
-          const recheckClaimable = evaluateClaimability({
-            row: desiredRow,
-            now: new Date(),
-            claimant,
-            activeOwner: newActiveOwner,
-          });
-          if (!recheckClaimable.ok) return recheckClaimable;
-        } else {
-          throw e;
-        }
-      }
-    }
-
-    if (!desiredRow) {
-      return err(notAvailable());
-    }
-
-    // Hyphen-insensitive uniqueness: if this key exists with a different canonical name,
-    // treat it as taken unless it is already owned by this claimant.
-    if (desiredRow.name !== desired) {
-      const collisionOwner = desiredRow.owner
-        ? { ownerType: desiredRow.owner.ownerType, ownerId: desiredRow.owner.ownerId }
-        : null;
-
-      if (!collisionOwner) return err(taken());
-      if (collisionOwner.ownerType !== args.ownerType || collisionOwner.ownerId !== args.ownerId) return err(taken());
-
-      // Same owner: no-op, return canonical name.
-      return ok({ handle: desiredRow.name });
-    }
-
-    // If the desired row exists and is RELEASED, activate it.
-    if (desiredRow.status === HandleStatus.RELEASED) {
-      const updated = await tx.handle.updateMany({
-        where: { id: desiredRow.id, status: HandleStatus.RELEASED },
-        data: {
-          status: HandleStatus.ACTIVE,
-          reclaimUntil: null,
-          availableAt: null,
-          lastOwnerType: null,
-          lastOwnerId: null,
-        },
-      });
-
-      if (updated.count === 0) {
-        // Another transaction activated it first.
-        return err(taken());
-      }
-
-      desiredRow = await tx.handle.findUnique({ where: { id: desiredRow.id }, select: handleRowSelect });
-      if (!desiredRow) return err(notAvailable());
-    }
-
-    if (desiredRow.status !== HandleStatus.ACTIVE) {
-      return err(
-        notAvailable({
-          reclaimUntil: desiredRow.reclaimUntil ?? undefined,
-          availableAt: desiredRow.availableAt ?? undefined,
-        }),
-      );
-    }
-
-    // Enforce canonical ownership: if someone else owns it, fail.
-    const existingOwner = desiredRow.owner
+  const activeOwner =
+    desiredRow && desiredRow.status === HandleStatus.ACTIVE && desiredRow.owner
       ? { ownerType: desiredRow.owner.ownerType, ownerId: desiredRow.owner.ownerId }
       : null;
 
-    if (existingOwner && (existingOwner.ownerType !== args.ownerType || existingOwner.ownerId !== args.ownerId)) {
-      return err(taken());
-    }
+  const claimable = evaluateClaimability({
+    row: desiredRow,
+    now: new Date(),
+    claimant,
+    activeOwner,
+  });
+  if (!claimable.ok) return claimable;
 
-    // Create or update the canonical owner mapping.
-    // handleId is the PK (one owner per handle). ownerType+ownerId is unique (one handle per owner).
-    await tx.handleOwner.upsert({
-      where: { handleId: desiredRow.id },
-      create: { handleId: desiredRow.id, ownerType: args.ownerType, ownerId: args.ownerId },
-      update: { ownerType: args.ownerType, ownerId: args.ownerId },
+  const now = new Date();
+
+  // Release current handle (if any): mark lifecycle + drop canonical owner mapping.
+  if (currentHandleId) {
+    const reclaimUntil = addDays(now, DEFAULT_COOLDOWN_DAYS);
+    const availableAt = addDays(reclaimUntil, DEFAULT_RECLAIM_DAYS);
+    await client.handle.updateMany({
+      where: { id: currentHandleId, status: HandleStatus.ACTIVE },
+      data: {
+        status: HandleStatus.RELEASED,
+        lastOwnerType: args.ownerType,
+        lastOwnerId: args.ownerId,
+        reclaimUntil,
+        availableAt,
+      },
+    });
+    await client.handleOwner.deleteMany({
+      where: { handleId: currentHandleId, ownerType: args.ownerType, ownerId: args.ownerId },
+    });
+  }
+
+  // Ensure desired handle exists.
+  if (!desiredRow) {
+    try {
+      desiredRow = await client.handle.create({
+        data: { name: desired, key: desiredKey, status: HandleStatus.ACTIVE },
+        select: handleRowSelect,
+      });
+    } catch (e) {
+      // Another transaction may have created it first.
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+        desiredRow = await client.handle.findUnique({ where: { key: desiredKey }, select: handleRowSelect });
+
+        // Re-evaluate claimability after the race.
+        if (!desiredRow) return err(notAvailable());
+
+        const newActiveOwner =
+          desiredRow.status === HandleStatus.ACTIVE && desiredRow.owner
+            ? { ownerType: desiredRow.owner.ownerType, ownerId: desiredRow.owner.ownerId }
+            : null;
+
+        const recheck = evaluateClaimability({
+          row: desiredRow,
+          now: new Date(),
+          claimant,
+          activeOwner: newActiveOwner,
+        });
+        if (!recheck.ok) return recheck;
+      } else {
+        throw e;
+      }
+    }
+  }
+
+  if (!desiredRow) return err(notAvailable());
+
+  // Hyphen-insensitive uniqueness: if this key exists with a different canonical name,
+  // treat it as taken unless it is already owned by this claimant.
+  if (desiredRow.name !== desired) {
+    const collisionOwner = desiredRow.owner
+      ? { ownerType: desiredRow.owner.ownerType, ownerId: desiredRow.owner.ownerId }
+      : null;
+
+    if (!collisionOwner) return err(taken());
+    if (collisionOwner.ownerType !== args.ownerType || collisionOwner.ownerId !== args.ownerId) return err(taken());
+
+    return ok({ handle: desiredRow.name, handleId: desiredRow.id });
+  }
+
+  // If the desired row exists and is RELEASED, activate it.
+  if (desiredRow.status === HandleStatus.RELEASED) {
+    const updated = await client.handle.updateMany({
+      where: { id: desiredRow.id, status: HandleStatus.RELEASED },
+      data: {
+        status: HandleStatus.ACTIVE,
+        reclaimUntil: null,
+        availableAt: null,
+        lastOwnerType: null,
+        lastOwnerId: null,
+      },
     });
 
-    return ok({ handle: desiredRow.name });
+    if (updated.count === 0) return err(taken());
+
+    desiredRow = await client.handle.findUnique({ where: { id: desiredRow.id }, select: handleRowSelect });
+    if (!desiredRow) return err(notAvailable());
+  }
+
+  if (desiredRow.status !== HandleStatus.ACTIVE) {
+    return err(
+      notAvailable({
+        reclaimUntil: desiredRow.reclaimUntil ?? undefined,
+        availableAt: desiredRow.availableAt ?? undefined,
+      }),
+    );
+  }
+
+  // Enforce canonical ownership: if someone else owns it, fail.
+  const existingOwner = desiredRow.owner
+    ? { ownerType: desiredRow.owner.ownerType, ownerId: desiredRow.owner.ownerId }
+    : null;
+
+  if (existingOwner && (existingOwner.ownerType !== args.ownerType || existingOwner.ownerId !== args.ownerId)) {
+    return err(taken());
+  }
+
+  // Create or update the canonical owner mapping.
+  await client.handleOwner.upsert({
+    where: { handleId: desiredRow.id },
+    create: { handleId: desiredRow.id, ownerType: args.ownerType, ownerId: args.ownerId },
+    update: { ownerType: args.ownerType, ownerId: args.ownerId },
   });
+
+  return ok({ handle: desiredRow.name, handleId: desiredRow.id });
+}
+
+export type ReleaseOwnerHandleOk = { released: true };
+export type ReleaseOwnerHandleResult = HandleResult<ReleaseOwnerHandleOk>;
+
+/**
+ * Release the currently-owned handle for an owner.
+ *
+ * Used by delete flows so routes never touch `handle` / `handleOwner` tables directly.
+ */
+export async function releaseOwnerHandle(
+  client: Prisma.TransactionClient | typeof db,
+  args: {
+    ownerType: HandleOwnerType;
+    ownerId: string;
+  },
+): Promise<ReleaseOwnerHandleResult> {
+  const mapping = await client.handleOwner.findUnique({
+    where: { ownerType_ownerId: { ownerType: args.ownerType, ownerId: args.ownerId } },
+    select: { handleId: true },
+  });
+
+  if (!mapping) return err(notAvailable());
+
+  const now = new Date();
+  const reclaimUntil = addDays(now, DEFAULT_COOLDOWN_DAYS);
+  const availableAt = addDays(reclaimUntil, DEFAULT_RECLAIM_DAYS);
+
+  const released = await client.handle.updateMany({
+    where: { id: mapping.handleId, status: HandleStatus.ACTIVE },
+    data: {
+      status: HandleStatus.RELEASED,
+      lastOwnerType: args.ownerType,
+      lastOwnerId: args.ownerId,
+      reclaimUntil,
+      availableAt,
+    },
+  });
+
+  if (released.count !== 1) return err(notAvailable({ reclaimUntil, availableAt }));
+
+  await client.handleOwner.deleteMany({
+    where: { handleId: mapping.handleId, ownerType: args.ownerType, ownerId: args.ownerId },
+  });
+
+  return ok({ released: true });
 }
 
 /**
