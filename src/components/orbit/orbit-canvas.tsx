@@ -594,24 +594,47 @@ export function OrbitCanvas({
       if (nextId) onHoverChange?.(next);
     }
 
-    // Pan / zoom interactions
+    // Pan / zoom interactions (Pointer Events: mouse + touch)
     let dragging = false;
-    let dragStartX = 0;
-    let dragStartY = 0;
+    let pointerDown = false;
+    let activePointerId: number | null = null;
+    let downX = 0;
+    let downY = 0;
+    let lastX = 0;
+    let lastY = 0;
     let panStartX = 0;
     let panStartY = 0;
+    let moved = false;
 
-    function onMouseDown(e: MouseEvent) {
+    const DRAG_THRESHOLD_PX = 3;
+
+    function eventPoint(e: PointerEvent) {
       const br = canvas.getBoundingClientRect();
-      const mx = e.clientX - br.left;
-      const my = e.clientY - br.top;
+      return { mx: e.clientX - br.left, my: e.clientY - br.top };
+    }
+
+    function onPointerDown(e: PointerEvent) {
+      // Only primary button for mouse; touches are always "primary".
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+
+      const { mx, my } = eventPoint(e);
+
+      pointerDown = true;
+      activePointerId = e.pointerId;
+      downX = mx;
+      downY = my;
+      lastX = mx;
+      lastY = my;
+      moved = false;
 
       const hit = pick(mx, my);
-      if (hit) return; // let click handle it
+      if (hit) {
+        // Don't start a drag; allow click/tap on pointer up.
+        dragging = false;
+        return;
+      }
 
       dragging = true;
-      dragStartX = mx;
-      dragStartY = my;
       const v = viewRef.current;
       panStartX = v.panX;
       panStartY = v.panY;
@@ -619,30 +642,96 @@ export function OrbitCanvas({
       // clear hover while dragging
       setHover(null);
       canvas.style.cursor = "grabbing";
+
+      // capture so we keep getting move/up even if pointer leaves canvas
+      try {
+        canvas.setPointerCapture(e.pointerId);
+      } catch {
+        // ignore
+      }
     }
 
-    function onMouseUp() {
-      dragging = false;
-      canvas.style.cursor = hoverIdRef.current ? "pointer" : "default";
-    }
+    function onPointerMove(e: PointerEvent) {
+      const { mx, my } = eventPoint(e);
 
-    function onMove(e: MouseEvent) {
-      const br = canvas.getBoundingClientRect();
-      const mx = e.clientX - br.left;
-      const my = e.clientY - br.top;
-
-      if (dragging) {
-        const dx = mx - dragStartX;
-        const dy = my - dragStartY;
-        const v = viewRef.current;
-        v.panX = panStartX + dx;
-        v.panY = panStartY + dy;
+      // Hover only for mouse pointers.
+      if (!pointerDown && e.pointerType === "mouse") {
+        const found = pick(mx, my);
+        setHover(found ? { id: found.id, x: mx, y: my } : null);
         return;
       }
 
-      const found = pick(mx, my);
-      setHover(found ? { id: found.id, x: mx, y: my } : null);
+      if (!pointerDown || activePointerId !== e.pointerId) return;
+
+      const dxFromDown = mx - downX;
+      const dyFromDown = my - downY;
+      if (!moved && (Math.abs(dxFromDown) > DRAG_THRESHOLD_PX || Math.abs(dyFromDown) > DRAG_THRESHOLD_PX)) {
+        moved = true;
+      }
+
+      if (!dragging) {
+        lastX = mx;
+        lastY = my;
+        return;
+      }
+
+      const v = viewRef.current;
+      v.panX = panStartX + dxFromDown;
+      v.panY = panStartY + dyFromDown;
+
+      lastX = mx;
+      lastY = my;
     }
+
+    function onPointerUp(e: PointerEvent) {
+      if (!pointerDown || activePointerId !== e.pointerId) return;
+
+      const { mx, my } = eventPoint(e);
+
+      // Click/tap if we weren't dragging and didn't move meaningfully.
+      if (!dragging || !moved) {
+        const found = pick(mx, my);
+        if (found) onClickMember(found.id);
+      }
+
+      pointerDown = false;
+      activePointerId = null;
+      dragging = false;
+
+      canvas.style.cursor = hoverIdRef.current ? "pointer" : "default";
+
+      try {
+        canvas.releasePointerCapture(e.pointerId);
+      } catch {
+        // ignore
+      }
+    }
+
+    function onPointerCancel(e: PointerEvent) {
+      if (activePointerId !== e.pointerId) return;
+      pointerDown = false;
+      activePointerId = null;
+      dragging = false;
+      canvas.style.cursor = "default";
+      setHover(null);
+      try {
+        canvas.releasePointerCapture(e.pointerId);
+      } catch {
+        // ignore
+      }
+    }
+
+    function onPointerLeave(e: PointerEvent) {
+      // Only clear hover for mouse pointers. Touch pointers use drag/click behavior.
+      if (e.pointerType !== "mouse") return;
+      if (dragging) return;
+      hoverIdRef.current = null;
+      pausedRef.current = false;
+      onHoverChange?.(null);
+      canvas.style.cursor = "default";
+    }
+
+    const wheelOpts: AddEventListenerOptions = { passive: false };
 
     function onWheel(e: WheelEvent) {
       e.preventDefault();
@@ -676,29 +765,12 @@ export function OrbitCanvas({
       v.scale = newScale;
     }
 
-    function onLeave() {
-      if (dragging) return;
-      hoverIdRef.current = null;
-      pausedRef.current = false;
-      onHoverChange?.(null);
-      canvas.style.cursor = "default";
-    }
-
-    function onClick(e: MouseEvent) {
-      if (dragging) return;
-      const br = canvas.getBoundingClientRect();
-      const mx = e.clientX - br.left;
-      const my = e.clientY - br.top;
-      const found = pick(mx, my);
-      if (found) onClickMember(found.id);
-    }
-
-    canvas.addEventListener("mousedown", onMouseDown);
-    window.addEventListener("mouseup", onMouseUp);
-    canvas.addEventListener("mousemove", onMove);
-    canvas.addEventListener("mouseleave", onLeave);
-    canvas.addEventListener("click", onClick);
-    canvas.addEventListener("wheel", onWheel, { passive: false });
+    canvas.addEventListener("pointerdown", onPointerDown);
+    canvas.addEventListener("pointermove", onPointerMove);
+    canvas.addEventListener("pointerup", onPointerUp);
+    canvas.addEventListener("pointercancel", onPointerCancel);
+    canvas.addEventListener("pointerleave", onPointerLeave);
+    canvas.addEventListener("wheel", onWheel, wheelOpts);
 
     let raf = 0;
 
@@ -800,12 +872,12 @@ export function OrbitCanvas({
       cancelAnimationFrame(raf);
       ro.disconnect();
 
-      canvas.removeEventListener("mousedown", onMouseDown);
-      window.removeEventListener("mouseup", onMouseUp);
-      canvas.removeEventListener("mousemove", onMove);
-      canvas.removeEventListener("mouseleave", onLeave);
-      canvas.removeEventListener("click", onClick);
-      canvas.removeEventListener("wheel", onWheel as any);
+      canvas.removeEventListener("pointerdown", onPointerDown);
+      canvas.removeEventListener("pointermove", onPointerMove);
+      canvas.removeEventListener("pointerup", onPointerUp);
+      canvas.removeEventListener("pointercancel", onPointerCancel);
+      canvas.removeEventListener("pointerleave", onPointerLeave);
+      canvas.removeEventListener("wheel", onWheel, wheelOpts);
     };
   }, [
     prepared,
