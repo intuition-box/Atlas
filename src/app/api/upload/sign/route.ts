@@ -1,112 +1,143 @@
-import { randomUUID } from "crypto";
-import { NextResponse } from "next/server";
-import { z } from "zod";
+import "server-only";
 
-import { requireCommunityRole, requireUser } from "@/lib/permissions";
+import { errJson, okJson } from "@/lib/api-server";
+import { db } from "@/lib/database";
+import { requireAuth } from "@/lib/guards";
 import { signR2Upload } from "@/lib/r2";
+import { requireCsrf } from "@/lib/security/csrf";
+import { MembershipRole } from "@prisma/client";
+import { randomUUID } from "node:crypto";
+import type { NextRequest } from "next/server";
+import { z } from "zod";
 
 export const runtime = "nodejs";
 
-type ApiError = {
-  code: number;
-  message: string;
-  details?: unknown;
+const UploadTypeSchema = z.enum(["user.avatar", "community.avatar"]);
+
+// Keep this strict and explicit.
+// Add new types only when the product pipeline supports them end-to-end.
+const ContentTypeSchema = z.enum([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+]);
+
+type ContentType = z.infer<typeof ContentTypeSchema>;
+
+const EXT_BY_CONTENT_TYPE: Record<ContentType, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/webp": "webp",
+  "image/gif": "gif",
 };
 
-function jsonOk<T>(data: T, init?: ResponseInit) {
-  return NextResponse.json({ ok: true, data }, init);
-}
+const SignUploadSchema = z
+  .object({
+    type: UploadTypeSchema,
+    contentType: ContentTypeSchema,
 
-function jsonFail(status: number, message: string, details?: unknown, init?: ResponseInit) {
-  const error: ApiError = { code: status, message, ...(details !== undefined ? { details } : {}) };
-  return NextResponse.json({ ok: false, error }, { status, ...init });
-}
+    // Used for client-side UX + future guards. R2 signing itself is based on key + contentType.
+    size: z.number().int().positive().max(25 * 1024 * 1024),
 
-const ALLOWED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
-
-const Body = z.object({
-  // MVP: restrict to a small set of image “buckets”
-  kind: z.enum(["USER_AVATAR", "COMMUNITY_AVATAR"]),
-  contentType: z.string().min(3).max(120),
-  extension: z
-    .string()
-    .regex(/^[a-z0-9]+$/i)
-    .max(8)
-    .optional(),
-  communityId: z.string().optional(), // required for COMMUNITY_AVATAR
-});
-
-function extFromContentType(contentType: string): string {
-  switch (contentType) {
-    case "image/png":
-      return "png";
-    case "image/jpeg":
-      return "jpg";
-    case "image/webp":
-      return "webp";
-    case "image/gif":
-      return "gif";
-    default:
-      return "bin";
-  }
-}
-
-function safeExt(contentType: string, ext?: string) {
-  // If caller supplies an extension, accept it only if it matches the inferred one.
-  // This prevents content-type/extension drift (e.g. image/png + .jpg).
-  const inferred = extFromContentType(contentType);
-  if (!ext) return inferred;
-  const provided = ext.toLowerCase();
-  if (provided !== inferred) return inferred;
-  return provided;
-}
-
-export async function POST(req: Request) {
-  const { userId } = await requireUser();
-
-  let json: unknown;
-  try {
-    json = await req.json();
-  } catch {
-    return jsonFail(400, "Invalid JSON body");
-  }
-
-  const parsed = Body.safeParse(json);
-  if (!parsed.success) {
-    return jsonFail(400, "Invalid request", parsed.error.flatten());
-  }
-
-  const body = parsed.data;
-
-  if (!ALLOWED_IMAGE_TYPES.has(body.contentType)) {
-    return jsonFail(400, "Only PNG/JPEG/WebP/GIF image uploads are allowed in MVP.");
-  }
-
-  if (body.kind === "COMMUNITY_AVATAR") {
-    if (!body.communityId) {
-      return jsonFail(400, "communityId is required.");
-    }
-
-    // Only community admins/owners can upload a community avatar.
-    await requireCommunityRole({
-      userId,
-      communityId: body.communityId,
-      minRole: "ADMIN",
-    });
-  }
-
-  const ext = safeExt(body.contentType, body.extension);
-  const nonce = randomUUID();
-
-  const key =
-    body.kind === "USER_AVATAR"
-      ? `avatars/users/${userId}/${nonce}.${ext}`
-      : `avatars/communities/${body.communityId}/${nonce}.${ext}`;
-
-  const { uploadUrl, publicUrl } = await signR2Upload({
-    key,
-    contentType: body.contentType,
+    // Required for community assets.
+    communityId: z.string().trim().min(1).optional(),
+  })
+  .refine((v) => (v.type === "community.avatar" ? Boolean(v.communityId) : true), {
+    message: "communityId is required for community.avatar",
+    path: ["communityId"],
   });
 
-  return jsonOk({ uploadUrl, publicUrl, key });
+function zodIssuesToApiIssues(
+  e: z.ZodError,
+): Array<{ path: Array<string | number>; message: string }> {
+  return e.issues.map((iss) => ({
+    path: iss.path.map((seg) => (typeof seg === "number" ? seg : String(seg))),
+    message: iss.message,
+  }));
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    requireCsrf(req);
+    const { userId } = await requireAuth();
+
+    const json = await req.json().catch(() => null);
+    const parsed = await SignUploadSchema.safeParseAsync(json);
+    if (!parsed.success) {
+      return errJson({
+        code: "INVALID_REQUEST",
+        message: "Invalid request",
+        status: 400,
+        issues: zodIssuesToApiIssues(parsed.error),
+      });
+    }
+
+    const input = parsed.data;
+    const ext = EXT_BY_CONTENT_TYPE[input.contentType];
+
+    // Authorization for community assets.
+    let communityId: string | null = null;
+
+    if (input.type === "community.avatar") {
+      // `refine` guarantees this at runtime; keep TS happy.
+      communityId = input.communityId ?? null;
+      if (!communityId) {
+        return errJson({
+          code: "INVALID_REQUEST",
+          message: "communityId is required for community.avatar",
+          status: 400,
+        });
+      }
+
+      const membership = await db.membership.findUnique({
+        where: {
+          userId_communityId: {
+            userId,
+            communityId,
+          },
+        },
+        select: { role: true },
+      });
+
+      const canUpload =
+        membership &&
+        (membership.role === MembershipRole.OWNER ||
+          membership.role === MembershipRole.ADMIN);
+
+      if (!canUpload) {
+        return errJson({ code: "FORBIDDEN", message: "Forbidden", status: 403 });
+      }
+    }
+
+    // Server chooses the object key. Never accept a raw key from clients.
+    // Keep keys clear and scoped by owner id.
+    const nonce = randomUUID();
+
+    const key =
+      input.type === "user.avatar"
+        ? `avatars/users/${userId}/${nonce}.${ext}`
+        : `avatars/communities/${communityId}/${nonce}.${ext}`;
+
+    const upload = await signR2Upload({
+      key,
+      contentType: input.contentType,
+      // Avatars are versioned by key, so immutable caching is safe.
+      cacheControl: "public, max-age=31536000, immutable",
+      expiresInSeconds: 60,
+    });
+
+    return okJson({
+      upload: {
+        key,
+        uploadUrl: upload.uploadUrl,
+        publicUrl: upload.publicUrl,
+      },
+    });
+  } catch (e) {
+    if (e instanceof Error) {
+      return errJson({ code: "INTERNAL_ERROR", message: e.message, status: 500 });
+    }
+    return errJson({ code: "INTERNAL_ERROR", message: "Internal error", status: 500 });
+  }
 }
