@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type OrbitLevel = "EXPLORER" | "PARTICIPANT" | "CONTRIBUTOR" | "ADVOCATE";
 
@@ -253,7 +253,9 @@ export function OrbitCanvas({
 
   const hoverIdRef = useRef<string | null>(null);
   const pausedRef = useRef(false);
-  const timeAnchorRef = useRef<number>(performance.now());
+  // Animation time that only advances when not paused (prevents time-jumps after hover)
+  const animTimeRef = useRef(0);
+  const lastNowRef = useRef<number | null>(null);
 
   const qtRef = useRef<Quadtree | null>(null);
   const cacheRef = useRef<Map<string, CacheEntry>>(new Map());
@@ -297,6 +299,8 @@ export function OrbitCanvas({
     viewRef.current.panY = 0;
     hoverIdRef.current = null;
     pausedRef.current = false;
+    animTimeRef.current = 0;
+    lastNowRef.current = null;
     onHoverChange?.(null);
   }, [onHoverChange, resetToken]);
 
@@ -329,11 +333,15 @@ export function OrbitCanvas({
   }, [members]);
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    const canvasEl = canvasRef.current;
+    if (!canvasEl) return;
 
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    const ctx2d = canvasEl.getContext("2d");
+    if (!ctx2d) return;
+
+    // Keep narrowed, non-null locals for the rest of the effect (including closures)
+    const canvas = canvasEl;
+    const ctx = ctx2d;
 
     function resize() {
       const dpr = window.devicePixelRatio || 1;
@@ -585,7 +593,6 @@ export function OrbitCanvas({
       if (nextId !== prevId) {
         hoverIdRef.current = nextId;
         pausedRef.current = !!nextId;
-        if (pausedRef.current) timeAnchorRef.current = performance.now();
         onHoverChange?.(nextId ? next : null);
         canvas.style.cursor = nextId ? "pointer" : "default";
         return;
@@ -782,8 +789,12 @@ export function OrbitCanvas({
       const shouldRotate = !prefersReducedMotion;
       const paused = pausedRef.current || !shouldRotate;
 
-      const t = paused ? timeAnchorRef.current : now;
-      if (!paused) timeAnchorRef.current = t;
+      // Advance time only when running to avoid any jump when resuming.
+      if (lastNowRef.current === null) lastNowRef.current = now;
+      const dt = now - lastNowRef.current;
+      lastNowRef.current = now;
+      if (!paused) animTimeRef.current += dt;
+      const t = animTimeRef.current;
 
       ctx.clearRect(0, 0, w, h);
 
