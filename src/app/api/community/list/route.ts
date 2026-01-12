@@ -1,19 +1,45 @@
-import { HandleOwnerType, MembershipStatus } from "@prisma/client";
+import { HandleOwnerType } from "@prisma/client";
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 
 import { db } from "@/lib/database";
-import { auth } from "@/lib/auth";
 import { errJson, okJson } from "@/lib/api-server";
 import { resolveHandleNamesForOwners } from "@/lib/handle-registry";
 
 export const runtime = "nodejs";
 
+const DEFAULT_TAKE = 24;
+const MAX_TAKE = 200;
+
 const QuerySchema = z.object({
-  q: z.string().trim().min(1).max(100).optional(),
-  take: z.coerce.number().int().min(1).max(100).optional(),
-  cursor: z.string().trim().min(1).optional(),
-  includePrivate: z.coerce.boolean().optional(),
+  q: z
+    .preprocess((v) => {
+      if (typeof v !== "string") return v;
+      const s = v.trim();
+      return s.length === 0 ? undefined : s;
+    }, z.string().min(1).max(100))
+    .optional(),
+
+  take: z
+    .preprocess((v) => {
+      if (v === undefined || v === null) return undefined;
+      if (typeof v === "string" && v.trim().length === 0) return undefined;
+      const n = typeof v === "number" ? v : Number(v);
+      if (!Number.isFinite(n)) return v;
+      const i = Math.floor(n);
+      if (i < 1) return 1;
+      if (i > MAX_TAKE) return MAX_TAKE;
+      return i;
+    }, z.number().int().min(1).max(MAX_TAKE))
+    .optional(),
+
+  cursor: z
+    .preprocess((v) => {
+      if (typeof v !== "string") return v;
+      const s = v.trim();
+      return s.length === 0 ? undefined : s;
+    }, z.string().min(1))
+    .optional(),
 });
 
 type CommunityListItem = {
@@ -39,7 +65,6 @@ export async function GET(req: NextRequest) {
       q: url.searchParams.get("q") ?? undefined,
       take: url.searchParams.get("take") ?? undefined,
       cursor: url.searchParams.get("cursor") ?? undefined,
-      includePrivate: url.searchParams.get("includePrivate") ?? undefined,
     });
 
     if (!parsed.success) {
@@ -55,40 +80,9 @@ export async function GET(req: NextRequest) {
     }
 
     const { q, cursor } = parsed.data;
-    const take = parsed.data.take ?? 24;
+    const take = parsed.data.take ?? DEFAULT_TAKE;
 
-    const includePrivate = parsed.data.includePrivate ?? false;
-
-    let userId: string | null = null;
-    if (includePrivate) {
-      const session = await auth();
-      userId = session?.user?.id ?? null;
-
-      if (!userId) {
-        return errJson({
-          code: "UNAUTHORIZED",
-          message: "Sign in required",
-          status: 401,
-        });
-      }
-    }
-
-    const visibilityWhere = includePrivate
-      ? {
-          OR: [
-            { isPublicDirectory: true },
-            {
-              memberships: {
-                some: {
-                  userId: userId!,
-                  status: { in: [MembershipStatus.APPROVED, MembershipStatus.PENDING] },
-                },
-              },
-            },
-          ],
-        }
-      : { isPublicDirectory: true };
-
+    const visibilityWhere = { isPublicDirectory: true };
     const searchWhere = q
       ? {
           OR: [
@@ -161,5 +155,3 @@ export async function GET(req: NextRequest) {
     });
   }
 }
-
-// (Optional) You can add POST later if you want server-side filtering bodies, but per conventions we keep list as GET.
