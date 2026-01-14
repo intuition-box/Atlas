@@ -55,7 +55,10 @@ type FormFieldProps<
    * Use `fieldControlProps(field)` to get both.
    */
   render: (args: FormFieldRenderArgs<TFieldValues, TName>) => React.ReactNode;
-} & Omit<React.ComponentProps<typeof Field>, "children" | "name" | "invalid" | "touched" | "dirty">;
+} & Omit<
+  React.ComponentProps<typeof Field>,
+  "children" | "name" | "invalid" | "touched" | "dirty" | "render"
+>;
 
 /**
  * Base UI + React Hook Form field helper.
