@@ -29,7 +29,6 @@ export type HandleOwner = {
   ownerId: string;
 };
 
-
 export type HandleErrorCode =
   | "HANDLE_INVALID"
   | "HANDLE_TAKEN"
