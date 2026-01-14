@@ -170,6 +170,7 @@ function fieldControlProps<
     id?: string;
     describedBy?: string;
     invalid?: boolean;
+    native?: boolean;
   },
 ) {
   return {
@@ -179,7 +180,7 @@ function fieldControlProps<
     value: field.value ?? "",
     onBlur: field.onBlur,
     onChange: field.onChange,
-    onValueChange: field.onChange,
+    ...(opts?.native ? {} : { onValueChange: field.onChange }),
     "aria-describedby": opts?.describedBy,
     "aria-invalid": opts?.invalid,
   };
