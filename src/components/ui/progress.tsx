@@ -1,15 +1,17 @@
 "use client"
 
+import * as React from "react"
 import { Progress as ProgressPrimitive } from "@base-ui/react/progress"
 
 import { cn } from "@/lib/utils"
 
-function Progress({
-  className,
-  children,
-  value,
-  ...props
-}: ProgressPrimitive.Root.Props) {
+type ProgressProps = React.ComponentProps<typeof ProgressPrimitive.Root>
+type ProgressTrackProps = React.ComponentProps<typeof ProgressPrimitive.Track>
+type ProgressIndicatorProps = React.ComponentProps<typeof ProgressPrimitive.Indicator>
+type ProgressLabelProps = React.ComponentProps<typeof ProgressPrimitive.Label>
+type ProgressValueProps = React.ComponentProps<typeof ProgressPrimitive.Value>
+
+function Progress({ className, children, value, ...props }: ProgressProps) {
   return (
     <ProgressPrimitive.Root
       value={value}
@@ -25,7 +27,7 @@ function Progress({
   )
 }
 
-function ProgressTrack({ className, ...props }: ProgressPrimitive.Track.Props) {
+function ProgressTrack({ className, ...props }: ProgressTrackProps) {
   return (
     <ProgressPrimitive.Track
       className={cn(
@@ -38,10 +40,7 @@ function ProgressTrack({ className, ...props }: ProgressPrimitive.Track.Props) {
   )
 }
 
-function ProgressIndicator({
-  className,
-  ...props
-}: ProgressPrimitive.Indicator.Props) {
+function ProgressIndicator({ className, ...props }: ProgressIndicatorProps) {
   return (
     <ProgressPrimitive.Indicator
       data-slot="progress-indicator"
@@ -51,7 +50,7 @@ function ProgressIndicator({
   )
 }
 
-function ProgressLabel({ className, ...props }: ProgressPrimitive.Label.Props) {
+function ProgressLabel({ className, ...props }: ProgressLabelProps) {
   return (
     <ProgressPrimitive.Label
       className={cn("text-sm font-medium", className)}
@@ -61,7 +60,7 @@ function ProgressLabel({ className, ...props }: ProgressPrimitive.Label.Props) {
   )
 }
 
-function ProgressValue({ className, ...props }: ProgressPrimitive.Value.Props) {
+function ProgressValue({ className, ...props }: ProgressValueProps) {
   return (
     <ProgressPrimitive.Value
       className={cn("text-muted-foreground ml-auto text-sm tabular-nums", className)}

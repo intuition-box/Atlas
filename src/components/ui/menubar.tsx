@@ -1,29 +1,29 @@
 "use client"
 
 import * as React from "react"
-import { Menu as MenuPrimitive } from "@base-ui/react/menu"
 import { Menubar as MenubarPrimitive } from "@base-ui/react/menubar"
 
-import { cn } from "@/lib/utils"
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuPortal,
-  DropdownMenuRadioGroup,
-  DropdownMenuSeparator,
-  DropdownMenuShortcut,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { HugeiconsIcon } from "@hugeicons/react"
-import { Tick02Icon } from "@hugeicons/core-free-icons"
+  Menu,
+  MenuContent,
+  MenuGroup,
+  MenuItem,
+  MenuLabel,
+  MenuPortal,
+  MenuRadioGroup,
+  MenuSeparator,
+  MenuShortcut,
+  MenuSub,
+  MenuSubContent,
+  MenuSubTrigger,
+  MenuTrigger,
+  MenuCheckboxItem,
+  MenuRadioItem,
+} from "@/components/ui/menu"
 
-function Menubar({ className, ...props }: MenubarPrimitive.Props) {
+import { cn } from "@/lib/utils"
+
+function Menubar({ className, ...props }: React.ComponentProps<typeof MenubarPrimitive>) {
   return (
     <MenubarPrimitive
       data-slot="menubar"
@@ -33,205 +33,85 @@ function Menubar({ className, ...props }: MenubarPrimitive.Props) {
   )
 }
 
-function MenubarMenu({ ...props }: React.ComponentProps<typeof DropdownMenu>) {
-  return <DropdownMenu data-slot="menubar-menu" {...props} />
+function MenubarMenu({ ...props }: React.ComponentProps<typeof Menu>) {
+  return <Menu data-slot="menubar-menu" {...props} />
 }
 
 function MenubarGroup({
   ...props
-}: React.ComponentProps<typeof DropdownMenuGroup>) {
-  return <DropdownMenuGroup data-slot="menubar-group" {...props} />
+}: React.ComponentProps<typeof MenuGroup>) {
+  return <MenuGroup data-slot="menubar-group" {...props} />
 }
 
 function MenubarPortal({
   ...props
-}: React.ComponentProps<typeof DropdownMenuPortal>) {
-  return <DropdownMenuPortal data-slot="menubar-portal" {...props} />
+}: React.ComponentProps<typeof MenuPortal>) {
+  return <MenuPortal data-slot="menubar-portal" {...props} />
 }
 
-function MenubarTrigger({
-  className,
-  ...props
-}: React.ComponentProps<typeof DropdownMenuTrigger>) {
-  return (
-    <DropdownMenuTrigger
-      data-slot="menubar-trigger"
-      className={cn(
-        "hover:bg-muted aria-expanded:bg-muted rounded-xl px-2.5 py-1 text-sm font-medium flex items-center outline-hidden select-none",
-        className
-      )}
-      {...props}
-    />
-  )
+function MenubarTrigger({ ...props }: React.ComponentProps<typeof MenuTrigger>) {
+  return <MenuTrigger data-slot="menubar-trigger" {...props} />
 }
 
 function MenubarContent({
-  className,
   align = "start",
   alignOffset = -4,
   sideOffset = 8,
   ...props
-}: React.ComponentProps<typeof DropdownMenuContent>) {
+}: React.ComponentProps<typeof MenuContent>) {
   return (
-    <DropdownMenuContent
+    <MenuContent
       data-slot="menubar-content"
       align={align}
       alignOffset={alignOffset}
       sideOffset={sideOffset}
-      className={cn("bg-popover text-popover-foreground data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 ring-foreground/5 min-w-48 rounded-2xl p-1 shadow-2xl ring-1 duration-100", className)}
       {...props}
     />
   )
 }
 
-function MenubarItem({
-  className,
-  inset,
-  variant = "default",
-  ...props
-}: React.ComponentProps<typeof DropdownMenuItem>) {
-  return (
-    <DropdownMenuItem
-      data-slot="menubar-item"
-      data-inset={inset}
-      data-variant={variant}
-      className={cn("focus:bg-accent focus:text-accent-foreground data-[variant=destructive]:text-destructive data-[variant=destructive]:focus:bg-destructive/10 dark:data-[variant=destructive]:focus:bg-destructive/20 data-[variant=destructive]:focus:text-destructive data-[variant=destructive]:*:[svg]:!text-destructive not-data-[variant=destructive]:focus:**:text-accent-foreground gap-2.5 rounded-xl px-3 py-2 text-sm data-[disabled]:opacity-50 data-[inset]:pl-8 [&_svg:not([class*='size-'])]:size-4 group/menubar-item", className)}
-      {...props}
-    />
-  )
+function MenubarItem({ ...props }: React.ComponentProps<typeof MenuItem>) {
+  return <MenuItem data-slot="menubar-item" {...props} />
 }
 
-function MenubarCheckboxItem({
-  className,
-  children,
-  checked,
-  ...props
-}: MenuPrimitive.CheckboxItem.Props) {
-  return (
-    <MenuPrimitive.CheckboxItem
-      data-slot="menubar-checkbox-item"
-      className={cn(
-        "focus:bg-accent focus:text-accent-foreground focus:**:text-accent-foreground gap-2.5 rounded-xl py-2 pr-3 pl-8 text-sm data-disabled:opacity-50 relative flex cursor-default items-center outline-hidden select-none data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0",
-        className
-      )}
-      checked={checked}
-      {...props}
-    >
-      <span className="left-2 size-4 [&_svg:not([class*='size-'])]:size-4 pointer-events-none absolute flex items-center justify-center">
-        <MenuPrimitive.CheckboxItemIndicator>
-          <HugeiconsIcon icon={Tick02Icon} strokeWidth={2} />
-        </MenuPrimitive.CheckboxItemIndicator>
-      </span>
-      {children}
-    </MenuPrimitive.CheckboxItem>
-  )
+function MenubarCheckboxItem({ ...props }: React.ComponentProps<typeof MenuCheckboxItem>) {
+  return <MenuCheckboxItem data-slot="menubar-checkbox-item" {...props} />
 }
 
 function MenubarRadioGroup({
   ...props
-}: React.ComponentProps<typeof DropdownMenuRadioGroup>) {
-  return <DropdownMenuRadioGroup data-slot="menubar-radio-group" {...props} />
+}: React.ComponentProps<typeof MenuRadioGroup>) {
+  return <MenuRadioGroup data-slot="menubar-radio-group" {...props} />
 }
 
-function MenubarRadioItem({
-  className,
-  children,
-  ...props
-}: MenuPrimitive.RadioItem.Props) {
-  return (
-    <MenuPrimitive.RadioItem
-      data-slot="menubar-radio-item"
-      className={cn(
-        "focus:bg-accent focus:text-accent-foreground focus:**:text-accent-foreground gap-2.5 rounded-xl py-2 pr-3 pl-8 text-sm data-disabled:opacity-50 [&_svg:not([class*='size-'])]:size-4 relative flex cursor-default items-center outline-hidden select-none data-disabled:pointer-events-none [&_svg]:pointer-events-none [&_svg]:shrink-0",
-        className
-      )}
-      {...props}
-    >
-      <span className="left-2 size-4 [&_svg:not([class*='size-'])]:size-4 pointer-events-none absolute flex items-center justify-center">
-        <MenuPrimitive.RadioItemIndicator>
-          <HugeiconsIcon icon={Tick02Icon} strokeWidth={2} />
-        </MenuPrimitive.RadioItemIndicator>
-      </span>
-      {children}
-    </MenuPrimitive.RadioItem>
-  )
+function MenubarRadioItem({ ...props }: React.ComponentProps<typeof MenuRadioItem>) {
+  return <MenuRadioItem data-slot="menubar-radio-item" {...props} />
 }
 
-function MenubarLabel({
-  className,
-  inset,
-  ...props
-}: React.ComponentProps<typeof DropdownMenuLabel>) {
-  return (
-    <DropdownMenuLabel
-      data-slot="menubar-label"
-      data-inset={inset}
-      className={cn("text-muted-foreground px-3.5 py-2.5 text-xs data-[inset]:pl-8", className)}
-      {...props}
-    />
-  )
+function MenubarLabel({ ...props }: React.ComponentProps<typeof MenuLabel>) {
+  return <MenuLabel data-slot="menubar-label" {...props} />
 }
 
-function MenubarSeparator({
-  className,
-  ...props
-}: React.ComponentProps<typeof DropdownMenuSeparator>) {
-  return (
-    <DropdownMenuSeparator
-      data-slot="menubar-separator"
-      className={cn("bg-border/50 -mx-1 my-1 h-px", className)}
-      {...props}
-    />
-  )
+function MenubarSeparator({ ...props }: React.ComponentProps<typeof MenuSeparator>) {
+  return <MenuSeparator data-slot="menubar-separator" {...props} />
 }
 
-function MenubarShortcut({
-  className,
-  ...props
-}: React.ComponentProps<typeof DropdownMenuShortcut>) {
-  return (
-    <DropdownMenuShortcut
-      data-slot="menubar-shortcut"
-      className={cn("text-muted-foreground group-focus/menubar-item:text-accent-foreground text-xs tracking-widest ml-auto", className)}
-      {...props}
-    />
-  )
+function MenubarShortcut({ ...props }: React.ComponentProps<typeof MenuShortcut>) {
+  return <MenuShortcut data-slot="menubar-shortcut" {...props} />
 }
 
 function MenubarSub({
   ...props
-}: React.ComponentProps<typeof DropdownMenuSub>) {
-  return <DropdownMenuSub data-slot="menubar-sub" {...props} />
+}: React.ComponentProps<typeof MenuSub>) {
+  return <MenuSub data-slot="menubar-sub" {...props} />
 }
 
-function MenubarSubTrigger({
-  className,
-  inset,
-  ...props
-}: React.ComponentProps<typeof DropdownMenuSubTrigger> & {
-  inset?: boolean
-}) {
-  return (
-    <DropdownMenuSubTrigger
-      data-slot="menubar-sub-trigger"
-      data-inset={inset}
-      className={cn("focus:bg-accent focus:text-accent-foreground data-open:bg-accent data-open:text-accent-foreground gap-2 rounded-xl px-3 py-2 text-sm data-[inset]:pl-8 [&_svg:not([class*='size-'])]:size-4", className)}
-      {...props}
-    />
-  )
+function MenubarSubTrigger({ ...props }: React.ComponentProps<typeof MenuSubTrigger>) {
+  return <MenuSubTrigger data-slot="menubar-sub-trigger" {...props} />
 }
 
-function MenubarSubContent({
-  className,
-  ...props
-}: React.ComponentProps<typeof DropdownMenuSubContent>) {
-  return (
-    <DropdownMenuSubContent
-      data-slot="menubar-sub-content"
-      className={cn("bg-popover text-popover-foreground data-open:animate-in data-closed:animate-out data-closed:fade-out-0 data-open:fade-in-0 data-closed:zoom-out-95 data-open:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 ring-foreground/5 min-w-32 rounded-2xl p-1 shadow-2xl ring-1 duration-100", className)}
-      {...props}
-    />
-  )
+function MenubarSubContent({ ...props }: React.ComponentProps<typeof MenuSubContent>) {
+  return <MenuSubContent data-slot="menubar-sub-content" {...props} />
 }
 
 export {

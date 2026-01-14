@@ -1,15 +1,27 @@
+"use client"
+
+import * as React from "react"
 import { NavigationMenu as NavigationMenuPrimitive } from "@base-ui/react/navigation-menu"
 import { cva } from "class-variance-authority"
-
-import { cn } from "@/lib/utils"
 import { HugeiconsIcon } from "@hugeicons/react"
 import { ArrowDown01Icon } from "@hugeicons/core-free-icons"
+
+import { cn } from "@/lib/utils"
+
+type NavigationMenuProps = React.ComponentProps<typeof NavigationMenuPrimitive.Root>
+type NavigationMenuListProps = React.ComponentProps<typeof NavigationMenuPrimitive.List>
+type NavigationMenuItemProps = React.ComponentProps<typeof NavigationMenuPrimitive.Item>
+type NavigationMenuTriggerProps = React.ComponentProps<typeof NavigationMenuPrimitive.Trigger>
+type NavigationMenuContentProps = React.ComponentProps<typeof NavigationMenuPrimitive.Content>
+type NavigationMenuPositionerProps = React.ComponentProps<typeof NavigationMenuPrimitive.Positioner>
+type NavigationMenuLinkProps = React.ComponentProps<typeof NavigationMenuPrimitive.Link>
+type NavigationMenuIndicatorProps = React.ComponentProps<typeof NavigationMenuPrimitive.Icon>
 
 function NavigationMenu({
   className,
   children,
   ...props
-}: NavigationMenuPrimitive.Root.Props) {
+}: NavigationMenuProps) {
   return (
     <NavigationMenuPrimitive.Root
       data-slot="navigation-menu"
@@ -28,7 +40,7 @@ function NavigationMenu({
 function NavigationMenuList({
   className,
   ...props
-}: NavigationMenuPrimitive.List.Props) {
+}: NavigationMenuListProps) {
   return (
     <NavigationMenuPrimitive.List
       data-slot="navigation-menu-list"
@@ -44,7 +56,7 @@ function NavigationMenuList({
 function NavigationMenuItem({
   className,
   ...props
-}: NavigationMenuPrimitive.Item.Props) {
+}: NavigationMenuItemProps) {
   return (
     <NavigationMenuPrimitive.Item
       data-slot="navigation-menu-item"
@@ -62,7 +74,7 @@ function NavigationMenuTrigger({
   className,
   children,
   ...props
-}: NavigationMenuPrimitive.Trigger.Props) {
+}: NavigationMenuTriggerProps) {
   return (
     <NavigationMenuPrimitive.Trigger
       data-slot="navigation-menu-trigger"
@@ -78,7 +90,7 @@ function NavigationMenuTrigger({
 function NavigationMenuContent({
   className,
   ...props
-}: NavigationMenuPrimitive.Content.Props) {
+}: NavigationMenuContentProps) {
   return (
     <NavigationMenuPrimitive.Content
       data-slot="navigation-menu-content"
@@ -98,7 +110,7 @@ function NavigationMenuPositioner({
   align = "start",
   alignOffset = 0,
   ...props
-}: NavigationMenuPrimitive.Positioner.Props) {
+}: NavigationMenuPositionerProps) {
   return (
     <NavigationMenuPrimitive.Portal>
       <NavigationMenuPrimitive.Positioner
@@ -123,7 +135,7 @@ function NavigationMenuPositioner({
 function NavigationMenuLink({
   className,
   ...props
-}: NavigationMenuPrimitive.Link.Props) {
+}: NavigationMenuLinkProps) {
   return (
     <NavigationMenuPrimitive.Link
       data-slot="navigation-menu-link"
@@ -136,7 +148,7 @@ function NavigationMenuLink({
 function NavigationMenuIndicator({
   className,
   ...props
-}: NavigationMenuPrimitive.Icon.Props) {
+}: NavigationMenuIndicatorProps) {
   return (
     <NavigationMenuPrimitive.Icon
       data-slot="navigation-menu-indicator"
