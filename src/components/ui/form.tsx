@@ -34,6 +34,7 @@ type FormFieldRenderArgs<
   TFieldValues extends FieldValues,
   TName extends FieldPath<TFieldValues>,
 > = {
+  id: string;
   field: ControllerRenderProps<TFieldValues, TName>;
   fieldState: ControllerFieldState;
 };
@@ -43,6 +44,8 @@ type FormFieldProps<
   TName extends FieldPath<TFieldValues>,
 > = {
   name: TName;
+  id?: string;
+  required?: boolean;
   label?: React.ReactNode;
   description?: React.ReactNode;
   rules?: RegisterOptions<TFieldValues, TName>;
@@ -70,8 +73,25 @@ function FormField<
   TFieldValues extends FieldValues,
   TName extends FieldPath<TFieldValues>,
 >(props: FormFieldProps<TFieldValues, TName>) {
-  const { name, label, description, rules, render, ...rootProps } = props;
+  const { name, id, required, label, description, rules, render, ...rootProps } = props;
   const { control } = useFormContext<TFieldValues>();
+
+  const reactId = React.useId();
+  const safeName = String(name).replace(/[^a-zA-Z0-9_-]/g, "-");
+  const controlId = id ?? `field-${safeName}-${reactId}`;
+
+  const inferredRequired = (() => {
+    if (!rules || !("required" in rules)) return false;
+    const req = (rules as { required?: unknown }).required;
+    if (typeof req === "boolean") return req;
+    if (typeof req === "string") return true;
+    if (req && typeof req === "object" && "value" in (req as Record<string, unknown>)) {
+      return Boolean((req as { value?: unknown }).value);
+    }
+    return Boolean(req);
+  })();
+
+  const isRequired = required ?? inferredRequired;
 
   return (
     <Controller
@@ -86,10 +106,19 @@ function FormField<
           touched={fieldState.isTouched}
           dirty={fieldState.isDirty}
         >
-          {label ? <FieldLabel>{label}</FieldLabel> : null}
+          {label ? (
+            <FieldLabel>
+              {label}
+              {isRequired ? (
+                <span aria-hidden="true" className="text-destructive ml-1">
+                  *
+                </span>
+              ) : null}
+            </FieldLabel>
+          ) : null}
           {description ? <FieldDescription>{description}</FieldDescription> : null}
 
-          {render({ field, fieldState })}
+          {render({ id: controlId, field, fieldState })}
 
           {fieldState.error ? (
             <FieldError>{fieldState.error.message}</FieldError>
@@ -97,6 +126,33 @@ function FormField<
         </Field>
       )}
     />
+  );
+}
+
+function FormError({ className, ...props }: React.ComponentProps<"p">) {
+  const {
+    formState: { errors },
+  } = useFormContext();
+
+  const message =
+    (errors as Record<string, unknown>)?.root &&
+    typeof (errors as { root?: { message?: unknown } }).root?.message === "string"
+      ? String((errors as { root?: { message?: unknown } }).root?.message)
+      : null;
+
+  if (!message) return null;
+
+  return (
+    <p
+      data-slot="form-error"
+      className={cn(
+        "text-destructive rounded-2xl border border-destructive/30 bg-destructive/5 p-4 text-sm",
+        className,
+      )}
+      {...props}
+    >
+      {message}
+    </p>
   );
 }
 
@@ -108,14 +164,24 @@ function FormField<
 function fieldControlProps<
   TFieldValues extends FieldValues,
   TName extends FieldPath<TFieldValues>,
->(field: ControllerRenderProps<TFieldValues, TName>) {
+>(
+  field: ControllerRenderProps<TFieldValues, TName>,
+  opts?: {
+    id?: string;
+    describedBy?: string;
+    invalid?: boolean;
+  },
+) {
   return {
+    id: opts?.id,
     name: field.name,
     ref: field.ref,
     value: field.value ?? "",
     onBlur: field.onBlur,
     onChange: field.onChange,
     onValueChange: field.onChange,
+    "aria-describedby": opts?.describedBy,
+    "aria-invalid": opts?.invalid,
   };
 }
 
@@ -123,6 +189,7 @@ export {
   Form,
   FormRoot,
   FormField,
+  FormError,
   fieldControlProps,
   type FormFieldRenderArgs,
   type FormFieldProps,
