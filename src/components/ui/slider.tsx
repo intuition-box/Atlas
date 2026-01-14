@@ -66,4 +66,3 @@ function Slider({
 }
 
 export { Slider }
-export type { SliderProps }

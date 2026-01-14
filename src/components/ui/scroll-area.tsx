@@ -53,4 +53,3 @@ function ScrollBar({
 }
 
 export { ScrollArea, ScrollBar };
-export type { ScrollAreaProps, ScrollBarProps };

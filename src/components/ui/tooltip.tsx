@@ -1,15 +1,15 @@
-"use client";
+"use client"
 
-import * as React from "react";
-import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip";
+import * as React from "react"
+import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip"
 
-import { cn } from "@/lib/utils";
+import { cn } from "@/lib/utils"
 
-type TooltipProviderProps = React.ComponentProps<typeof TooltipPrimitive.Provider>;
+type TooltipProviderProps = React.ComponentProps<typeof TooltipPrimitive.Provider>
 
-type TooltipProps = React.ComponentProps<typeof TooltipPrimitive.Root>;
+type TooltipProps = React.ComponentProps<typeof TooltipPrimitive.Root>
 
-type TooltipTriggerProps = React.ComponentProps<typeof TooltipPrimitive.Trigger>;
+type TooltipTriggerProps = React.ComponentProps<typeof TooltipPrimitive.Trigger>
 
 type TooltipContentProps = React.ComponentProps<typeof TooltipPrimitive.Popup> & {
   side?: React.ComponentProps<typeof TooltipPrimitive.Positioner>["side"];
@@ -17,7 +17,7 @@ type TooltipContentProps = React.ComponentProps<typeof TooltipPrimitive.Popup> &
   align?: React.ComponentProps<typeof TooltipPrimitive.Positioner>["align"];
   alignOffset?: React.ComponentProps<typeof TooltipPrimitive.Positioner>["alignOffset"];
   positionerClassName?: string;
-};
+}
 
 function TooltipProvider({ delay = 0, ...props }: TooltipProviderProps) {
   return (
@@ -26,15 +26,15 @@ function TooltipProvider({ delay = 0, ...props }: TooltipProviderProps) {
       delay={delay}
       {...props}
     />
-  );
+  )
 }
 
 function Tooltip(props: TooltipProps) {
-  return <TooltipPrimitive.Root data-slot="tooltip" {...props} />;
+  return <TooltipPrimitive.Root data-slot="tooltip" {...props} />
 }
 
 function TooltipTrigger(props: TooltipTriggerProps) {
-  return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />;
+  return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />
 }
 
 function TooltipContent({
@@ -69,7 +69,12 @@ function TooltipContent({
         </TooltipPrimitive.Popup>
       </TooltipPrimitive.Positioner>
     </TooltipPrimitive.Portal>
-  );
+  )
 }
 
-export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider };
+export {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+  TooltipProvider,
+}

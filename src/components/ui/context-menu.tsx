@@ -271,20 +271,3 @@ export {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 }
-
-export type {
-  ContextMenuCheckboxItemProps,
-  ContextMenuContentProps,
-  ContextMenuGroupProps,
-  ContextMenuItemProps,
-  ContextMenuLabelProps,
-  ContextMenuPortalProps,
-  ContextMenuProps,
-  ContextMenuRadioGroupProps,
-  ContextMenuRadioItemProps,
-  ContextMenuSeparatorProps,
-  ContextMenuShortcutProps,
-  ContextMenuSubProps,
-  ContextMenuSubTriggerProps,
-  ContextMenuTriggerProps,
-}

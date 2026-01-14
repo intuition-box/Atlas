@@ -1,19 +1,19 @@
-"use client";
+"use client"
 
-import * as React from "react";
-import { Field as FieldPrimitive } from "@base-ui/react/field";
+import * as React from "react"
+import { Field as FieldPrimitive } from "@base-ui/react/field"
 
-import { cn } from "@/lib/utils";
+import { cn } from "@/lib/utils"
 
-export type FieldProps = React.ComponentProps<typeof FieldPrimitive.Root>;
-export type FieldLabelProps = React.ComponentProps<typeof FieldPrimitive.Label>;
-export type FieldDescriptionProps = React.ComponentProps<typeof FieldPrimitive.Description>;
-export type FieldItemProps = React.ComponentProps<typeof FieldPrimitive.Item>;
-export type FieldErrorProps = React.ComponentProps<typeof FieldPrimitive.Error>;
-export type FieldValidityProps = React.ComponentProps<typeof FieldPrimitive.Validity>;
+export type FieldProps = React.ComponentProps<typeof FieldPrimitive.Root>
+export type FieldLabelProps = React.ComponentProps<typeof FieldPrimitive.Label>
+export type FieldDescriptionProps = React.ComponentProps<typeof FieldPrimitive.Description>
+export type FieldItemProps = React.ComponentProps<typeof FieldPrimitive.Item>
+export type FieldErrorProps = React.ComponentProps<typeof FieldPrimitive.Error>
+export type FieldValidityProps = React.ComponentProps<typeof FieldPrimitive.Validity>
 
 // `ref` is important for React Hook Form / focus management, so we forward it only on the control.
-export type FieldControlProps = React.ComponentPropsWithoutRef<typeof FieldPrimitive.Control>;
+export type FieldControlProps = React.ComponentPropsWithoutRef<typeof FieldPrimitive.Control>
 
 export function Field({ className, ...props }: FieldProps) {
   return (
@@ -22,7 +22,7 @@ export function Field({ className, ...props }: FieldProps) {
       className={cn("grid gap-2 data-[invalid]:text-destructive", className)}
       {...props}
     />
-  );
+  )
 }
 
 export function FieldLabel({ className, ...props }: FieldLabelProps) {
@@ -35,7 +35,7 @@ export function FieldLabel({ className, ...props }: FieldLabelProps) {
       )}
       {...props}
     />
-  );
+  )
 }
 
 export const FieldControl = React.forwardRef<
@@ -51,8 +51,8 @@ export const FieldControl = React.forwardRef<
     )}
     {...props}
   />
-));
-FieldControl.displayName = "FieldControl";
+))
+FieldControl.displayName = "FieldControl"
 
 export function FieldDescription({ className, ...props }: FieldDescriptionProps) {
   return (
@@ -61,7 +61,7 @@ export function FieldDescription({ className, ...props }: FieldDescriptionProps)
       className={cn("text-sm text-muted-foreground", className)}
       {...props}
     />
-  );
+  )
 }
 
 export function FieldItem({ className, ...props }: FieldItemProps) {
@@ -71,7 +71,7 @@ export function FieldItem({ className, ...props }: FieldItemProps) {
       className={cn("flex items-center gap-2", className)}
       {...props}
     />
-  );
+  )
 }
 
 export function FieldError({ className, ...props }: FieldErrorProps) {
@@ -81,11 +81,11 @@ export function FieldError({ className, ...props }: FieldErrorProps) {
       className={cn("text-sm font-medium text-destructive", className)}
       {...props}
     />
-  );
+  )
 }
 
 // Base UI's Validity does not accept `className`/`ref` (and we don't need to style it yet),
 // so we export it as-is.
-export const FieldValidity = FieldPrimitive.Validity;
+export const FieldValidity = FieldPrimitive.Validity
 
-export { FieldPrimitive };
+export { FieldPrimitive }

@@ -8,26 +8,43 @@ import { Button } from "@/components/ui/button"
 import { HugeiconsIcon } from "@hugeicons/react"
 import { Cancel01Icon } from "@hugeicons/core-free-icons"
 
-function Dialog({ ...props }: DialogPrimitive.Root.Props) {
+type DialogProps = React.ComponentProps<typeof DialogPrimitive.Root>
+type DialogTriggerProps = React.ComponentProps<typeof DialogPrimitive.Trigger>
+type DialogPortalProps = React.ComponentProps<typeof DialogPrimitive.Portal>
+type DialogCloseProps = React.ComponentProps<typeof DialogPrimitive.Close>
+type DialogOverlayProps = React.ComponentProps<typeof DialogPrimitive.Backdrop>
+type DialogPopupProps = React.ComponentProps<typeof DialogPrimitive.Popup>
+type DialogTitleProps = React.ComponentProps<typeof DialogPrimitive.Title>
+type DialogDescriptionProps = React.ComponentProps<typeof DialogPrimitive.Description>
+
+type DialogContentProps = DialogPopupProps & {
+  showCloseButton?: boolean
+}
+
+type DialogFooterProps = React.ComponentProps<"div"> & {
+  showCloseButton?: boolean
+}
+
+function Dialog({ ...props }: DialogProps) {
   return <DialogPrimitive.Root data-slot="dialog" {...props} />
 }
 
-function DialogTrigger({ ...props }: DialogPrimitive.Trigger.Props) {
+function DialogTrigger({ ...props }: DialogTriggerProps) {
   return <DialogPrimitive.Trigger data-slot="dialog-trigger" {...props} />
 }
 
-function DialogPortal({ ...props }: DialogPrimitive.Portal.Props) {
+function DialogPortal({ ...props }: DialogPortalProps) {
   return <DialogPrimitive.Portal data-slot="dialog-portal" {...props} />
 }
 
-function DialogClose({ ...props }: DialogPrimitive.Close.Props) {
+function DialogClose({ ...props }: DialogCloseProps) {
   return <DialogPrimitive.Close data-slot="dialog-close" {...props} />
 }
 
 function DialogOverlay({
   className,
   ...props
-}: DialogPrimitive.Backdrop.Props) {
+}: DialogOverlayProps) {
   return (
     <DialogPrimitive.Backdrop
       data-slot="dialog-overlay"
@@ -42,9 +59,7 @@ function DialogContent({
   children,
   showCloseButton = true,
   ...props
-}: DialogPrimitive.Popup.Props & {
-  showCloseButton?: boolean
-}) {
+}: DialogContentProps) {
   return (
     <DialogPortal>
       <DialogOverlay />
@@ -92,14 +107,12 @@ function DialogFooter({
   showCloseButton = false,
   children,
   ...props
-}: React.ComponentProps<"div"> & {
-  showCloseButton?: boolean
-}) {
+}: DialogFooterProps) {
   return (
     <div
       data-slot="dialog-footer"
       className={cn(
-        "gap-2 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end",
+        "gap-2 flex flex-col-reverse sm:flex-row sm:justify-end",
         className
       )}
       {...props}
@@ -114,7 +127,7 @@ function DialogFooter({
   )
 }
 
-function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
+function DialogTitle({ className, ...props }: DialogTitleProps) {
   return (
     <DialogPrimitive.Title
       data-slot="dialog-title"
@@ -127,7 +140,7 @@ function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
 function DialogDescription({
   className,
   ...props
-}: DialogPrimitive.Description.Props) {
+}: DialogDescriptionProps) {
   return (
     <DialogPrimitive.Description
       data-slot="dialog-description"
