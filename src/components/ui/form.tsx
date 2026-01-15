@@ -6,6 +6,9 @@ import {
   Controller,
   FormProvider,
   useFormContext,
+  useForm,
+  type SubmitHandler,
+  type UseFormReturn,
   type ControllerFieldState,
   type ControllerRenderProps,
   type FieldPath,
@@ -17,7 +20,18 @@ import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui
 
 import { cn } from "@/lib/utils";
 
-const Form = FormProvider;
+type FormProps<TFieldValues extends FieldValues> = {
+  form: UseFormReturn<TFieldValues>;
+  onSubmit: SubmitHandler<TFieldValues>;
+} & Omit<React.ComponentProps<typeof FormPrimitive>, "onSubmit">;
+
+function Form<TFieldValues extends FieldValues>({ form, onSubmit, ...props }: FormProps<TFieldValues>) {
+  return (
+    <FormProvider {...form}>
+      <FormRoot {...props} onSubmit={form.handleSubmit(onSubmit)} />
+    </FormProvider>
+  );
+}
 
 /**
  * Base UI form element.
@@ -156,6 +170,22 @@ function FormError({ className, ...props }: React.ComponentProps<"p">) {
   );
 }
 
+function FormActions({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="form-actions"
+      className={cn("flex flex-wrap items-center gap-2", className)}
+      {...props}
+    />
+  );
+}
+
+function FormMessage({ className, ...props }: React.ComponentProps<"p">) {
+  return (
+    <p data-slot="form-message" className={cn("text-sm text-foreground/80", className)} {...props} />
+  );
+}
+
 /**
  * Convenience helper for mapping RHF field props onto either:
  * - Base UI controls (use `onValueChange`)
@@ -191,7 +221,10 @@ export {
   FormRoot,
   FormField,
   FormError,
+  FormActions,
+  FormMessage,
   fieldControlProps,
+  useForm,
   type FormFieldRenderArgs,
   type FormFieldProps,
 };
