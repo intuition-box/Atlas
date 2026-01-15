@@ -348,7 +348,7 @@ model Community {
   owner       User     @relation("CommunityOwner", fields: [ownerId], references: [id], onDelete: Restrict)
 
   // Settings (keep flexible)
-  isPublicDirectory Boolean @default(false)
+  isPublicDirectory Boolean @default(true)
 
   /// If false, users cannot submit new applications to join this community.
   isMembershipOpen Boolean @default(true)
