@@ -1,57 +1,56 @@
 import Link from "next/link";
-import { auth, signIn, signOut } from "@/lib/auth";
+import { auth, signOut } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
+import { Separator } from "../ui/separator";
+import { ROUTES } from "@/lib/routes";
 
 export default async function UserMenu() {
   const session = await auth();
   const isAuthed = !!(session?.user as any)?.id;
 
   return (
-    <div className="relative ml-auto">
-      <nav
-        className={
-          "flex items-center gap-6 transition-all duration-200 " +
-          (isAuthed ? "" : "blur-[2px] pointer-events-none")
-        }
-        aria-hidden={isAuthed ? undefined : true}
-      >
-        <Link href="/dashboard" className="hover:text-white/90">Dashboard</Link>
+
+
+    <nav
+      className=" ml-auto flex flex-col gap-2 py-4 transition-all duration-200"
+      aria-hidden={isAuthed ? undefined : true}
+    >
+      <Link href="/about" className="hover:text-white/90">About</Link>
+
+      {isAuthed && (
+        <>
         <Link href="/quests" className="hover:text-white/90">Quests</Link>
-        <Link href="/settings" className="hover:text-white/90">Settings</Link>
-        {isAuthed && (
-          <form
-            action={async () => {
-              "use server";
-              await signOut({ redirectTo: "/" });
-            }}
-            className="absolute right-0 top-full mt-2"
+        <form
+          action={async () => {
+            "use server";
+            await signOut({ redirectTo: "/" });
+          }}
+        >
+          <Button
+            variant="link"
+            type="submit"
+            className="p-0 m-0 h-auto"
           >
-            <Button
-              variant="link"
-              type="submit"
-              className="rounded-full border border-white/15 px-3 py-1.5 text-white/80 hover:border-white/30 hover:bg-white/5 hover:text-white/90"
-              title="Sign out"
-            >
-              Sign out
-            </Button>
-          </form>
-        )}
-      </nav>
+            Sign out
+          </Button>
+        </form>
+        </>
+      )}
 
       {!isAuthed && (
         <Button
-          size="sm"
-          className="absolute top-[50%] left-[50%] -translate-1/2"
+          variant="link"
+          type="submit"
+          className="p-0 m-0 h-auto"
         >
           <Link
-            href="/signin"
-            title="Connect socials to continue"
+            href={ROUTES.signIn}
             aria-label="Connect socials to continue"
           >
             Connect
           </Link>
         </Button>
       )}
-    </div>
+    </nav>
   );
 }
