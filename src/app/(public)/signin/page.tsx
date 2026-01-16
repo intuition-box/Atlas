@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { auth, signIn } from "@/lib/auth";
+import { ROUTES } from "@/lib/routes";
 
 export const dynamic = "force-dynamic";
 
@@ -8,12 +9,14 @@ type SearchParams = {
   returnTo?: string;
 };
 
+const DEFAULT_RETURN_TO = ROUTES.onboarding;
+
 function sanitizeReturnTo(value: string | undefined) {
-  if (!value) return "/onboarding";
+  if (!value) return DEFAULT_RETURN_TO;
   // Only allow in-app relative redirects.
-  if (!value.startsWith("/")) return "/onboarding";
+  if (!value.startsWith("/")) return DEFAULT_RETURN_TO;
   // Prevent protocol-relative redirects (//evil.com).
-  if (value.startsWith("//")) return "/onboarding";
+  if (value.startsWith("//")) return DEFAULT_RETURN_TO;
   return value;
 }
 
