@@ -18,7 +18,7 @@ type Props = {
   centerSubtitle?: string;
 };
 
-export default function OrbitView({ members, centerTitle, centerSubtitle }: Props) {
+export function OrbitView({ members, centerTitle, centerSubtitle }: Props) {
   const router = useRouter();
   const containerRef = useRef<HTMLDivElement | null>(null);
 
