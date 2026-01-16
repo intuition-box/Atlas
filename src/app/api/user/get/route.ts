@@ -15,8 +15,35 @@ type GetUserOk = {
     handle: string | null;
     name: string | null;
     image: string | null;
+    avatarUrl: string | null;
+    headline: string | null;
+    bio: string | null;
+    location: string | null;
+    links: string[] | null;
+    skills: string[] | null;
+    tags: string[] | null;
+    createdAt: Date;
   };
   isSelf: boolean;
+  attestations: Array<{
+    id: string;
+    communityId: string;
+    type: string;
+    note: string | null;
+    createdAt: Date;
+    fromUser: {
+      id: string;
+      name: string | null;
+      handle: string | null;
+      image: string | null;
+      avatarUrl: string | null;
+    };
+    community: {
+      id: string;
+      name: string;
+      handle: string | null;
+    };
+  }>;
 };
 
 const QuerySchema = z.object({
@@ -50,11 +77,13 @@ export async function GET(req: NextRequest) {
     const input = parsed.data;
     const handleInput = input.handle; // raw user input
 
-    // Default to self only when no identifier is provided.
+    // Public endpoint: require an explicit identifier. (No session required.)
     if (!input.userId && !handleInput) {
-      if (!actorId) {
-        return errJson({ code: "UNAUTHORIZED", message: "Sign in required", status: 401 });
-      }
+      return errJson({
+        code: "INVALID_REQUEST",
+        message: "Provide either userId or handle",
+        status: 400,
+      });
     }
 
     // Resolve target user id (prefer explicit ids; support handle for public lookup).
@@ -66,11 +95,9 @@ export async function GET(req: NextRequest) {
       targetUserId = resolved.value;
     }
 
-    // Default to self when no identifier is provided.
-    if (!targetUserId) targetUserId = actorId;
-
+    // If we still don't have a target id, treat as not found (public lookup).
     if (!targetUserId) {
-      return errJson({ code: "UNAUTHORIZED", message: "Sign in required", status: 401 });
+      return errJson({ code: "NOT_FOUND", message: "User not found", status: 404 });
     }
 
     const user = await db.user.findUnique({
@@ -79,6 +106,14 @@ export async function GET(req: NextRequest) {
         id: true,
         name: true,
         image: true,
+        avatarUrl: true,
+        headline: true,
+        bio: true,
+        location: true,
+        links: true,
+        skills: true,
+        tags: true,
+        createdAt: true,
       },
     });
 
@@ -88,14 +123,90 @@ export async function GET(req: NextRequest) {
 
     const handleName = await resolveHandleNameForOwner({ ownerType: HandleOwnerType.USER, ownerId: user.id });
 
+    const rawAttestations = await db.attestation.findMany({
+      where: { toUserId: user.id },
+      take: 50,
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        communityId: true,
+        type: true,
+        note: true,
+        createdAt: true,
+        fromUser: {
+          select: {
+            id: true,
+            name: true,
+            image: true,
+            avatarUrl: true,
+          },
+        },
+        community: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+    });
+
+    const fromUserIds = Array.from(new Set(rawAttestations.map((a) => a.fromUser.id)));
+    const communityIds = Array.from(new Set(rawAttestations.map((a) => a.community.id)));
+
+    const fromUserHandlePairs = await Promise.all(
+      fromUserIds.map(async (id) => {
+        const h = await resolveHandleNameForOwner({ ownerType: HandleOwnerType.USER, ownerId: id });
+        return [id, h] as const;
+      }),
+    );
+
+    const communityHandlePairs = await Promise.all(
+      communityIds.map(async (id) => {
+        const h = await resolveHandleNameForOwner({ ownerType: HandleOwnerType.COMMUNITY, ownerId: id });
+        return [id, h] as const;
+      }),
+    );
+
+    const fromUserHandles = new Map(fromUserHandlePairs);
+    const communityHandles = new Map(communityHandlePairs);
+
+    const attestations: GetUserOk["attestations"] = rawAttestations.map((a) => ({
+      id: a.id,
+      communityId: a.communityId,
+      type: a.type,
+      note: a.note,
+      createdAt: a.createdAt,
+      fromUser: {
+        id: a.fromUser.id,
+        name: a.fromUser.name,
+        handle: fromUserHandles.get(a.fromUser.id) ?? null,
+        image: a.fromUser.image,
+        avatarUrl: a.fromUser.avatarUrl,
+      },
+      community: {
+        id: a.community.id,
+        name: a.community.name,
+        handle: communityHandles.get(a.community.id) ?? null,
+      },
+    }));
+
     return okJson<GetUserOk>({
       user: {
         id: user.id,
         handle: handleName,
         name: user.name,
         image: user.image,
+        avatarUrl: user.avatarUrl,
+        headline: user.headline,
+        bio: user.bio,
+        location: user.location,
+        links: user.links,
+        skills: user.skills,
+        tags: user.tags,
+        createdAt: user.createdAt,
       },
       isSelf: actorId === user.id,
+      attestations,
     });
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2025") {
