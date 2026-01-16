@@ -47,7 +47,8 @@ function uniqStrings(values: string[]): string[] {
 const OnboardSchema = z.object({
   handle: HandleSchema,
 
-  name: z.string().trim().min(1, "Name is required").max(80, "Name is too long").optional(),
+  name: z.string().trim().min(1, "Name is required").max(80, "Name is too long"),
+
   image: z.string().url("Invalid image url").nullable().optional(),
 
   headline: z
