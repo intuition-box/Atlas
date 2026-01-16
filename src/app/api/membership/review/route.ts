@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 
-import { MembershipRole, MembershipStatus } from "@prisma/client";
+import { HandleStatus, MembershipRole, MembershipStatus } from "@prisma/client";
 
 import { auth } from "@/lib/auth";
 import { errJson, okJson } from "@/lib/api-server";
@@ -49,11 +49,179 @@ type ReviewOk = {
   alreadyReviewed: boolean;
 };
 
+
 const REVIEW_ROLES: MembershipRole[] = [
   MembershipRole.OWNER,
   MembershipRole.ADMIN,
   MembershipRole.MODERATOR,
 ];
+
+const QuerySchema = z
+  .object({
+    communityId: z.string().trim().min(1).optional(),
+    communityHandle: z.string().trim().min(1).optional(),
+    q: z.string().trim().max(80).optional(),
+    limit: z
+      .string()
+      .trim()
+      .optional()
+      .transform((v) => {
+        const n = Number(v)
+        return Number.isFinite(n) ? n : undefined
+      })
+      .pipe(z.number().int().min(1).max(200).optional()),
+  })
+  .superRefine((v, ctx) => {
+    if (v.communityId || v.communityHandle) return
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["communityId"],
+      message: "communityId or communityHandle is required",
+    })
+  })
+
+type ReviewListOk = {
+  applications: Array<{
+    id: string
+    createdAt: string
+    answers: unknown
+    user: {
+      id: string
+      handle: string | null
+      name: string | null
+      image: string | null
+      createdAt: string
+    }
+  }>
+}
+
+export async function GET(req: NextRequest) {
+  try {
+    const session = await auth()
+    const userId = session?.user?.id
+
+    if (!userId) {
+      return errJson({ code: "UNAUTHORIZED", message: "Sign in required", status: 401 })
+    }
+
+    const parsed = QuerySchema.safeParse(Object.fromEntries(req.nextUrl.searchParams.entries()))
+
+    if (!parsed.success) {
+      return errJson({
+        code: "INVALID_REQUEST",
+        message: "Invalid request",
+        status: 400,
+        issues: parsed.error.issues.map((iss) => ({
+          path: iss.path.map((seg) => (typeof seg === "number" ? seg : String(seg))),
+          message: iss.message,
+        })),
+      })
+    }
+
+    let communityId = parsed.data.communityId ?? null
+    if (!communityId && parsed.data.communityHandle) {
+      const resolved = await resolveCommunityIdFromHandle(parsed.data.communityHandle)
+      if (!resolved.ok) return errJson(resolved.error)
+      communityId = resolved.value
+    }
+
+    if (!communityId) {
+      return errJson({ code: "INVALID_REQUEST", message: "Invalid request", status: 400 })
+    }
+
+    const reviewer = await db.membership.findFirst({
+      where: {
+        communityId,
+        userId,
+        status: MembershipStatus.APPROVED,
+      },
+      select: { id: true, role: true },
+    })
+
+    if (!reviewer || !REVIEW_ROLES.includes(reviewer.role)) {
+      return errJson({ code: "FORBIDDEN", message: "Not allowed", status: 403 })
+    }
+
+    const q = String(parsed.data.q || "").trim().toLowerCase()
+    const take = parsed.data.limit ?? 100
+
+    const apps = await db.application.findMany({
+      where: {
+        communityId,
+        status: MembershipStatus.PENDING,
+        ...(q
+          ? {
+              user: {
+                OR: [{ name: { contains: q, mode: "insensitive" } }],
+              },
+            }
+          : {}),
+      },
+      orderBy: { createdAt: "desc" },
+      take,
+      select: {
+        id: true,
+        createdAt: true,
+        answers: true,
+        user: {
+          select: {
+            id: true,
+            name: true,
+            image: true,
+            createdAt: true,
+          },
+        },
+      },
+    })
+
+    const userIds = Array.from(new Set(apps.map((a) => a.user.id)))
+
+    const owners = await db.handleOwner.findMany({
+      where: {
+        ownerType: "USER",
+        ownerId: { in: userIds },
+        handle: {
+          status: HandleStatus.ACTIVE,
+        },
+      },
+      select: {
+        ownerId: true,
+        handle: {
+          select: {
+            name: true,
+          },
+        },
+      },
+    })
+
+    const handleByUserId = new Map<string, string>()
+    for (const o of owners) {
+      const h = String(o.handle?.name || "").trim()
+      if (h) handleByUserId.set(String(o.ownerId), h)
+    }
+
+    return okJson<ReviewListOk>({
+      applications: apps.map((a) => ({
+        id: a.id,
+        createdAt: a.createdAt.toISOString(),
+        answers: a.answers,
+        user: {
+          id: a.user.id,
+          handle: handleByUserId.get(a.user.id) ?? null,
+          name: a.user.name ?? null,
+          image: a.user.image ?? null,
+          createdAt: a.user.createdAt.toISOString(),
+        },
+      })),
+    })
+  } catch {
+    return errJson({
+      code: "INTERNAL_ERROR",
+      message: "Something went wrong",
+      status: 500,
+    })
+  }
+}
 
 export async function POST(req: NextRequest) {
   try {
