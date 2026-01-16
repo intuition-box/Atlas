@@ -74,9 +74,12 @@ export default function CommunitySettingsPage() {
     void (async () => {
       // Enforce ownership client-side.
       const session = await getSession()
-      const sessionHandle = session?.user?.handle
+      const sessionHandle = (session?.user as any)?.handle ? String((session?.user as any).handle) : ""
+      const sessionUserId = (session?.user as any)?.id ? String((session?.user as any).id) : ""
 
-      if (!session?.user?.id || !sessionHandle) {
+      // If we can’t identify the signed-in user at all, bounce to the public page.
+      // (Some NextAuth configs don’t include `user.id` in the client session, so we rely on handle when present.)
+      if (!sessionHandle && !sessionUserId) {
         if (!cancelled) router.replace(`/c/${handle}`)
         return
       }
@@ -94,17 +97,25 @@ export default function CommunitySettingsPage() {
       const ownerId = c.ownerId ? String(c.ownerId) : ""
       const ownerHandle = c.owner?.handle ? String(c.owner.handle) : ""
 
-      const isOwner = ownerId
-        ? ownerId === session.user.id
-        : ownerHandle
-          ? ownerHandle === sessionHandle
-          : false
+      // Prefer ID match when both are available, otherwise fall back to handle.
+      // If the API response doesn’t include ownership fields, don’t hard-block owners:
+      // allow the page to render and let the update route enforce authorization.
+      const canCheckById = !!ownerId && !!sessionUserId
+      const canCheckByHandle = !!ownerHandle && !!sessionHandle
 
-      if (!isOwner) {
+      const isOwner = canCheckById
+        ? ownerId === sessionUserId
+        : canCheckByHandle
+          ? ownerHandle === sessionHandle
+          : null
+
+      if (isOwner === false) {
         router.replace(`/c/${handle}`)
         return
       }
 
+      // If we couldn’t verify ownership (missing owner fields), keep going so owners aren’t locked out.
+      // The server will still enforce authorization on update.
       setCommunityId(String(c.id))
 
       form.reset(
