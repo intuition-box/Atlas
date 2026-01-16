@@ -12,7 +12,7 @@ export default defineConfig({
     path: path.join('prisma', 'migrations'),
 
     // Seed command: node/ts-node/tsx
-    // seed: 'tsx prisma/seed.ts',
+    seed: 'tsx prisma/seed.ts',
     // initShadowDb: '/* optional SQL for shadow DB bootstrap */',
   },
 
