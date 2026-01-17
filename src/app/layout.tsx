@@ -4,7 +4,7 @@ import { Noto_Sans, Noto_Serif, Noto_Sans_Mono } from "next/font/google";
 import "./globals.css";
 import { Separator } from "@/components/ui/separator";
 import UserMenu from "@/components/layout/user-menu";
-import Logo from "@/components/logo";
+import Logo from "@/components/brand/logo";
 
 const serif = Noto_Serif({
   variable: "--font-serif",
