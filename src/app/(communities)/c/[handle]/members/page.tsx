@@ -24,11 +24,16 @@ import {
 } from "@/components/ui/combobox"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { PageHeader } from "@/components/common/page-header"
+import { UsersIcon } from "@/components/ui/icons"
 
-// Constants
+// === CONSTANTS ===
+
 const PAGE_SIZE = 50
 const DEBOUNCE_DELAY = 300
 const LOADING_SKELETON_COUNT = 9
+
+// === TYPES ===
 
 type MemberRole = "OWNER" | "ADMIN" | "MOD" | "MEMBER"
 
@@ -58,13 +63,15 @@ type CommunityMember = {
   user: MemberProfile
 }
 
+type CommunityInfo = {
+  id: string
+  handle: string
+  name: string
+  avatarUrl?: string | null
+}
+
 type MembersResponse = {
-  community: {
-    id: string
-    handle: string
-    name: string
-    avatarUrl?: string | null
-  }
+  community: CommunityInfo
   page: {
     nextCursor: string | null
   }
@@ -77,8 +84,25 @@ type MembersResponse = {
   }
 }
 
+type FilterState = {
+  q: string
+  role: MemberRole | ""
+  country: string
+  skills: string[]
+  tools: string[]
+  headline: string
+  bio: string
+  linkDomain: string
+  loveMin: string
+  loveMax: string
+  reachMin: string
+  reachMax: string
+  gravityMin: string
+  gravityMax: string
+}
+
 type QueryParams = {
-  handle: string
+  communityHandle: string
   q?: string
   role?: string
   country?: string
@@ -97,18 +121,19 @@ type QueryParams = {
   limit: number
 }
 
+// === UTILITY FUNCTIONS ===
+
 function normalizeMembersPayload(raw: unknown, fallbackHandle: string): MembersResponse {
   const r = raw as Record<string, unknown> | null
 
   const communityRaw = (r && (r["community"] as Record<string, unknown> | null)) || null
-  const community: MembersResponse["community"] = {
+  const community: CommunityInfo = {
     id: String((communityRaw && communityRaw["id"]) || ""),
     handle: String((communityRaw && communityRaw["handle"]) || fallbackHandle),
     name: String((communityRaw && communityRaw["name"]) || "Community"),
     avatarUrl: (communityRaw && (communityRaw["avatarUrl"] as string | null | undefined)) || null,
   }
 
-  // Support a few historical payload shapes.
   const pageRaw = (r && (r["page"] as Record<string, unknown> | null)) || null
   const nextCursorFromPage = pageRaw ? (pageRaw["nextCursor"] as string | null | undefined) : null
   const nextCursor =
@@ -122,32 +147,23 @@ function normalizeMembersPayload(raw: unknown, fallbackHandle: string): MembersR
     (r && (r["memberships"] as unknown))
 
   const members: CommunityMember[] = Array.isArray(membersRaw) ? (membersRaw as CommunityMember[]) : []
-
   const facets = (r && (r["facets"] as MembersResponse["facets"])) || undefined
 
-  return {
-    community,
-    page: { nextCursor },
-    members,
-    facets,
-  }
+  return { community, page: { nextCursor }, members, facets }
 }
 
-// Utility functions
-function mergeMembersUnique(prev: CommunityMember[], next: CommunityMember[]) {
+function mergeMembersUnique(prev: CommunityMember[], next: CommunityMember[]): CommunityMember[] {
   const out: CommunityMember[] = []
   const seen = new Set<string>()
 
   for (const m of prev) {
-    if (!m) continue
-    if (seen.has(m.membershipId)) continue
+    if (!m || seen.has(m.membershipId)) continue
     seen.add(m.membershipId)
     out.push(m)
   }
 
   for (const m of next) {
-    if (!m) continue
-    if (seen.has(m.membershipId)) continue
+    if (!m || seen.has(m.membershipId)) continue
     seen.add(m.membershipId)
     out.push(m)
   }
@@ -155,9 +171,10 @@ function mergeMembersUnique(prev: CommunityMember[], next: CommunityMember[]) {
   return out
 }
 
-function uniqStrings(values: string[]) {
+function uniqStrings(values: string[]): string[] {
   const seen = new Set<string>()
   const out: string[] = []
+
   for (const v of values) {
     const s = v.trim()
     if (!s) continue
@@ -166,6 +183,7 @@ function uniqStrings(values: string[]) {
     seen.add(key)
     out.push(s)
   }
+
   return out
 }
 
@@ -177,60 +195,22 @@ function clampInt(v: string, min: number, max: number): number | null {
   return i
 }
 
-function opt(value: string | undefined | null): string | undefined {
+function optionalString(value: string | undefined | null): string | undefined {
   const v = (value ?? "").trim()
   return v || undefined
 }
 
-function asCsv(values: string[]) {
+function asCsv(values: string[]): string | undefined {
   const v = uniqStrings(values)
   return v.length ? v.join(",") : undefined
 }
 
-function formatCompact(n: number | null | undefined) {
+function formatCompact(n: number | null | undefined): string {
   if (n === null || n === undefined || !Number.isFinite(n)) return ""
   return Intl.NumberFormat(undefined, { notation: "compact" }).format(n)
 }
 
-function initials(nameOrHandle: string) {
-  const s = nameOrHandle.trim()
-  if (!s) return "?"
-  const parts = s.split(/\s+/).filter(Boolean)
-  if (parts.length === 1) return parts[0].slice(0, 1).toUpperCase()
-  return (parts[0].slice(0, 1) + parts[1].slice(0, 1)).toUpperCase()
-}
-
-function useDebouncedValue<T>(value: T, delayMs: number) {
-  const [debounced, setDebounced] = React.useState(value)
-
-  React.useEffect(() => {
-    const t = window.setTimeout(() => setDebounced(value), delayMs)
-    return () => window.clearTimeout(t)
-  }, [value, delayMs])
-
-  return debounced
-}
-
-function buildQueryParams(
-  handle: string,
-  filters: {
-    q: string
-    role: string
-    country: string
-    skills: string[]
-    tools: string[]
-    headline: string
-    bio: string
-    linkDomain: string
-    loveMin: string
-    loveMax: string
-    reachMin: string
-    reachMax: string
-    gravityMin: string
-    gravityMax: string
-  },
-  cursor: string | null
-): QueryParams {
+function buildQueryParams(communityHandle: string, filters: FilterState, cursor: string | null): QueryParams {
   const loveMinN = filters.loveMin.trim() ? clampInt(filters.loveMin, 0, 1_000_000) : null
   const loveMaxN = filters.loveMax.trim() ? clampInt(filters.loveMax, 0, 1_000_000) : null
   const reachMinN = filters.reachMin.trim() ? clampInt(filters.reachMin, 0, 1_000_000) : null
@@ -239,15 +219,15 @@ function buildQueryParams(
   const gravityMaxN = filters.gravityMax.trim() ? clampInt(filters.gravityMax, 0, 1_000_000_000) : null
 
   return {
-    handle,
-    q: opt(filters.q),
-    role: opt(filters.role),
-    country: opt(filters.country),
+    communityHandle,
+    q: optionalString(filters.q),
+    role: optionalString(filters.role),
+    country: optionalString(filters.country),
     skills: asCsv(filters.skills),
     tools: asCsv(filters.tools),
-    headline: opt(filters.headline),
-    bio: opt(filters.bio),
-    linkDomain: opt(filters.linkDomain),
+    headline: optionalString(filters.headline),
+    bio: optionalString(filters.bio),
+    linkDomain: optionalString(filters.linkDomain),
     loveMin: loveMinN ?? undefined,
     loveMax: loveMaxN ?? undefined,
     reachMin: reachMinN ?? undefined,
@@ -259,7 +239,137 @@ function buildQueryParams(
   }
 }
 
-// Components
+function hasActiveFilters(filters: FilterState): boolean {
+  return Boolean(
+    filters.q ||
+    filters.role ||
+    filters.country ||
+    filters.skills.length ||
+    filters.tools.length ||
+    filters.headline ||
+    filters.bio ||
+    filters.linkDomain ||
+    filters.loveMin ||
+    filters.loveMax ||
+    filters.reachMin ||
+    filters.reachMax ||
+    filters.gravityMin ||
+    filters.gravityMax
+  )
+}
+
+// === CUSTOM HOOKS ===
+
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = React.useState(value)
+
+  React.useEffect(() => {
+    const t = window.setTimeout(() => setDebounced(value), delayMs)
+    return () => window.clearTimeout(t)
+  }, [value, delayMs])
+
+  return debounced
+}
+
+function useMembersData(communityHandle: string, filters: FilterState, cursor: string | null) {
+  const router = useRouter()
+  const [data, setData] = React.useState<MembersResponse | null>(null)
+  const [items, setItems] = React.useState<CommunityMember[]>([])
+  const [loading, setLoading] = React.useState(true)
+  const [loadingMore, setLoadingMore] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+
+  const debouncedQ = useDebouncedValue(filters.q, DEBOUNCE_DELAY)
+  const debouncedHeadline = useDebouncedValue(filters.headline, DEBOUNCE_DELAY)
+  const debouncedBio = useDebouncedValue(filters.bio, DEBOUNCE_DELAY)
+  const debouncedLinkDomain = useDebouncedValue(filters.linkDomain, DEBOUNCE_DELAY)
+
+  const queryObject = React.useMemo(() => {
+    return buildQueryParams(
+      communityHandle,
+      {
+        ...filters,
+        q: debouncedQ,
+        headline: debouncedHeadline,
+        bio: debouncedBio,
+        linkDomain: debouncedLinkDomain,
+      },
+      cursor
+    )
+  }, [
+    communityHandle,
+    debouncedQ,
+    filters.role,
+    filters.country,
+    filters.skills,
+    filters.tools,
+    debouncedHeadline,
+    debouncedBio,
+    debouncedLinkDomain,
+    filters.loveMin,
+    filters.loveMax,
+    filters.reachMin,
+    filters.reachMax,
+    filters.gravityMin,
+    filters.gravityMax,
+    cursor,
+  ])
+
+  React.useEffect(() => {
+    const ac = new AbortController()
+
+    async function load() {
+      setError(null)
+      setLoading(cursor === null)
+      setLoadingMore(cursor !== null)
+
+      try {
+        const res = await apiGet<MembersResponse>("/api/membership/list", queryObject, {
+          signal: ac.signal,
+        })
+
+        if (ac.signal.aborted) return
+
+        if (!res.ok) {
+          if ("status" in res.error && res.error.status === 401) {
+            router.replace(ROUTES.signIn)
+            return
+          }
+
+          setError("We couldn't load members. Try again.")
+          setLoading(false)
+          setLoadingMore(false)
+          return
+        }
+
+        const normalized = normalizeMembersPayload(res.value as unknown, communityHandle)
+        const nextMembers = normalized.members
+
+        setData(normalized)
+        setItems((prevItems) => cursor ? mergeMembersUnique(prevItems, nextMembers) : nextMembers)
+        setLoading(false)
+        setLoadingMore(false)
+      } catch (err) {
+        if (!ac.signal.aborted) {
+          setError("An unexpected error occurred while loading members.")
+          setLoading(false)
+          setLoadingMore(false)
+        }
+      }
+    }
+
+    void load()
+
+    return () => {
+      ac.abort()
+    }
+  }, [router, queryObject, cursor, communityHandle])
+
+  return { data, items, loading, loadingMore, error }
+}
+
+// === SUB-COMPONENTS ===
+
 function Chip({ children, onRemove }: { children: React.ReactNode; onRemove?: () => void }) {
   return (
     <span className="inline-flex items-center gap-1 rounded-4xl bg-muted-foreground/10 px-2 py-1 text-xs font-medium">
@@ -345,11 +455,7 @@ function FilterCombobox<T extends string>({
   )
 }
 
-type MemberCardProps = {
-  member: CommunityMember
-}
-
-function MemberCard({ member }: MemberCardProps) {
+function MemberCard({ member }: { member: CommunityMember }) {
   const u = member.user
   const displayName = u.name?.trim() || `@${u.handle}`
   const href = userPath(u.handle)
@@ -363,7 +469,7 @@ function MemberCard({ member }: MemberCardProps) {
       <div className="flex items-start gap-3">
         <Avatar className="h-10 w-10">
           <AvatarImage src={u.image ?? undefined} alt={displayName} />
-          <AvatarFallback>{initials(displayName)}</AvatarFallback>
+          <AvatarFallback><UsersIcon /></AvatarFallback>
         </Avatar>
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <div className="flex items-center justify-between gap-2">
@@ -414,11 +520,7 @@ function MemberCard({ member }: MemberCardProps) {
   )
 }
 
-type MemberRowProps = {
-  member: CommunityMember
-}
-
-function MemberRow({ member }: MemberRowProps) {
+function MemberRow({ member }: { member: CommunityMember }) {
   const u = member.user
   const displayName = u.name?.trim() || `@${u.handle}`
   const href = userPath(u.handle)
@@ -432,7 +534,7 @@ function MemberRow({ member }: MemberRowProps) {
       <div className="flex min-w-0 items-center gap-3">
         <Avatar className="h-8 w-8">
           <AvatarImage src={u.image ?? undefined} alt={displayName} />
-          <AvatarFallback>{initials(displayName)}</AvatarFallback>
+          <AvatarFallback><UsersIcon /></AvatarFallback>
         </Avatar>
         <div className="min-w-0">
           <div className="truncate font-medium">{displayName}</div>
@@ -458,46 +560,78 @@ function MemberRow({ member }: MemberRowProps) {
   )
 }
 
-export default function CommunityMembersPage() {
-  const router = useRouter()
-  const params = useParams<{ handle: string }>()
-  const handle = params.handle?.trim() || ""
+function LoadingSkeleton() {
+  return (
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true">
+      {Array.from({ length: LOADING_SKELETON_COUNT }).map((_, i) => (
+        <div key={i} className="rounded-2xl border border-border/60 bg-card/30 p-4">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-full bg-muted-foreground/10" />
+            <div className="flex-1">
+              <div className="h-4 w-40 rounded bg-muted-foreground/10" />
+              <div className="mt-2 h-3 w-28 rounded bg-muted-foreground/10" />
+            </div>
+          </div>
+          <div className="mt-4 h-3 w-full rounded bg-muted-foreground/10" />
+          <div className="mt-2 h-3 w-5/6 rounded bg-muted-foreground/10" />
+        </div>
+      ))}
+    </div>
+  )
+}
 
-  // View + paging
-  const [view, setView] = React.useState<"cards" | "list">("cards")
-  const [cursor, setCursor] = React.useState<string | null>(null)
+function ActiveFiltersBar({
+  filters,
+  memberCount,
+  hasMorePages,
+  onRemoveRole,
+  onRemoveCountry,
+  onRemoveSkill,
+  onRemoveTool,
+}: {
+  filters: FilterState
+  memberCount: number
+  hasMorePages: boolean
+  onRemoveRole: () => void
+  onRemoveCountry: () => void
+  onRemoveSkill: (skill: string) => void
+  onRemoveTool: (tool: string) => void
+}) {
+  return (
+    <div className="-mt-2 flex flex-wrap items-center gap-2">
+      <Badge variant="secondary">
+        {memberCount}
+        {hasMorePages ? "+" : ""} members
+      </Badge>
+      {filters.role && <Chip onRemove={onRemoveRole}>Role: {filters.role}</Chip>}
+      {filters.country && <Chip onRemove={onRemoveCountry}>Country: {filters.country}</Chip>}
+      {filters.skills.map((s) => (
+        <Chip key={s} onRemove={() => onRemoveSkill(s)}>
+          Skill: {s}
+        </Chip>
+      ))}
+      {filters.tools.map((t) => (
+        <Chip key={t} onRemove={() => onRemoveTool(t)}>
+          Tool: {t}
+        </Chip>
+      ))}
+    </div>
+  )
+}
 
-  // Filters
-  const [q, setQ] = React.useState("")
-  const [role, setRole] = React.useState<MemberRole | "">("")
-  const [country, setCountry] = React.useState("")
-  const [skills, setSkills] = React.useState<string[]>([])
-  const [tools, setTools] = React.useState<string[]>([])
-  const [headline, setHeadline] = React.useState("")
-  const [bio, setBio] = React.useState("")
-  const [linkDomain, setLinkDomain] = React.useState("")
-  const [loveMin, setLoveMin] = React.useState("")
-  const [loveMax, setLoveMax] = React.useState("")
-  const [reachMin, setReachMin] = React.useState("")
-  const [reachMax, setReachMax] = React.useState("")
-  const [gravityMin, setGravityMin] = React.useState("")
-  const [gravityMax, setGravityMax] = React.useState("")
-
-  // UI state
-  const [isFiltersOpen, setIsFiltersOpen] = React.useState(false)
-  const [loading, setLoading] = React.useState(true)
-  const [loadingMore, setLoadingMore] = React.useState(false)
-  const [error, setError] = React.useState<string | null>(null)
-
-  const [data, setData] = React.useState<MembersResponse | null>(null)
-  const [items, setItems] = React.useState<CommunityMember[]>([])
-
-  const memberCount = items.length
-
-  const debouncedQ = useDebouncedValue(q, DEBOUNCE_DELAY)
-  const debouncedHeadline = useDebouncedValue(headline, DEBOUNCE_DELAY)
-  const debouncedBio = useDebouncedValue(bio, DEBOUNCE_DELAY)
-  const debouncedLinkDomain = useDebouncedValue(linkDomain, DEBOUNCE_DELAY)
+function FiltersPanel({
+  filters,
+  onFiltersChange,
+  onAddSkill,
+  onAddTool,
+}: {
+  filters: FilterState
+  onFiltersChange: (updates: Partial<FilterState>) => void
+  onAddSkill: (skill: string) => void
+  onAddTool: (tool: string) => void
+}) {
+  const [skillQuery, setSkillQuery] = React.useState("")
+  const [toolQuery, setToolQuery] = React.useState("")
 
   const countryItems = React.useMemo(() => COUNTRIES.map((c) => c.name), [])
   const roleItems = React.useMemo<Array<MemberRole | "">>(
@@ -505,8 +639,8 @@ export default function CommunityMembersPage() {
     []
   )
 
-  const selectedSkillSet = React.useMemo(() => new Set(skills.map((s) => s.toLowerCase())), [skills])
-  const selectedToolSet = React.useMemo(() => new Set(tools.map((t) => t.toLowerCase())), [tools])
+  const selectedSkillSet = React.useMemo(() => new Set(filters.skills.map((s) => s.toLowerCase())), [filters.skills])
+  const selectedToolSet = React.useMemo(() => new Set(filters.tools.map((t) => t.toLowerCase())), [filters.tools])
 
   const availableSkills = React.useMemo(() => {
     return (SKILLS as string[]).filter((s) => !selectedSkillSet.has(s.toLowerCase()))
@@ -517,187 +651,359 @@ export default function CommunityMembersPage() {
     return toolOptions.filter((t) => !selectedToolSet.has(t.toLowerCase()))
   }, [toolOptions, selectedToolSet])
 
-  const [skillQuery, setSkillQuery] = React.useState("")
-  const [toolQuery, setToolQuery] = React.useState("")
-
-  const hasActiveFilters = Boolean(
-    q || role || country || skills.length || tools.length || headline || bio ||
-    linkDomain || loveMin || loveMax || reachMin || reachMax || gravityMin || gravityMax
-  )
-
-  const queryObject = React.useMemo(() => {
-    return buildQueryParams(
-      handle,
-      {
-        q: debouncedQ,
-        role,
-        country,
-        skills,
-        tools,
-        headline: debouncedHeadline,
-        bio: debouncedBio,
-        linkDomain: debouncedLinkDomain,
-        loveMin,
-        loveMax,
-        reachMin,
-        reachMax,
-        gravityMin,
-        gravityMax,
-      },
-      cursor
-    )
-  }, [
-    handle,
-    debouncedQ,
-    role,
-    country,
-    skills,
-    tools,
-    debouncedHeadline,
-    debouncedBio,
-    debouncedLinkDomain,
-    loveMin,
-    loveMax,
-    reachMin,
-    reachMax,
-    gravityMin,
-    gravityMax,
-    cursor,
-  ])
-
-  // Reset paging when filters change (except cursor)
-  React.useEffect(() => {
-    setCursor(null)
-  }, [
-    handle,
-    debouncedQ,
-    role,
-    country,
-    skills,
-    tools,
-    debouncedHeadline,
-    debouncedBio,
-    debouncedLinkDomain,
-    loveMin,
-    loveMax,
-    reachMin,
-    reachMax,
-    gravityMin,
-    gravityMax,
-  ])
-
-  React.useEffect(() => {
-    const ac = new AbortController()
-
-    async function load() {
-      setError(null)
-      setLoading(cursor === null)
-      setLoadingMore(cursor !== null)
-
-      const res = await apiGet<MembersResponse>("/api/membership/list", queryObject, {
-        signal: ac.signal,
-      })
-
-      if (ac.signal.aborted) return
-
-      if (!res.ok) {
-        if ("status" in res.error && res.error.status === 401) {
-          router.replace(ROUTES.signIn)
-          return
-        }
-
-        setError("We couldn't load members. Try again.")
-        setLoading(false)
-        setLoadingMore(false)
-        return
-      }
-
-      const normalized = normalizeMembersPayload(res.value as unknown, handle)
-      const nextMembers = normalized.members
-
-      setData(normalized)
-
-      // Apply paging
-      setItems((prevItems) => {
-        return cursor ? mergeMembersUnique(prevItems, nextMembers) : nextMembers
-      })
-
-      setLoading(false)
-      setLoadingMore(false)
-    }
-
-    void load()
-
-    return () => {
-      ac.abort()
-    }
-  }, [router, queryObject, cursor])
-
-  function clearAll() {
-    setQ("")
-    setRole("")
-    setCountry("")
-    setSkills([])
-    setTools([])
-    setHeadline("")
-    setBio("")
-    setLinkDomain("")
-    setLoveMin("")
-    setLoveMax("")
-    setReachMin("")
-    setReachMax("")
-    setGravityMin("")
-    setGravityMax("")
-  }
-
-  function addTool(next: string) {
+  function handleAddTool(next: string) {
     const v = next.trim()
-    if (!v) return
+    if (!v || selectedToolSet.has(v.toLowerCase())) return
 
-    const key = v.toLowerCase()
-    if (selectedToolSet.has(key)) return
-
-    if (!toolOptions.some((t) => t.toLowerCase() === key)) {
+    if (!toolOptions.some((t) => t.toLowerCase() === v.toLowerCase())) {
       setToolOptions((prev) => [v, ...prev])
     }
 
-    setTools((prev) => [...prev, v])
+    onAddTool(v)
     setToolQuery("")
   }
 
-  function addSkill(next: string) {
+  function handleAddSkill(next: string) {
     const v = next.trim()
-    if (!v) return
+    if (!v || selectedSkillSet.has(v.toLowerCase())) return
 
-    const key = v.toLowerCase()
-    if (selectedSkillSet.has(key)) return
-
-    setSkills((prev) => [...prev, v])
+    onAddSkill(v)
     setSkillQuery("")
   }
 
-  const communityName = data?.community?.name || "Community"
-  const communityHandle = data?.community?.handle || handle
-
   return (
-    <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-10">
-      <header className="flex flex-col gap-2">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <Avatar className="h-10 w-10">
-              <AvatarImage src={data?.community?.avatarUrl ?? undefined} alt={communityName} />
-              <AvatarFallback>{initials(communityName)}</AvatarFallback>
-            </Avatar>
-            <div className="flex flex-col">
-              <h1 className="text-2xl font-semibold">Members</h1>
-              <p className="text-sm text-muted-foreground">
-                <span className="text-foreground/80">{communityName}</span> · /c/{communityHandle}
-              </p>
+    <section className="rounded-2xl border border-border/60 bg-card/30 p-4" aria-label="Member filters">
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="flex flex-col gap-2">
+          <div className="text-xs font-medium text-foreground/70">Search</div>
+          <Input
+            placeholder="Name, handle, headline…"
+            value={filters.q}
+            onChange={(e) => onFiltersChange({ q: e.target.value })}
+            aria-label="Search members"
+          />
+        </div>
+
+        <FilterCombobox
+          label="Role"
+          placeholder="Any"
+          items={roleItems}
+          value={filters.role || null}
+          onValueChange={(v) => onFiltersChange({ role: (v as MemberRole) || "" })}
+          renderItem={(item) => item || "Any"}
+        />
+
+        <FilterCombobox
+          label="Country"
+          placeholder="Any"
+          items={countryItems}
+          value={filters.country || null}
+          onValueChange={(v) => onFiltersChange({ country: v || "" })}
+        />
+
+        <div className="flex flex-col gap-2">
+          <div className="text-xs font-medium text-foreground/70">Headline contains</div>
+          <Input
+            placeholder="e.g. Designer"
+            value={filters.headline}
+            onChange={(e) => onFiltersChange({ headline: e.target.value })}
+            aria-label="Filter by headline"
+          />
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <div className="text-xs font-medium text-foreground/70">Bio contains</div>
+          <Input
+            placeholder="keywords"
+            value={filters.bio}
+            onChange={(e) => onFiltersChange({ bio: e.target.value })}
+            aria-label="Filter by bio"
+          />
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <div className="text-xs font-medium text-foreground/70">Link domain</div>
+          <Input
+            placeholder="e.g. github.com"
+            value={filters.linkDomain}
+            onChange={(e) => onFiltersChange({ linkDomain: e.target.value })}
+            aria-label="Filter by link domain"
+          />
+        </div>
+
+        <div className="grid gap-4 lg:col-span-3 lg:grid-cols-2">
+          <div className="flex flex-col gap-2">
+            <div className="text-xs font-medium text-foreground/70">Skills</div>
+            <FilterCombobox
+              label=""
+              placeholder="Add a skill…"
+              items={availableSkills}
+              value={null}
+              onValueChange={(v) => v && handleAddSkill(v)}
+              inputValue={skillQuery}
+              onInputValueChange={setSkillQuery}
+            />
+
+            {filters.skills.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {filters.skills.map((s) => (
+                  <Chip
+                    key={s}
+                    onRemove={() => onFiltersChange({ skills: filters.skills.filter((x) => x !== s) })}
+                  >
+                    {s}
+                  </Chip>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <div className="text-xs font-medium text-foreground/70">Tools</div>
+            <FilterCombobox
+              label=""
+              placeholder="Add a tool…"
+              items={availableTools}
+              value={null}
+              onValueChange={(v) => v && handleAddTool(v)}
+              inputValue={toolQuery}
+              onInputValueChange={setToolQuery}
+              emptyMessage={`Press Enter to add "${toolQuery.trim() || "…"}".`}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault()
+                  handleAddTool(toolQuery)
+                }
+              }}
+            />
+
+            {filters.tools.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {filters.tools.map((t) => (
+                  <Chip
+                    key={t}
+                    onRemove={() => onFiltersChange({ tools: filters.tools.filter((x) => x !== t) })}
+                  >
+                    {t}
+                  </Chip>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="grid gap-3 lg:col-span-3 lg:grid-cols-3">
+          <div className="flex flex-col gap-2">
+            <div className="text-xs font-medium text-foreground/70">Love range</div>
+            <div className="grid grid-cols-2 gap-2">
+              <Input
+                placeholder="Min"
+                value={filters.loveMin}
+                onChange={(e) => onFiltersChange({ loveMin: e.target.value })}
+                aria-label="Minimum love score"
+              />
+              <Input
+                placeholder="Max"
+                value={filters.loveMax}
+                onChange={(e) => onFiltersChange({ loveMax: e.target.value })}
+                aria-label="Maximum love score"
+              />
             </div>
           </div>
 
+          <div className="flex flex-col gap-2">
+            <div className="text-xs font-medium text-foreground/70">Reach range</div>
+            <div className="grid grid-cols-2 gap-2">
+              <Input
+                placeholder="Min"
+                value={filters.reachMin}
+                onChange={(e) => onFiltersChange({ reachMin: e.target.value })}
+                aria-label="Minimum reach score"
+              />
+              <Input
+                placeholder="Max"
+                value={filters.reachMax}
+                onChange={(e) => onFiltersChange({ reachMax: e.target.value })}
+                aria-label="Maximum reach score"
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <div className="text-xs font-medium text-foreground/70">Gravity range</div>
+            <div className="grid grid-cols-2 gap-2">
+              <Input
+                placeholder="Min"
+                value={filters.gravityMin}
+                onChange={(e) => onFiltersChange({ gravityMin: e.target.value })}
+                aria-label="Minimum gravity score"
+              />
+              <Input
+                placeholder="Max"
+                value={filters.gravityMax}
+                onChange={(e) => onFiltersChange({ gravityMax: e.target.value })}
+                aria-label="Maximum gravity score"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function MembersGrid({ items, view }: { items: CommunityMember[]; view: "cards" | "list" }) {
+  if (view === "cards") {
+    return (
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {items.map((m) => (
+          <MemberCard key={m.membershipId} member={m} />
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-2xl border border-border/60 bg-card/30 overflow-hidden">
+      <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3 border-b border-border/60 px-4 py-3 text-xs font-medium text-foreground/70">
+        <div>Member</div>
+        <div>Role</div>
+        <div>Location</div>
+        <div className="text-right">Score</div>
+      </div>
+
+      {items.map((m) => (
+        <MemberRow key={m.membershipId} member={m} />
+      ))}
+    </div>
+  )
+}
+
+function EmptyState({ hasFilters, onClearFilters }: { hasFilters: boolean; onClearFilters: () => void }) {
+  return (
+    <div className="rounded-2xl border border-border/60 bg-card/30 px-4 py-10 text-center text-sm text-muted-foreground">
+      <p>No members match your filters.</p>
+      {hasFilters && (
+        <button
+          type="button"
+          onClick={onClearFilters}
+          className="mt-2 text-primary hover:underline"
+        >
+          Clear all filters
+        </button>
+      )}
+    </div>
+  )
+}
+
+// === MAIN COMPONENT ===
+
+export default function CommunityMembersPage() {
+  const router = useRouter()
+  const params = useParams<{ handle: string }>()
+  const communityHandle = params.handle?.trim() || ""
+
+  const [view, setView] = React.useState<"cards" | "list">("cards")
+  const [cursor, setCursor] = React.useState<string | null>(null)
+  const [isFiltersOpen, setIsFiltersOpen] = React.useState(false)
+
+  const [filters, setFilters] = React.useState<FilterState>({
+    q: "",
+    role: "",
+    country: "",
+    skills: [],
+    tools: [],
+    headline: "",
+    bio: "",
+    linkDomain: "",
+    loveMin: "",
+    loveMax: "",
+    reachMin: "",
+    reachMax: "",
+    gravityMin: "",
+    gravityMax: "",
+  })
+
+  const { data, items, loading, loadingMore, error } = useMembersData(communityHandle, filters, cursor)
+
+  const activeFilters = hasActiveFilters(filters)
+  const communityName = data?.community?.name || "Community"
+
+  // Reset paging when filters change
+  React.useEffect(() => {
+    setCursor(null)
+  }, [
+    filters.q,
+    filters.role,
+    filters.country,
+    filters.skills,
+    filters.tools,
+    filters.headline,
+    filters.bio,
+    filters.linkDomain,
+    filters.loveMin,
+    filters.loveMax,
+    filters.reachMin,
+    filters.reachMax,
+    filters.gravityMin,
+    filters.gravityMax,
+  ])
+
+  function handleFiltersChange(updates: Partial<FilterState>) {
+    setFilters((prev) => ({ ...prev, ...updates }))
+  }
+
+  function handleClearAll() {
+    setFilters({
+      q: "",
+      role: "",
+      country: "",
+      skills: [],
+      tools: [],
+      headline: "",
+      bio: "",
+      linkDomain: "",
+      loveMin: "",
+      loveMax: "",
+      reachMin: "",
+      reachMax: "",
+      gravityMin: "",
+      gravityMax: "",
+    })
+  }
+
+  function handleAddSkill(skill: string) {
+    setFilters((prev) => ({ ...prev, skills: [...prev.skills, skill] }))
+  }
+
+  function handleAddTool(tool: string) {
+    setFilters((prev) => ({ ...prev, tools: [...prev.tools, tool] }))
+  }
+
+  function handleRemoveSkill(skill: string) {
+    setFilters((prev) => ({ ...prev, skills: prev.skills.filter((s) => s !== skill) }))
+  }
+
+  function handleRemoveTool(tool: string) {
+    setFilters((prev) => ({ ...prev, tools: prev.tools.filter((t) => t !== tool) }))
+  }
+
+  if (!communityHandle) return null
+
+  return (
+    <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-10">
+      <PageHeader
+        leading={
+          <Avatar className="h-12 w-12">
+            <AvatarImage src={data?.community?.avatarUrl ?? undefined} alt={communityName} />
+            <AvatarFallback><UsersIcon /></AvatarFallback>
+          </Avatar>
+        }
+        title="Members"
+        description={`/c/${communityHandle}`}
+        actions={
           <div className="flex items-center gap-2">
-            <Tabs value={view} onValueChange={(v) => setView(v === "list" ? "list" : "cards")}>
+            <Tabs className="gap-0" value={view} onValueChange={(v) => setView(v === "list" ? "list" : "cards")}>
               <TabsList>
                 <TabsTrigger value="cards">Cards</TabsTrigger>
                 <TabsTrigger value="list">List</TabsTrigger>
@@ -714,206 +1020,32 @@ export default function CommunityMembersPage() {
               Refresh
             </Button>
 
-            {hasActiveFilters && (
-              <Button type="button" variant="ghost" onClick={clearAll}>
+            {activeFilters && (
+              <Button type="button" variant="ghost" onClick={handleClearAll}>
                 Reset
               </Button>
             )}
           </div>
-        </div>
+        }
+      />
 
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="secondary">
-            {memberCount}
-            {data?.page?.nextCursor ? "+" : ""} members
-          </Badge>
-          {role && <Chip onRemove={() => setRole("")}>Role: {role}</Chip>}
-          {country && <Chip onRemove={() => setCountry("")}>Country: {country}</Chip>}
-          {skills.map((s) => (
-            <Chip key={s} onRemove={() => setSkills((prev) => prev.filter((x) => x !== s))}>
-              Skill: {s}
-            </Chip>
-          ))}
-          {tools.map((t) => (
-            <Chip key={t} onRemove={() => setTools((prev) => prev.filter((x) => x !== t))}>
-              Tool: {t}
-            </Chip>
-          ))}
-        </div>
-      </header>
+      <ActiveFiltersBar
+        filters={filters}
+        memberCount={items.length}
+        hasMorePages={!!data?.page?.nextCursor}
+        onRemoveRole={() => handleFiltersChange({ role: "" })}
+        onRemoveCountry={() => handleFiltersChange({ country: "" })}
+        onRemoveSkill={handleRemoveSkill}
+        onRemoveTool={handleRemoveTool}
+      />
 
       {isFiltersOpen && (
-        <section className="rounded-2xl border border-border/60 bg-card/30 p-4" aria-label="Member filters">
-          <div className="grid gap-4 lg:grid-cols-3">
-            <div className="flex flex-col gap-2">
-              <div className="text-xs font-medium text-foreground/70">Search</div>
-              <Input
-                placeholder="Name, handle, headline…"
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                aria-label="Search members"
-              />
-            </div>
-
-            <FilterCombobox
-              label="Role"
-              placeholder="Any"
-              items={roleItems}
-              value={role || null}
-              onValueChange={(v) => setRole((v as MemberRole) || "")}
-              renderItem={(item) => item || "Any"}
-            />
-
-            <FilterCombobox
-              label="Country"
-              placeholder="Any"
-              items={countryItems}
-              value={country || null}
-              onValueChange={(v) => setCountry(v || "")}
-            />
-
-            <div className="flex flex-col gap-2">
-              <div className="text-xs font-medium text-foreground/70">Headline contains</div>
-              <Input
-                placeholder="e.g. Designer"
-                value={headline}
-                onChange={(e) => setHeadline(e.target.value)}
-                aria-label="Filter by headline"
-              />
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <div className="text-xs font-medium text-foreground/70">Bio contains</div>
-              <Input
-                placeholder="keywords"
-                value={bio}
-                onChange={(e) => setBio(e.target.value)}
-                aria-label="Filter by bio"
-              />
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <div className="text-xs font-medium text-foreground/70">Link domain</div>
-              <Input
-                placeholder="e.g. github.com"
-                value={linkDomain}
-                onChange={(e) => setLinkDomain(e.target.value)}
-                aria-label="Filter by link domain"
-              />
-            </div>
-
-            <div className="grid gap-4 lg:col-span-3 lg:grid-cols-2">
-              <div className="flex flex-col gap-2">
-                <div className="text-xs font-medium text-foreground/70">Skills</div>
-                <FilterCombobox
-                  label=""
-                  placeholder="Add a skill…"
-                  items={availableSkills}
-                  value={null}
-                  onValueChange={(v) => v && addSkill(v)}
-                  inputValue={skillQuery}
-                  onInputValueChange={setSkillQuery}
-                />
-
-                {skills.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {skills.map((s) => (
-                      <Chip key={s} onRemove={() => setSkills((prev) => prev.filter((x) => x !== s))}>
-                        {s}
-                      </Chip>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="flex flex-col gap-2">
-                <div className="text-xs font-medium text-foreground/70">Tools</div>
-                <FilterCombobox
-                  label=""
-                  placeholder="Add a tool…"
-                  items={availableTools}
-                  value={null}
-                  onValueChange={(v) => v && addTool(v)}
-                  inputValue={toolQuery}
-                  onInputValueChange={setToolQuery}
-                  emptyMessage={`Press Enter to add "${toolQuery.trim() || "…"}".`}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault()
-                      addTool(toolQuery)
-                    }
-                  }}
-                />
-
-                {tools.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {tools.map((t) => (
-                      <Chip key={t} onRemove={() => setTools((prev) => prev.filter((x) => x !== t))}>
-                        {t}
-                      </Chip>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="grid gap-3 lg:col-span-3 lg:grid-cols-3">
-              <div className="flex flex-col gap-2">
-                <div className="text-xs font-medium text-foreground/70">Love range</div>
-                <div className="grid grid-cols-2 gap-2">
-                  <Input
-                    placeholder="Min"
-                    value={loveMin}
-                    onChange={(e) => setLoveMin(e.target.value)}
-                    aria-label="Minimum love score"
-                  />
-                  <Input
-                    placeholder="Max"
-                    value={loveMax}
-                    onChange={(e) => setLoveMax(e.target.value)}
-                    aria-label="Maximum love score"
-                  />
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-2">
-                <div className="text-xs font-medium text-foreground/70">Reach range</div>
-                <div className="grid grid-cols-2 gap-2">
-                  <Input
-                    placeholder="Min"
-                    value={reachMin}
-                    onChange={(e) => setReachMin(e.target.value)}
-                    aria-label="Minimum reach score"
-                  />
-                  <Input
-                    placeholder="Max"
-                    value={reachMax}
-                    onChange={(e) => setReachMax(e.target.value)}
-                    aria-label="Maximum reach score"
-                  />
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-2">
-                <div className="text-xs font-medium text-foreground/70">Gravity range</div>
-                <div className="grid grid-cols-2 gap-2">
-                  <Input
-                    placeholder="Min"
-                    value={gravityMin}
-                    onChange={(e) => setGravityMin(e.target.value)}
-                    aria-label="Minimum gravity score"
-                  />
-                  <Input
-                    placeholder="Max"
-                    value={gravityMax}
-                    onChange={(e) => setGravityMax(e.target.value)}
-                    aria-label="Maximum gravity score"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
+        <FiltersPanel
+          filters={filters}
+          onFiltersChange={handleFiltersChange}
+          onAddSkill={handleAddSkill}
+          onAddTool={handleAddTool}
+        />
       )}
 
       {error && (
@@ -926,59 +1058,15 @@ export default function CommunityMembersPage() {
       )}
 
       <div aria-live="polite" aria-atomic="true" className="sr-only">
-        {loading ? "Loading members..." : `${memberCount} members loaded`}
+        {loading ? "Loading members..." : `${items.length} members loaded`}
       </div>
 
       {loading ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true">
-          {Array.from({ length: LOADING_SKELETON_COUNT }).map((_, i) => (
-            <div key={i} className="rounded-2xl border border-border/60 bg-card/30 p-4">
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-full bg-muted-foreground/10" />
-                <div className="flex-1">
-                  <div className="h-4 w-40 rounded bg-muted-foreground/10" />
-                  <div className="mt-2 h-3 w-28 rounded bg-muted-foreground/10" />
-                </div>
-              </div>
-              <div className="mt-4 h-3 w-full rounded bg-muted-foreground/10" />
-              <div className="mt-2 h-3 w-5/6 rounded bg-muted-foreground/10" />
-            </div>
-          ))}
-        </div>
-      ) : view === "cards" ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {items.map((m) => (
-            <MemberCard key={m.membershipId} member={m} />
-          ))}
-        </div>
+        <LoadingSkeleton />
+      ) : items.length === 0 ? (
+        <EmptyState hasFilters={activeFilters} onClearFilters={handleClearAll} />
       ) : (
-        <div className="rounded-2xl border border-border/60 bg-card/30 overflow-hidden">
-          <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3 border-b border-border/60 px-4 py-3 text-xs font-medium text-foreground/70">
-            <div>Member</div>
-            <div>Role</div>
-            <div>Location</div>
-            <div className="text-right">Score</div>
-          </div>
-
-          {items.map((m) => (
-            <MemberRow key={m.membershipId} member={m} />
-          ))}
-
-          {items.length === 0 && !loading && (
-            <div className="px-4 py-10 text-center text-sm text-muted-foreground">
-              <p>No members match your filters.</p>
-              {hasActiveFilters && (
-                <button
-                  type="button"
-                  onClick={clearAll}
-                  className="mt-2 text-primary hover:underline"
-                >
-                  Clear all filters
-                </button>
-              )}
-            </div>
-          )}
-        </div>
+        <MembersGrid items={items} view={view} />
       )}
 
       {!loading && data?.page?.nextCursor && (
