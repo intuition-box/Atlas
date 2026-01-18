@@ -1,5 +1,3 @@
-
-
 "use client"
 
 import * as React from "react"
@@ -9,6 +7,7 @@ import { parseApiClientError, parseApiProblem } from "@/lib/api-errors"
 import { cn } from "@/lib/utils"
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { UserIcon } from "@/components/ui/icons"
 
 type SignedUpload = {
   uploadUrl: string
@@ -19,7 +18,7 @@ type SignedUpload = {
 export type AvatarDropzoneProps = {
   value?: string | null
   alt: string
-  fallback: string
+  fallback?: string
   disabled?: boolean
   className?: string
   accept?: string
@@ -195,7 +194,7 @@ function AvatarDropzone({
       >
         <Avatar className="size-16 rounded-2xl">
           <AvatarImage src={value ?? ""} alt={alt} />
-          <AvatarFallback className="rounded-2xl">{fallback}</AvatarFallback>
+          <AvatarFallback><UserIcon /></AvatarFallback>
         </Avatar>
 
         <div
