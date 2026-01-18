@@ -1,22 +1,18 @@
 import type { Metadata, Viewport } from "next";
 import Link from "next/link";
-import { Noto_Sans, Noto_Serif, Noto_Sans_Mono } from "next/font/google";
+import { Google_Sans_Code, Google_Sans_Flex } from "next/font/google";
 import "./globals.css";
-import { Separator } from "@/components/ui/separator";
 import UserMenu from "@/components/layout/user-menu";
 import Logo from "@/components/brand/logo";
 
-const serif = Noto_Serif({
-  variable: "--font-serif",
+const sans = Google_Sans_Flex({
+  variable: '--font-sans',
   subsets: ["latin"],
 });
 
-const sans = Noto_Sans({
-  variable: '--font-sans'
-});
-
-const mono = Noto_Sans_Mono({
-  variable: '--font-sans'
+const mono = Google_Sans_Code({
+  variable: '--font-mono',
+  subsets: ["latin"],
 });
 
 export const metadata: Metadata = {
@@ -51,7 +47,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${serif.variable} ${sans.variable} ${mono.variable} dark h-full min-h-dvh antialiased selection:bg-foreground/30`}
+        className={`${sans.variable} ${mono.variable} dark h-full min-h-dvh antialiased selection:bg-foreground/30`}
       >
         <header className="group fixed z-50 flex flex-col p-6 text-sm text-white/60">
           <Logo />
