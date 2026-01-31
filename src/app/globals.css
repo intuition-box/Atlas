@@ -78,6 +78,7 @@
   --color-background-radial-gradient: radial-gradient(45% 65% at center, rgb(9, 16, 39) 0%, rgb(4, 4, 11) 100%);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --font-display: var(--font-display);
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
   --color-sidebar-ring: var(--sidebar-ring);
@@ -118,9 +119,9 @@
   --radius-4xl: calc(var(--radius) + 16px);
 }
 
-/**
+/*
  * 1) Element-level defaults
- */
+*/
 
 @layer base {
   *,
@@ -134,36 +135,56 @@
   }
 
   body {
-    @apply bg-background text-foreground font-sans;
-    /* background-image: var(--color-background-radial-gradient); */
+    @apply w-full min-h-dvh antialiased;
+    @apply text-foreground font-sans;
+    @apply bg-background selection:bg-foreground/30;
+    background-image: var(--color-background-radial-gradient);
     background-attachment: fixed;
     background-size: cover;
     background-repeat: no-repeat;
   }
+
+  body:after {
+    content: "";
+    z-index: -1;
+    opacity: 0.02;
+    position: fixed;
+    top: 0px;
+    right: 0px;
+    bottom: 0px;
+    left: 0px;
+    background-image: url("/grain.png");
+    touch-action: none;
+    pointer-events: none
+  }
+
+  main {
+    @apply mx-auto max-w-5xl flex-col px-4 flex flex-1 items-center justify-center;
+  }
 }
 
-/**
+/*
  * 2) Reusable component classes
- */
+*/
 
 @layer components {
-  /**
-   * Typography
-   */
+  /* Typography */
 
-  /**
-   * Shapes
-   */
+  h1,h2,h3,h4,h5,h6 {
+    @apply font-display font-semibold uppercase;
+  }
 
-  /**
-   * Materials
-   */
+  /* Shapes */
+
+
+  /* Materials */
+
 
 }
 
 /*
  * 3) (Optional) Custom utilities
- */
+*/
 
 @layer utilities {
   
