@@ -105,6 +105,10 @@ model User {
   discordId     String?  @unique
   avatarUrl     String?  // preferred profile image URL (e.g., Cloudflare R2)
 
+  // Onboarding state (server source of truth)
+  onboarded     Boolean  @default(false)
+  onboardedAt   DateTime?
+
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
