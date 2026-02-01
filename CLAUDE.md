@@ -59,10 +59,10 @@ src/
 │   │   ├── shapes.ts   # Result, ApiEnvelope, ApiError types
 │   │   └── errors.ts   # error parsing for forms (parseApiProblem)
 │   ├── auth/           # authentication
-│   │   ├── auth.ts     # NextAuth config
+│   │   ├── session.ts  # NextAuth config
 │   │   └── policy.ts   # authorization helpers
 │   ├── db/             # database
-│   │   └── database.ts # Prisma client singleton
+│   │   └── client.ts   # Prisma client singleton
 │   ├── env/            # environment
 │   │   ├── client.ts   # typed client env (NEXT_PUBLIC_*)
 │   │   └── server.ts   # typed server env
@@ -121,12 +121,17 @@ export type ApiEnvelope<T> =
   | { ok: true; data: T }
   | { ok: false; error: ApiError };
 
-export type ApiError = {
-  code: string;
+// Generics optional - defaults to simple strings
+export type ApiError<
+  Code extends string = string,
+  Status extends number = number,
+  Meta = unknown,
+> = {
+  code: Code;
   message: string;
-  status: number;
+  status: Status;
   issues?: ApiIssue[];  // for validation errors
-  meta?: unknown;       // safe-to-expose context
+  meta?: Meta;          // safe-to-expose context
 };
 
 export type ApiIssue = {
@@ -185,7 +190,7 @@ These helpers handle CSRF tokens, idempotency keys, credentials, timeouts, and r
 **Server Components** — call data layer directly (no HTTP needed):
 ```ts
 // In a Server Component
-import { db } from '@/lib/db/database';
+import { db } from '@/lib/db/client';
 
 const spaces = await db.space.findMany({ where: { ownerId } });
 ```
@@ -193,7 +198,7 @@ const spaces = await db.space.findMany({ where: { ownerId } });
 ## Auth Pattern
 
 ```ts
-import { auth } from '@/lib/auth/auth';
+import { auth } from '@/lib/auth/session';
 
 const session = await auth();
 if (!session?.user?.id) {
@@ -258,7 +263,7 @@ export default function Error({ error, reset }: { error: Error; reset: () => voi
 **Config files**
 - `prisma/schema.prisma` — models only
 - `prisma.config.ts` — datasource URL via `env('DATABASE_URL')`
-- `src/lib/db/database.ts` — PrismaClient singleton with driver adapter
+- `src/lib/db/client.ts` — PrismaClient singleton with driver adapter
 
 **Migration policy**
 - Any schema change must ship with migration in same PR
