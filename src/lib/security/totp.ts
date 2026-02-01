@@ -2,8 +2,8 @@ import "server-only";
 
 import crypto from "node:crypto";
 
-import type { ApiError, Result } from "@/lib/api-shapes";
-import { err, ok } from "@/lib/api-shapes";
+import type { ApiError, Result } from "@/lib/api/shapes";
+import { err, ok } from "@/lib/api/shapes";
 
 /**
  * TOTP (RFC 6238) + Base32 (RFC 4648)

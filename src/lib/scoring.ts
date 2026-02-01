@@ -2,7 +2,7 @@ import "server-only";
 
 import { MembershipStatus, OrbitLevel } from "@prisma/client";
 
-import { db } from "@/lib/database";
+import { db } from "@/lib/db/client";
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));

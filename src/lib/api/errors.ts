@@ -1,5 +1,5 @@
-import type { ApiEnvelope, ApiError, ApiIssue } from "@/lib/api-shapes";
-import { isApiEnvelope } from "@/lib/api-shapes";
+import type { ApiEnvelope, ApiError, ApiIssue } from "@/lib/api/shapes";
+import { isApiEnvelope } from "@/lib/api/shapes";
 
 /**
  * Shared helpers for turning API failures into UI-friendly error objects.
@@ -54,7 +54,7 @@ export function parseEnvelopeError(env: ApiEnvelope<unknown>): ParsedApiError {
 
   if (env.ok === true) return out;
 
-  const e = env.error as ApiError<string, number, unknown>;
+  const e = env.error;
   if (typeof e.message === "string" && e.message) out.formError = e.message;
   if (typeof e.code === "string") out.code = e.code;
   if (typeof e.status === "number") out.status = e.status;

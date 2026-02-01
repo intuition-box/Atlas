@@ -2,9 +2,9 @@ import "server-only";
 
 import { HandleOwnerType, HandleStatus, Prisma } from "@prisma/client";
 
-import { db } from "@/lib/database";
-import type { ApiError, Result } from "@/lib/api-shapes";
-import { err, ok } from "@/lib/api-shapes";
+import { db } from "@/lib/db/client";
+import type { ApiError, Result } from "@/lib/api/shapes";
+import { err, ok } from "@/lib/api/shapes";
 import { handleKey, parseHandle } from "@/lib/handle";
 
 /**

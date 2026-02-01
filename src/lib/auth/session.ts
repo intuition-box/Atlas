@@ -5,7 +5,7 @@ import NextAuth from "next-auth";
 import Discord from "next-auth/providers/discord";
 import { HandleOwnerType } from "@prisma/client";
 
-import { db } from "@/lib/database";
+import { db } from "@/lib/db/client";
 import { ROUTES } from "@/lib/routes";
 
 const isDev = process.env.NODE_ENV !== "production";

@@ -5,8 +5,8 @@ import crypto from "node:crypto";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
-import type { ApiEnvelope, ApiError, Result } from "@/lib/api-shapes";
-import { err, errEnvelope, ok, okEnvelope } from "@/lib/api-shapes";
+import type { ApiEnvelope, ApiError, Result } from "@/lib/api/shapes";
+import { err, errEnvelope, ok, okEnvelope } from "@/lib/api/shapes";
 
 /**
  * CSRF protection (server-only)

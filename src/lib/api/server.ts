@@ -14,12 +14,12 @@ import type { Session } from "next-auth";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
-import type { ApiEnvelope, ApiError, ApiIssue } from "@/lib/api-shapes";
-import { errEnvelope, okEnvelope } from "@/lib/api-shapes";
-import type { AuthProblem } from "@/lib/guards";
-import { requireAuth, requireOnboarded } from "@/lib/guards";
+import type { ApiEnvelope, ApiError, ApiIssue } from "@/lib/api/shapes";
+import { errEnvelope, okEnvelope } from "@/lib/api/shapes";
+import type { AuthProblem } from "@/lib/auth/policy";
+import { requireAuth, requireOnboarded } from "@/lib/auth/policy";
 import { requireCsrf } from "@/lib/security/csrf";
-import { buildRateLimitHeaders, getRateLimitKey, rateLimit } from "@/lib/rate-limit";
+import { buildRateLimitHeaders, getRateLimitKey, rateLimit } from "@/lib/security/rate-limit";
 import { requireIdempotencyKey } from "@/lib/idempotency";
 
 export type Method = "GET" | "POST";
@@ -118,14 +118,11 @@ function okJson<T>(data: T, init?: ResponseInit) {
   return NextResponse.json<ApiEnvelope<T>>(okEnvelope(data), { ...(init ?? {}), headers });
 }
 
-function errJson<Code extends string, Status extends number, Meta = unknown>(
-  error: ApiError<Code, Status, Meta>,
-  init?: ResponseInit,
-) {
+function errJson(error: ApiError, init?: ResponseInit) {
   const headers = new Headers(init?.headers);
   if (!headers.has("Cache-Control")) headers.set("Cache-Control", "no-store");
 
-  return NextResponse.json<ApiEnvelope<never, Code, Status, Meta>>(errEnvelope(error), {
+  return NextResponse.json<ApiEnvelope<never>>(errEnvelope(error), {
     ...(init ?? {}),
     status: error.status,
     headers,
@@ -151,7 +148,7 @@ function extractErrorMessage(err: unknown, defaultMessage: string): string {
 
 async function readJsonBody(req: NextRequest, maxBytes: number): Promise<
   | { ok: true; value: unknown }
-  | { ok: false; error: ApiError<ApiServerErrorCode, number, unknown> }
+  | { ok: false; error: ApiError }
 > {
   let text: string;
   try {
@@ -226,7 +223,7 @@ function originAllowed(req: NextRequest, explicit?: string[]): boolean {
   return allow.includes(origin);
 }
 
-function asApiErrorFromAuthProblem(p: AuthProblem): ApiError<string, number> {
+function asApiErrorFromAuthProblem(p: AuthProblem): ApiError {
   return { code: p.code, message: p.message, status: p.status };
 }
 

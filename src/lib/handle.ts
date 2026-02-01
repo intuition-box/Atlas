@@ -1,7 +1,7 @@
 import { z } from "zod";
 
-import type { ApiError, Result } from "@/lib/api-shapes";
-import { err, ok } from "@/lib/api-shapes";
+import type { ApiError, Result } from "@/lib/api/shapes";
+import { err, ok } from "@/lib/api/shapes";
 import { isReservedHandle } from "@/config/reserved-handles";
 
 /**

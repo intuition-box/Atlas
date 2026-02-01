@@ -1,7 +1,7 @@
 import "server-only";
 
-import { db } from "@/lib/database";
-import { requireAuth } from "@/lib/guards";
+import { db } from "@/lib/db/client";
+import { requireAuth } from "@/lib/auth/policy";
 import { MembershipRole, MembershipStatus } from "@prisma/client";
 
 // Lower index = more privileges.

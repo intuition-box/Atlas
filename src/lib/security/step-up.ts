@@ -3,9 +3,9 @@ import "server-only";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
-import type { ApiEnvelope, ApiError, Result } from "@/lib/api-shapes";
-import { err, errEnvelope, ok } from "@/lib/api-shapes";
-import { db } from "@/lib/database";
+import type { ApiEnvelope, ApiError, Result } from "@/lib/api/shapes";
+import { err, errEnvelope, ok } from "@/lib/api/shapes";
+import { db } from "@/lib/db/client";
 import { readRememberDevice } from "@/lib/security/mfa";
 
 /**

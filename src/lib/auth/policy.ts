@@ -4,12 +4,12 @@ import { redirect } from "next/navigation";
 import type { Session } from "next-auth";
 import { HandleOwnerType } from "@prisma/client";
 
-import { auth } from "@/lib/auth";
-import { db } from "@/lib/database";
+import { auth } from "@/lib/auth/session";
+import { db } from "@/lib/db/client";
 import { ROUTES } from "@/lib/routes";
 
-import type { ApiError, Result } from "@/lib/api-shapes";
-import { err, ok } from "@/lib/api-shapes";
+import type { ApiError, Result } from "@/lib/api/shapes";
+import { err, ok } from "@/lib/api/shapes";
 
 async function resolveUserHandleName(userId: string): Promise<string | undefined> {
   const row = await db.handleOwner.findUnique({
@@ -23,6 +23,15 @@ async function resolveUserHandleName(userId: string): Promise<string | undefined
   });
 
   return row?.handle.name ?? undefined;
+}
+
+async function resolveUserOnboarded(userId: string): Promise<boolean> {
+  const row = await db.user.findUnique({
+    where: { id: userId },
+    select: { onboardedAt: true },
+  });
+
+  return Boolean(row?.onboardedAt);
 }
 
 /**
@@ -52,11 +61,13 @@ async function checkAuth(): Promise<AuthResult<AuthContext>> {
     return err({ code: "AUTH_REQUIRED", message: "Please sign in.", status: 401 });
   }
 
+  const onboarded = await resolveUserOnboarded(userId);
+
   return ok({
     session,
     userId,
-    handle: await resolveUserHandleName(userId),
-    onboarded: Boolean(session.user.onboarded),
+    handle: undefined,
+    onboarded,
   });
 }
 
@@ -111,7 +122,12 @@ export async function requireOnboarded(): Promise<{ session: AuthContext["sessio
   const r = await checkAuth();
   if (!r.ok) throw r.error;
 
-  const o = requireOnboardedContext(r.value);
+  if (!r.value.onboarded) {
+    throw err({ code: "ONBOARDING_REQUIRED", message: "Onboarding required.", status: 428 });
+  }
+
+  const handle = await resolveUserHandleName(r.value.userId);
+  const o = requireOnboardedContext({ ...r.value, handle });
   if (!o.ok) throw o.error;
   return o.value;
 }
@@ -137,7 +153,12 @@ export async function requireOnboardedRedirect(
   const r = await checkAuth();
   if (!r.ok) redirectWithReturn(ROUTES.signIn, returnToUrl);
 
-  const o = requireOnboardedContext(r.value);
+  if (!r.value.onboarded) {
+    redirectWithReturn(ROUTES.onboarding, returnToUrl);
+  }
+
+  const handle = await resolveUserHandleName(r.value.userId);
+  const o = requireOnboardedContext({ ...r.value, handle });
   if (!o.ok) {
     redirectWithReturn(ROUTES.onboarding, returnToUrl);
   }

@@ -9,6 +9,11 @@ function requireEnv(name: string) {
   return value;
 }
 
+function getOptionalEnv(name: string) {
+  const value = process.env[name];
+  return value && value.trim() ? value : undefined;
+}
+
 function assertSafeHeaderValue(name: string, value: string) {
   const v = value.trim();
   if (!v) throw new Error(`Invalid ${name}: empty`);
@@ -73,8 +78,43 @@ function r2Client() {
 export function buildPublicUrl(key: string) {
   assertSafeKey(key);
   const k = key.trim().replace(/^\/+/, "");
-  const base = requireEnv("R2_PUBLIC_BASE_URL").replace(/\/+$/, "");
+
+  // Public base URL is OPTIONAL.
+  // It should point to a publicly-accessible bucket/custom domain where objects can be fetched
+  // without signing (e.g. your custom CDN domain or an R2 public bucket URL).
+  const baseRaw = getOptionalEnv("R2_PUBLIC_BASE_URL");
+  if (!baseRaw) return undefined;
+
+  const base = baseRaw.replace(/\/+$/, "");
   return `${base}/${k}`;
+}
+
+
+export async function putR2Object(params: {
+  key: string;
+  body: Uint8Array;
+  contentType: string;
+  cacheControl?: string;
+}) {
+  assertSafeKey(params.key);
+  assertSafeContentType(params.contentType);
+  if (params.cacheControl) assertSafeCacheControl(params.cacheControl);
+
+  const bucket = requireEnv("R2_BUCKET");
+  const client = r2Client();
+
+  const cmd = new PutObjectCommand({
+    Bucket: bucket,
+    Key: params.key,
+    Body: params.body,
+    ContentType: params.contentType,
+    CacheControl: params.cacheControl ?? "public, max-age=31536000, immutable",
+  });
+
+  await client.send(cmd);
+
+  const publicUrl = buildPublicUrl(params.key);
+  return { key: params.key, publicUrl };
 }
 
 export async function signR2Upload(params: {
