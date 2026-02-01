@@ -1,144 +1,72 @@
-import type { ApiEnvelope, ApiError, ApiIssue } from "@/lib/api/shapes";
-import { isApiEnvelope } from "@/lib/api/shapes";
-
 /**
- * Shared helpers for turning API failures into UI-friendly error objects.
+ * Client-safe error parsing utilities.
  *
- * This module is client-safe (no server-only imports).
+ * Transforms ApiError responses into UI-friendly objects for forms and toasts.
+ *
+ * @see @/lib/api/shapes for ApiErrorSchema
  */
 
-export type ParsedApiError = {
-  /** Flat "field -> message" map for form UIs. */
+import { ApiErrorSchema, type ApiIssue } from "@/lib/api/shapes";
+
+// ============================================================================
+// Types
+// ============================================================================
+
+/** UI-friendly error parsed from ApiError, ready for forms and toasts. */
+export type ApiFormError = {
   fieldErrors: Record<string, string>;
-  /** Optional form-level error message (toast/banner). */
   formError?: string;
-  /** Optional app-level error code. */
   code?: string;
-  /** Optional HTTP status. */
   status?: number;
-  /** Optional extra meta payload from the server. */
   meta?: unknown;
 };
 
-export type ApiProblemLike = {
-  message?: string;
-  status?: number;
-  code?: string;
-  issues?: ApiIssue[];
-  meta?: unknown;
-};
+// ============================================================================
+// Parsing
+// ============================================================================
 
-function pushFieldError(out: ParsedApiError, path: Array<string | number>, message: string) {
-  // Heuristic: use the last segment as the field key (matches typical form libs).
-  const key = String(path[path.length - 1] ?? "");
-  if (!key) return;
-
-  // Preserve first error per field.
-  if (!out.fieldErrors[key]) out.fieldErrors[key] = message;
-}
-
-export function parseIssues(issues: ApiIssue[] | undefined | null): ParsedApiError {
-  const out: ParsedApiError = { fieldErrors: {} };
-  if (!issues || !Array.isArray(issues)) return out;
+/**
+ * Extract field-level errors from API issues.
+ * Uses dot notation for nested paths (e.g., ["user", "profile", "name"] → "user.profile.name").
+ * Compatible with React Hook Form's nested field naming.
+ */
+function extractFieldErrors(issues: ApiIssue[]): Record<string, string> {
+  const fieldErrors: Record<string, string> = {};
 
   for (const issue of issues) {
-    if (!issue || !Array.isArray(issue.path) || typeof issue.message !== "string") continue;
-    pushFieldError(out, issue.path, issue.message);
+    if (issue.path.length === 0) continue;
+    const key = issue.path.map(String).join(".");
+    if (!fieldErrors[key]) {
+      fieldErrors[key] = issue.message;
+    }
   }
 
-  return out;
-}
-
-export function parseEnvelopeError(env: ApiEnvelope<unknown>): ParsedApiError {
-  const out: ParsedApiError = { fieldErrors: {} };
-
-  if (env.ok === true) return out;
-
-  const e = env.error;
-  if (typeof e.message === "string" && e.message) out.formError = e.message;
-  if (typeof e.code === "string") out.code = e.code;
-  if (typeof e.status === "number") out.status = e.status;
-  if ("meta" in e) out.meta = (e as any).meta;
-
-  const withIssues = parseIssues(e.issues);
-  out.fieldErrors = withIssues.fieldErrors;
-
-  return out;
+  return fieldErrors;
 }
 
 /**
- * Parse a Response that is expected to contain an ApiEnvelope.
+ * Parse an ApiError into a UI-friendly ApiFormError.
  *
- * If parsing fails, returns a safe formError message.
+ * @example
+ * const result = await apiPost('/api/users/create', data);
+ * if (!result.ok) {
+ *   const { fieldErrors, formError } = parseApiError(result.error);
+ * }
  */
-export async function parseApiErrorResponse(res: Response): Promise<ParsedApiError> {
-  const out: ParsedApiError = { fieldErrors: {} };
+export function parseApiError(error: unknown): ApiFormError {
+  const parsed = ApiErrorSchema.safeParse(error);
 
-  const ct = (res.headers.get("content-type") || "").toLowerCase();
-  if (!ct.includes("application/json")) {
-    out.formError = res.statusText || `Request failed (${res.status})`;
-    out.status = res.status;
-    return out;
+  if (!parsed.success) {
+    return { fieldErrors: {} };
   }
 
-  let json: unknown;
-  try {
-    json = await res.json();
-  } catch {
-    out.formError = res.statusText || `Request failed (${res.status})`;
-    out.status = res.status;
-    return out;
-  }
+  const { code, message, status, issues, meta } = parsed.data;
 
-  if (!isApiEnvelope(json)) {
-    out.formError = "Invalid server response";
-    out.status = res.status;
-    out.meta = json;
-    return out;
-  }
-
-  const env = json as ApiEnvelope<unknown>;
-  if (env.ok === true) return out;
-
-  const parsed = parseEnvelopeError(env);
-
-  // If server didn't include status, fall back to HTTP.
-  if (parsed.status === undefined) parsed.status = res.status;
-
-  return parsed;
+  return {
+    fieldErrors: issues?.length ? extractFieldErrors(issues) : {},
+    formError: message || undefined,
+    code,
+    status,
+    meta,
+  };
 }
-
-/**
- * Parse an API problem object.
- *
- * Works with Result-first callers (`result.ok === false ? result.error : ...`) and also with thrown Errors.
- */
-export function parseApiProblem(problem: unknown): ParsedApiError {
-  const out: ParsedApiError = { fieldErrors: {} };
-
-  const e = problem as ApiProblemLike;
-
-  // Prefer issues when present.
-  const issues = e?.issues;
-  if (Array.isArray(issues) && issues.length > 0) {
-    const parsed = parseIssues(issues);
-    out.fieldErrors = parsed.fieldErrors;
-  }
-
-  // Form-level error
-  if (typeof e?.message === "string" && e.message) {
-    out.formError = e.message;
-  }
-
-  if (typeof e?.code === "string") out.code = e.code;
-  if (typeof e?.status === "number") out.status = e.status;
-  if ("meta" in (e as any)) out.meta = (e as any).meta;
-
-  return out;
-}
-
-/**
- * Compatibility wrapper: old code paths may still pass thrown errors.
- * Prefer `parseApiProblem` for Result-first usage.
- */
-export const parseApiClientError = parseApiProblem;

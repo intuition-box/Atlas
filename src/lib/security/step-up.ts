@@ -4,7 +4,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
 import type { ApiEnvelope, ApiError, Result } from "@/lib/api/shapes";
-import { err, errEnvelope, ok } from "@/lib/api/shapes";
+import { err, apiErr, ok } from "@/lib/api/shapes";
 import { db } from "@/lib/db/client";
 import { readRememberDevice } from "@/lib/security/mfa";
 
@@ -143,7 +143,7 @@ export async function requireStepUp(
  * Standard response helper for step-up errors.
  */
 export function stepUpErrorResponse(problem: StepUpProblem): NextResponse<ApiEnvelope<never>> {
-  const res = NextResponse.json(errEnvelope(problem), { status: problem.status });
+  const res = NextResponse.json(apiErr(problem), { status: problem.status });
   // Step-up responses should never be cached.
   res.headers.set("cache-control", "no-store");
   return res;

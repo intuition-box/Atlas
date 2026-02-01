@@ -55,9 +55,9 @@ src/
 ├── lib/                # core utilities
 │   ├── api/            # API layer
 │   │   ├── client.ts   # client-side API calls (apiGet, apiPost)
-│   │   ├── server.ts   # server-side route helpers (withApi, api)
+│   │   ├── server.ts   # server-side route helpers (api, okJson, errJson)
 │   │   ├── shapes.ts   # Result, ApiEnvelope, ApiError types
-│   │   └── errors.ts   # error parsing for forms (parseApiProblem)
+│   │   └── errors.ts   # error parsing for forms (parseApiError)
 │   ├── auth/           # authentication
 │   │   ├── session.ts  # NextAuth config
 │   │   └── policy.ts   # authorization helpers
@@ -72,6 +72,27 @@ src/
 │   └── logger.ts       # structured logging
 └── test/               # unit & e2e tests
 ```
+
+## API Layer Naming Convention
+
+All types, schemas, and functions in `src/lib/api/` follow consistent naming:
+
+| Category | Pattern | Examples |
+|----------|---------|----------|
+| Schemas | `*Schema` | `ApiErrorSchema`, `ApiIssueSchema` |
+| Types (API) | `Api*` | `ApiError`, `ApiEnvelope`, `ApiContext`, `ApiMethod`, `ApiAuthMode` |
+| Types (Auth) | `Auth*` | `AuthError`, `AuthErrorCode`, `AuthResult` |
+| Type Guards | `is*` | `isApiEnvelope`, `isApiError` |
+| Envelope factories | `api*` | `apiOk`, `apiErr` |
+| Result factories | `ok`, `err` | `ok(value)`, `err(error)` |
+| Response helpers | `*Json` | `okJson`, `errJson` |
+| Error parsers | `parse*` | `parseApiError` |
+
+**Files:**
+- `shapes.ts` — Core types: `Result`, `ApiEnvelope`, `ApiError`, `ApiIssue`, schemas, type guards
+- `errors.ts` — Form error parsing: `ApiFormError`, `parseApiError`
+- `server.ts` — Server middleware: `api`, `okJson`, `errJson`, `ApiContext`, `ApiOptions`
+- `client.ts` — Client helpers: `apiGet`, `apiPost`
 
 ## API Route Convention
 
@@ -91,13 +112,24 @@ src/
 - ❌ `GET /api/spaces/123`
 - ❌ `PATCH /api/spaces/123`
 
+**GET schemas:** Query params are always strings. Use `z.coerce.*` for non-string types:
+
+```ts
+// GET /api/users/list?page=1&limit=20
+const schema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  q: z.string().optional(),
+});
+```
+
 **Exceptions**
 - `src/app/api/auth/[...nextauth]/route.ts` — NextAuth handler (framework-required); do not wrap with CSRF/idempotency guards
 - Cron routes under `/api/cron/<verb>` may use `GET`; do not use CSRF (machine-to-machine)
 
 **Mandatory Security Guards (every route)**
 
-Use `withApi()` or `api()` from `@/lib/api/server` which handles:
+Use `api()` from `@/lib/api/server` which handles:
 1. Method validation
 2. Authentication (`auth: 'public' | 'auth' | 'onboarded'`)
 3. Origin check (same-origin)
@@ -108,35 +140,127 @@ Use `withApi()` or `api()` from `@/lib/api/server` which handles:
 8. Zod schema validation
 9. Idempotency key extraction
 
+## Schema-First Pattern
+
+**Always define Zod schemas first, derive types from them.** This is the industry standard:
+
+1. Define schema once (single source of truth)
+2. Derive TypeScript type from schema (`z.infer<typeof Schema>`)
+3. Use schema for runtime validation (`schema.safeParse()`)
+
+```ts
+// ✅ Correct: Schema-first
+const UserSchema = z.object({ name: z.string(), email: z.string().email() });
+type User = z.infer<typeof UserSchema>;
+
+// Runtime validation
+const result = UserSchema.safeParse(input);
+if (result.success) {
+  const user: User = result.data;
+}
+
+// ❌ Wrong: Type-first with manual type guards
+type User = { name: string; email: string };
+function isUser(v: unknown): v is User {
+  return typeof v === 'object' && v !== null && 'name' in v && 'email' in v;
+}
+```
+
+**Exception — Generic types for compile-time narrowing:**
+
+When you need domain-specific type narrowing at compile time, keep generics on the type but use the base schema for runtime validation:
+
+```ts
+// Schema validates the base shape
+const ApiErrorSchema = z.object({ code: z.string(), message: z.string(), status: z.number() });
+
+// Type uses generics for compile-time narrowing
+type ApiError<Code extends string = string, Status extends number = number> = {
+  code: Code; message: string; status: Status;
+};
+
+// Domain-specific error with narrowed types
+type AuthError = ApiError<"AUTH_REQUIRED" | "ONBOARDING_REQUIRED", 401 | 428>;
+
+// Runtime validation still uses the base schema
+const parsed = ApiErrorSchema.safeParse(thrown);
+```
+
 ## API Types
 
 ```ts
-// @/lib/api/shapes.ts
+// @/lib/api/shapes.ts — Zod schemas + derived types
 
-// Result type for internal domain code
-export type Result<T, E> = { ok: true; value: T } | { ok: false; error: E };
+// Result type for internal domain code (simple discriminated union)
+type Result<T, E> = { ok: true; value: T } | { ok: false; error: E };
+function ok<T>(value: T): Result<T, never>;
+function err<E>(error: E): Result<never, E>;
 
-// API envelope for HTTP responses
-export type ApiEnvelope<T> =
-  | { ok: true; data: T }
-  | { ok: false; error: ApiError };
+// API schemas — single source of truth (Zod-first)
+const ApiIssueSchema = z.object({
+  path: z.array(z.union([z.string(), z.number()])),
+  message: z.string(),
+});
+const ApiErrorSchema = z.object({
+  code: z.string(),
+  message: z.string(),
+  status: z.number(),
+  issues: z.array(ApiIssueSchema).optional(),
+  meta: z.unknown().optional(),
+});
 
-// Generics optional - defaults to simple strings
-export type ApiError<
+// Derived types from schemas
+type ApiIssue = z.infer<typeof ApiIssueSchema>;
+
+// ApiError keeps generics for compile-time narrowing
+// Runtime validation uses ApiErrorSchema.safeParse()
+type ApiError<
   Code extends string = string,
   Status extends number = number,
-  Meta = unknown,
+  Meta = unknown
 > = {
   code: Code;
   message: string;
   status: Status;
-  issues?: ApiIssue[];  // for validation errors
-  meta?: Meta;          // safe-to-expose context
+  issues?: ApiIssue[];
+  meta?: Meta;
 };
 
-export type ApiIssue = {
-  path: Array<string | number>;
-  message: string;
+// API envelope for HTTP responses
+type ApiEnvelope<T> =
+  | { ok: true; data: T }
+  | { ok: false; error: ApiError };
+function apiOk<T>(data: T): ApiEnvelope<T>;
+function apiErr(error: ApiError): ApiEnvelope<never>;
+
+// Type guard uses Zod for runtime validation
+function isApiEnvelope(v: unknown): v is ApiEnvelope<unknown>;
+
+// @/lib/api/errors.ts — UI-friendly error parsing
+// Note: ApiFormError is an output type (we construct it), not input
+
+type ApiFormError = {
+  fieldErrors: Record<string, string>;
+  formError?: string;
+  code?: string;
+  status?: number;
+  meta?: unknown;
+};
+function parseApiError(error: unknown): ApiFormError;
+
+// @/lib/api/server.ts — server-side types
+type ApiMethod = "GET" | "POST";
+type ApiAuthMode = "public" | "auth" | "onboarded";
+type ApiContext<T> = {
+  req: NextRequest;
+  session: Session | null;
+  viewerId: string | null;
+  handle: string | null;
+  json: T;
+  idempotencyKey: string | null;
+  ifMatch: string | null;
+  requestId: string;
+  authMode: ApiAuthMode; // for observability/logging
 };
 ```
 
@@ -156,7 +280,7 @@ const schema = z.object({
 export const POST = api(schema, async (ctx) => {
   const { viewerId, json } = ctx;
 
-  // ctx provides: req, session, viewerId, handle, json, idempotencyKey, ifMatch
+  // ctx provides: req, session, viewerId, handle, json, idempotencyKey, ifMatch, requestId
   const space = await createSpace({ name: json.name, ownerId: viewerId });
 
   return okJson({ space });
@@ -185,7 +309,24 @@ if (result.ok) {
 }
 ```
 
-These helpers handle CSRF tokens, idempotency keys, credentials, timeouts, and retry on CSRF failure.
+**Features:**
+- CSRF tokens (auto-attached to POST, retry on 419)
+- Timeout (30s default, configurable)
+- Network retry with exponential backoff (2 retries default for 502/503/504)
+- Request IDs (`X-Request-ID` header for tracing)
+- Idempotency keys (via `idempotencyKey` option)
+- If-Match headers (via `ifMatch` option for optimistic concurrency)
+
+**Options:**
+```ts
+await apiPost('/api/users/create', body, {
+  timeoutMs: 10_000,       // Override timeout (0 to disable)
+  maxRetries: 0,           // Disable network retry
+  idempotencyKey: 'abc',   // For safe retries
+  ifMatch: '"etag"',       // Optimistic concurrency
+  csrf: false,             // Skip CSRF (for webhooks)
+});
+```
 
 **Server Components** — call data layer directly (no HTTP needed):
 ```ts
@@ -198,28 +339,58 @@ const spaces = await db.space.findMany({ where: { ownerId } });
 ## Auth Pattern
 
 ```ts
-import { auth } from '@/lib/auth/session';
+// @/lib/auth/policy.ts — schema-first auth errors
 
-const session = await auth();
-if (!session?.user?.id) {
-  return errJson({ code: 'UNAUTHORIZED', message: 'Sign in required.', status: 401 });
+// Zod schema is single source of truth
+const AuthErrorSchema = z.object({
+  code: z.enum(["AUTH_REQUIRED", "ONBOARDING_REQUIRED"]),
+  message: z.string(),
+  status: z.union([z.literal(401), z.literal(428)]),
+});
+
+type AuthErrorCode = "AUTH_REQUIRED" | "ONBOARDING_REQUIRED";
+type AuthError = ApiError<AuthErrorCode, 401 | 428>;
+type AuthResult<T> = Result<T, AuthError>;
+
+// Guards throw AuthError, caught and validated in api/server.ts
+async function requireAuth(): Promise<{ session: Session; userId: string }>;
+async function requireOnboarded(): Promise<{ session: Session; userId: string; handle: string }>;
+
+// Redirect helpers for Server Components
+async function requireAuthRedirect(returnToUrl?: string): Promise<...>;
+async function requireOnboardedRedirect(returnToUrl?: string): Promise<...>;
+```
+
+**Usage in API routes:** Use `api()` with `auth: 'auth'` or `auth: 'onboarded'`:
+
+```ts
+export const POST = api(schema, handler, { auth: 'onboarded' });
+```
+
+**Usage in Server Components:**
+
+```ts
+import { requireOnboardedRedirect } from '@/lib/auth/policy';
+
+export default async function Page() {
+  const { userId, handle } = await requireOnboardedRedirect();
+  // ...
 }
 ```
 
-Or use `withApi()` with `auth: 'auth'` or `auth: 'onboarded'` to handle this automatically.
-
 - All authorization checks via `@/lib/auth/policy` helpers
 - Never check roles on client to gate server operations
+- Auth errors use `AuthErrorSchema.safeParse()` for runtime validation in `api/server.ts`
 
 ## Forms
 
-Use `@/components/ui/form.tsx` for form components. Handle API errors with `parseApiProblem`:
+Use `@/components/ui/form.tsx` for form components. Handle API errors with `parseApiError`:
 
 ```tsx
 'use client';
 
 import { apiPost } from '@/lib/api/client';
-import { parseApiProblem } from '@/lib/api/errors';
+import { parseApiError } from '@/lib/api/errors';
 
 async function handleSubmit(formData: FormData) {
   const result = await apiPost('/api/spaces/create', {
@@ -227,7 +398,7 @@ async function handleSubmit(formData: FormData) {
   });
 
   if (!result.ok) {
-    const { fieldErrors, formError } = parseApiProblem(result.error);
+    const { fieldErrors, formError } = parseApiError(result.error);
     // fieldErrors: { name: 'Name is required' }
     // formError: 'Something went wrong'
     return;
@@ -420,7 +591,7 @@ revalidateTag(`space:${id}`);
 
 - [ ] Quality gates pass (`format:check`, `lint`, `typecheck`, `test`)
 - [ ] Runtime set correctly (`export const runtime = 'nodejs'` where needed)
-- [ ] Zod validation at boundary (via `withApi` or `api`)
+- [ ] Zod validation at boundary (via `api`)
 - [ ] Rate limit with IETF headers
 - [ ] Auth mode set correctly (`public`, `auth`, `onboarded`)
 - [ ] API calls use `apiGet` / `apiPost` (not raw fetch)

@@ -1,8 +1,3 @@
-"use client";
-
-import type { ApiEnvelope, ApiError, ApiIssue, Result } from "@/lib/api/shapes";
-import { err, isApiEnvelope, ok } from "@/lib/api/shapes";
-
 /**
  * Client-safe API client for JSON API routes.
  *
@@ -12,33 +7,23 @@ import { err, isApiEnvelope, ok } from "@/lib/api/shapes";
  * @see @/lib/api/shapes for type definitions
  */
 
+"use client";
+
+import type { ApiEnvelope, ApiError, Result } from "@/lib/api/shapes";
+import { err, isApiEnvelope, ok } from "@/lib/api/shapes";
+
+// ============================================================================
+// Configuration
+// ============================================================================
+
 const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_MAX_RETRIES = 2;
+const RETRY_BASE_DELAY_MS = 500;
+const RETRY_MAX_DELAY_MS = 5_000;
 
-export type ApiRequestOptions = {
-  method?: "GET" | "POST";
-  query?: Record<string, QueryValue> | URLSearchParams;
-  body?: unknown;
-  headers?: Record<string, string>;
-  signal?: AbortSignal;
-
-  /** If set, sent as If-Match for optimistic concurrency control. */
-  ifMatch?: string;
-
-  /** If set, sent as Idempotency-Key for safe request retries. */
-  idempotencyKey?: string;
-
-  /** Override automatic CSRF header attachment. Defaults to true for POST. */
-  csrf?: boolean;
-
-  /** Retry once after CSRF refresh on CSRF failure. Defaults to true. */
-  retryOnCsrfFailure?: boolean;
-
-  /** Request timeout in milliseconds. Defaults to 30s. Set to 0 to disable. */
-  timeoutMs?: number;
-
-  /** @internal Used to prevent infinite retry loops. */
-  _retryCount?: number;
-};
+// ============================================================================
+// Public Types
+// ============================================================================
 
 type QueryValue =
   | string
@@ -48,26 +33,73 @@ type QueryValue =
   | undefined
   | Array<string | number | boolean | null | undefined>;
 
+export type ApiGetOptions = {
+  headers?: Record<string, string>;
+  signal?: AbortSignal;
+  /** Max retries for network errors. Defaults to 2. Set to 0 to disable. */
+  maxRetries?: number;
+  /** Request timeout in milliseconds. Defaults to 30s. Set to 0 to disable. */
+  timeoutMs?: number;
+  /** Request ID for tracing. Auto-generated if not provided. */
+  requestId?: string;
+};
+
+export type ApiPostOptions = ApiGetOptions & {
+  /** If set, sent as If-Match for optimistic concurrency control. */
+  ifMatch?: string;
+  /** If set, sent as Idempotency-Key for safe request retries. */
+  idempotencyKey?: string;
+  /** Override automatic CSRF header attachment. Defaults to true. */
+  csrf?: boolean;
+  /** Retry once after CSRF refresh on 419. Defaults to true. */
+  retryOnCsrfFailure?: boolean;
+};
+
+// ============================================================================
+// Internal Types
+// ============================================================================
+
+type InternalRequestOptions = {
+  method: "GET" | "POST";
+  query?: Record<string, QueryValue> | URLSearchParams;
+  body?: Record<string, unknown> | unknown[];
+  headers?: Record<string, string>;
+  signal?: AbortSignal;
+  ifMatch?: string;
+  idempotencyKey?: string;
+  csrf?: boolean;
+  retryOnCsrfFailure?: boolean;
+  maxRetries?: number;
+  timeoutMs?: number;
+  requestId?: string;
+  _retryCount?: number;
+  _csrfRetryCount?: number;
+};
+
+// ============================================================================
+// Request ID Generation
+// ============================================================================
+
+function generateRequestId(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 // ============================================================================
 // CSRF Token Management
 // ============================================================================
 
 let csrfPromise: Promise<string> | null = null;
+let csrfFetcher: () => Promise<string> = defaultCsrfFetcher;
 
-async function fetchCsrfToken(): Promise<string> {
+async function defaultCsrfFetcher(): Promise<string> {
   try {
     const r = await fetch("/api/security/csrf", {
       method: "GET",
       credentials: "same-origin",
       cache: "no-store",
-      headers: {
-        Accept: "application/json",
-        "X-Requested-With": "XMLHttpRequest",
-      },
+      headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
     });
-
     if (!r.ok) return "";
-
     const json: unknown = await r.json().catch(() => null);
     if (isApiEnvelope(json) && json.ok) {
       return (json.data as { token?: string })?.token ?? "";
@@ -80,22 +112,50 @@ async function fetchCsrfToken(): Promise<string> {
 
 function getCsrfToken(): Promise<string> {
   if (!csrfPromise) {
-    csrfPromise = fetchCsrfToken();
+    csrfPromise = csrfFetcher();
   }
   return csrfPromise;
 }
 
-/**
- * Resets the cached CSRF token, forcing a fresh fetch on next request.
- */
+/** Resets the cached CSRF token, forcing a fresh fetch on next request. */
 export function resetCsrf(): void {
   csrfPromise = null;
 }
 
-function shouldAttachCsrf(method: "GET" | "POST", override?: boolean): boolean {
-  if (override === false) return false;
-  if (override === true) return true;
-  return method === "POST";
+// ============================================================================
+// Testing Utilities (not part of public API contract)
+// ============================================================================
+
+/** @internal For testing only. Injects a custom CSRF fetcher. */
+export const __testing__ = {
+  setCsrfFetcher: (fetcher: () => Promise<string>): void => {
+    csrfFetcher = fetcher;
+    csrfPromise = null;
+  },
+  resetCsrfFetcher: (): void => {
+    csrfFetcher = defaultCsrfFetcher;
+    csrfPromise = null;
+  },
+};
+
+// ============================================================================
+// Retry Logic
+// ============================================================================
+
+function calculateBackoff(attempt: number): number {
+  const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
+  const jitter = Math.random() * 100;
+  return Math.min(delay + jitter, RETRY_MAX_DELAY_MS);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetryableError(error: ApiError): boolean {
+  const retryableCodes = ["CLIENT_NETWORK_ERROR", "CLIENT_REQUEST_TIMEOUT"];
+  const retryableStatuses = [502, 503, 504];
+  return retryableCodes.includes(error.code) || retryableStatuses.includes(error.status);
 }
 
 // ============================================================================
@@ -169,37 +229,25 @@ function buildQuery(q?: Record<string, QueryValue> | URLSearchParams): string {
 }
 
 // ============================================================================
-// Error Helpers
-// ============================================================================
-
-function clientError(code: string, message: string, status: number = 0, meta?: unknown): ApiError {
-  return { code, message, status, meta };
-}
-
-function isCsrfProblem(e: ApiError): boolean {
-  return e.status === 419 || e.code === "CSRF_FAILED";
-}
-
-// ============================================================================
 // Response Parser
 // ============================================================================
 
-async function parseEnvelope<T>(r: Response): Promise<Result<T, ApiError>> {
+async function parseResponse<T>(r: Response, requestId: string): Promise<Result<T, ApiError>> {
   const ct = r.headers.get("content-type");
   if (!ct || !ct.toLowerCase().includes("application/json")) {
     await r.text().catch(() => {});
-    return err(clientError("CLIENT_NON_JSON_RESPONSE", "Invalid server response", r.status, { contentType: ct }));
+    return err({ code: "CLIENT_NON_JSON_RESPONSE", message: "Invalid server response", status: r.status, meta: { contentType: ct, requestId } });
   }
 
   let json: unknown;
   try {
     json = await r.json();
   } catch {
-    return err(clientError("CLIENT_INVALID_RESPONSE", "Invalid server response", r.status));
+    return err({ code: "CLIENT_INVALID_RESPONSE", message: "Invalid server response", status: r.status, meta: { requestId } });
   }
 
   if (!isApiEnvelope(json)) {
-    return err(clientError("CLIENT_INVALID_RESPONSE", "Invalid server response", r.status, json));
+    return err({ code: "CLIENT_INVALID_RESPONSE", message: "Invalid server response", status: r.status, meta: { raw: json, requestId } });
   }
 
   const env = json as ApiEnvelope<T>;
@@ -207,92 +255,93 @@ async function parseEnvelope<T>(r: Response): Promise<Result<T, ApiError>> {
     return ok(env.data);
   }
 
-  return err(env.error);
+  return err({ ...env.error, meta: { ...((env.error.meta as object) ?? {}), requestId } });
 }
 
 // ============================================================================
-// API Request
+// Internal Request Implementation
 // ============================================================================
 
-/**
- * Makes an API request and returns a Result for explicit handling.
- */
-export async function apiRequest<T>(
-  path: string,
-  options: ApiRequestOptions = {},
-): Promise<Result<T, ApiError>> {
-  const retryCount = options._retryCount ?? 0;
-  const method: "GET" | "POST" = options.method ?? "GET";
-  const retryOnCsrfFailure = options.retryOnCsrfFailure ?? true;
-  const timeout = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+async function request<T>(path: string, opts: InternalRequestOptions): Promise<Result<T, ApiError>> {
+  const retryCount = opts._retryCount ?? 0;
+  const csrfRetryCount = opts._csrfRetryCount ?? 0;
+  const maxRetries = opts.maxRetries ?? DEFAULT_MAX_RETRIES;
+  const retryOnCsrfFailure = opts.retryOnCsrfFailure ?? true;
+  const timeout = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const requestId = opts.requestId ?? generateRequestId();
 
-  const url = `${path}${buildQuery(options.query)}`;
+  const url = `${path}${buildQuery(opts.query)}`;
 
   const headers: Record<string, string> = {
     Accept: "application/json",
     "X-Requested-With": "XMLHttpRequest",
-    ...(options.headers ?? {}),
+    "X-Request-ID": requestId,
+    ...(opts.headers ?? {}),
   };
 
-  if (options.ifMatch) headers["If-Match"] = options.ifMatch;
-  if (options.idempotencyKey) headers["Idempotency-Key"] = options.idempotencyKey;
+  if (opts.ifMatch) headers["If-Match"] = opts.ifMatch;
+  if (opts.idempotencyKey) headers["Idempotency-Key"] = opts.idempotencyKey;
 
-  if (method === "POST") {
+  if (opts.method === "POST") {
     headers["Content-Type"] = headers["Content-Type"] ?? "application/json";
-
-    if (shouldAttachCsrf(method, options.csrf)) {
+    if (opts.csrf !== false) {
       const token = await getCsrfToken();
       if (token) headers["X-CSRF-Token"] = token;
     }
   }
 
-  const timeoutCtx = createTimeout(timeout, options.signal);
+  const timeoutCtx = createTimeout(timeout, opts.signal);
 
   const init: RequestInit = {
-    method,
+    method: opts.method,
     credentials: "same-origin",
     cache: "no-store",
     headers,
-    body: method === "POST" ? JSON.stringify(options.body ?? {}) : undefined,
+    body: opts.method === "POST" ? JSON.stringify(opts.body ?? {}) : undefined,
     signal: timeoutCtx.signal,
   };
 
   const attempt = async (): Promise<Result<T, ApiError>> => {
     try {
       const r = await fetch(url, init);
-      return await parseEnvelope<T>(r);
+      return await parseResponse<T>(r, requestId);
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") {
         if (timeoutCtx.timedOut) {
-          return err(clientError("CLIENT_REQUEST_TIMEOUT", "Request timeout"));
+          return err({ code: "CLIENT_REQUEST_TIMEOUT", message: "Request timeout", status: 0, meta: { requestId } });
         }
-        return err(clientError("CLIENT_REQUEST_ABORTED", "Request cancelled"));
+        return err({ code: "CLIENT_REQUEST_ABORTED", message: "Request cancelled", status: 0, meta: { requestId } });
       }
-      return err(clientError("CLIENT_NETWORK_ERROR", "Network error"));
+      return err({ code: "CLIENT_NETWORK_ERROR", message: "Network error", status: 0, meta: { requestId } });
     }
   };
 
   try {
-    const first = await attempt();
+    const result = await attempt();
 
-    if (method !== "POST" || first.ok) return first;
+    if (result.ok) return result;
 
-    const wantsRetry =
-      retryCount === 0 && retryOnCsrfFailure && shouldAttachCsrf(method, options.csrf);
-
-    if (wantsRetry && isCsrfProblem(first.error)) {
+    // CSRF retry (separate from network retry)
+    if (opts.method === "POST" && csrfRetryCount === 0 && retryOnCsrfFailure && (result.error.status === 419 || result.error.code === "CSRF_FAILED")) {
       resetCsrf();
-      return await apiRequest<T>(path, { ...options, _retryCount: 1 });
+      return await request<T>(path, { ...opts, requestId, _csrfRetryCount: 1 });
     }
 
-    return first;
+    // Network retry with exponential backoff
+    if (retryCount < maxRetries && isRetryableError(result.error)) {
+      const delay = calculateBackoff(retryCount);
+      await sleep(delay);
+      return await request<T>(path, { ...opts, requestId, _retryCount: retryCount + 1 });
+    }
+
+    return result;
   } finally {
     timeoutCtx.cleanup();
   }
 }
 
 // ============================================================================
-// Convenience Functions
+// Public API
 // ============================================================================
 
 /**
@@ -300,13 +349,18 @@ export async function apiRequest<T>(
  *
  * @example
  * const result = await apiGet<User[]>('/api/users/list', { page: 1 });
+ * if (result.ok) {
+ *   console.log(result.value);
+ * } else {
+ *   console.error(result.error);
+ * }
  */
 export function apiGet<T>(
   path: string,
   query?: Record<string, QueryValue> | URLSearchParams,
-  options: Omit<ApiRequestOptions, "method" | "query" | "body"> = {},
+  options: ApiGetOptions = {},
 ): Promise<Result<T, ApiError>> {
-  return apiRequest<T>(path, { ...options, method: "GET", query });
+  return request<T>(path, { ...options, method: "GET", query });
 }
 
 /**
@@ -314,19 +368,16 @@ export function apiGet<T>(
  *
  * @example
  * const result = await apiPost<{ user: User }>('/api/users/create', { name: 'John' });
+ * if (result.ok) {
+ *   console.log(result.value);
+ * } else {
+ *   console.error(result.error);
+ * }
  */
 export function apiPost<T>(
   path: string,
-  body?: unknown,
-  options: Omit<ApiRequestOptions, "method" | "body"> = {},
+  body?: Record<string, unknown> | unknown[],
+  options: ApiPostOptions = {},
 ): Promise<Result<T, ApiError>> {
-  return apiRequest<T>(path, { ...options, method: "POST", body });
-}
-
-/**
- * Extracts validation issues from an error result.
- */
-export function getApiIssues(r: Result<unknown, ApiError>): ApiIssue[] | undefined {
-  if (r.ok) return undefined;
-  return r.error.issues;
+  return request<T>(path, { ...options, method: "POST", body });
 }

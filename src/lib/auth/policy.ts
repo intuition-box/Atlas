@@ -3,6 +3,7 @@ import "server-only";
 import { redirect } from "next/navigation";
 import type { Session } from "next-auth";
 import { HandleOwnerType } from "@prisma/client";
+import { z } from "zod";
 
 import { auth } from "@/lib/auth/session";
 import { db } from "@/lib/db/client";
@@ -38,13 +39,20 @@ async function resolveUserOnboarded(userId: string): Promise<boolean> {
  * Server-only auth/onboarding guards.
  *
  * Two usage patterns:
- * - Route handlers / server actions: throw a structured `AuthProblem` at the boundary in `require*` helpers.
+ * - Route handlers / server actions: throw a structured `AuthError` at the boundary in `require*` helpers.
  * - Server Components / layouts: redirect to sign-in/onboarding (with safe returnToUrl).
  */
-export type AuthErrorCode = "AUTH_REQUIRED" | "ONBOARDING_REQUIRED";
 
-export type AuthProblem = ApiError<AuthErrorCode, 401 | 428>;
-export type AuthResult<T> = Result<T, AuthProblem>;
+// Schema-first: Zod schema is the source of truth for runtime validation
+export const AuthErrorSchema = z.object({
+  code: z.enum(["AUTH_REQUIRED", "ONBOARDING_REQUIRED"]),
+  message: z.string(),
+  status: z.union([z.literal(401), z.literal(428)]),
+});
+
+export type AuthErrorCode = "AUTH_REQUIRED" | "ONBOARDING_REQUIRED";
+export type AuthError = ApiError<AuthErrorCode, 401 | 428>;
+export type AuthResult<T> = Result<T, AuthError>;
 
 type AuthContext = {
   session: Session;

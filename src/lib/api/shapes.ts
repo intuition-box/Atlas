@@ -1,17 +1,19 @@
 /**
- * Shared shapes for server/client boundaries.
+ * Shared API shapes for server/client boundaries.
  *
- * Keep this file:
- * - framework-agnostic (no Next.js imports)
- * - runtime-light (types first)
- * - dependency-free (so it can be imported from anywhere)
+ * Schema-first: Zod schemas are the single source of truth for runtime validation.
+ * Types can extend the base schema for domain-specific errors.
+ *
+ * @see CLAUDE.md "Schema-First Pattern"
  */
+
+import { z } from "zod";
 
 // ============================================================================
 // Result Type (internal domain code)
 // ============================================================================
 
-/** A simple, typed success/failure result for internal code. */
+/** Discriminated union for internal success/failure. No Zod — keep it simple. */
 export type Result<T, E> = { ok: true; value: T } | { ok: false; error: E };
 
 export function ok<T>(value: T): Result<T, never> {
@@ -23,20 +25,34 @@ export function err<E>(error: E): Result<never, E> {
 }
 
 // ============================================================================
-// API Types (HTTP boundaries)
+// API Schemas (single source of truth for runtime validation)
 // ============================================================================
 
-/** Validation issue pointing to a specific field. */
-export type ApiIssue = {
-  path: Array<string | number>;
-  message: string;
-};
+export const ApiIssueSchema = z.object({
+  path: z.array(z.union([z.string(), z.number()])),
+  message: z.string(),
+});
+
+export const ApiErrorSchema = z.object({
+  code: z.string(),
+  message: z.string(),
+  status: z.number(),
+  issues: z.array(ApiIssueSchema).optional(),
+  meta: z.unknown().optional(),
+});
+
+// ============================================================================
+// Derived Types
+// ============================================================================
+
+export type ApiIssue = z.infer<typeof ApiIssueSchema>;
 
 /**
  * Standard API error shape.
  *
- * Generics allow typed domain errors (e.g., ApiError<"NOT_FOUND", 404>)
- * but default to simple strings for general use.
+ * Runtime validation uses ApiErrorSchema (base strings/numbers).
+ * Generics provide compile-time narrowing for domain-specific errors
+ * (e.g., ApiError<"NOT_FOUND", 404>) without affecting runtime behavior.
  */
 export type ApiError<
   Code extends string = string,
@@ -50,37 +66,30 @@ export type ApiError<
   meta?: Meta;
 };
 
+// ============================================================================
+// API Envelope
+// ============================================================================
+
 /** Standard API envelope for HTTP responses. */
 export type ApiEnvelope<T> =
   | { ok: true; data: T }
   | { ok: false; error: ApiError };
 
-export function okEnvelope<T>(data: T): ApiEnvelope<T> {
+export function apiOk<T>(data: T): ApiEnvelope<T> {
   return { ok: true, data };
 }
 
-export function errEnvelope(error: ApiError): ApiEnvelope<never> {
+export function apiErr(error: ApiError): ApiEnvelope<never> {
   return { ok: false, error };
 }
 
-/** Runtime check for ApiEnvelope shape. */
+/** Runtime check for ApiEnvelope shape using Zod. */
 export function isApiEnvelope(v: unknown): v is ApiEnvelope<unknown> {
-  if (!v || typeof v !== "object") return false;
-  const obj = v as Record<string, unknown>;
+  if (typeof v !== "object" || v === null) return false;
+  if (!("ok" in v)) return false;
 
-  if (typeof obj.ok !== "boolean") return false;
+  if (v.ok === true) return "data" in v;
+  if (v.ok === false) return "error" in v && ApiErrorSchema.safeParse(v.error).success;
 
-  if (obj.ok === true) {
-    return "data" in obj;
-  }
-
-  const e = obj.error;
-  if (!e || typeof e !== "object") return false;
-
-  const error = e as Record<string, unknown>;
-  return (
-    typeof error.code === "string" &&
-    typeof error.message === "string" &&
-    typeof error.status === "number"
-  );
+  return false;
 }

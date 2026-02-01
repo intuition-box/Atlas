@@ -1,11 +1,10 @@
 /**
- * Minimal, production-ready API bootstrap for Next.js App Router.
+ * Server-side API middleware for Next.js App Router.
  *
- * Canonical JSON envelope (see `src/lib/api-shapes.ts`):
- * - { ok: true, data }
- * - { ok: false, error: { code, message, status, issues?, meta? } }
+ * Provides `api()` for building secure, validated route handlers.
+ * All routes return ApiEnvelope<T> responses.
  *
- * Convention: use GET and POST only.
+ * @see @/lib/api/shapes for type definitions
  */
 
 import "server-only";
@@ -14,84 +13,51 @@ import type { Session } from "next-auth";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
-import type { ApiEnvelope, ApiError, ApiIssue } from "@/lib/api/shapes";
-import { errEnvelope, okEnvelope } from "@/lib/api/shapes";
-import type { AuthProblem } from "@/lib/auth/policy";
-import { requireAuth, requireOnboarded } from "@/lib/auth/policy";
+import type { ApiEnvelope, ApiError, ApiIssue, Result } from "@/lib/api/shapes";
+import { apiErr, apiOk, err, ok } from "@/lib/api/shapes";
+import { AuthErrorSchema, requireAuth, requireOnboarded } from "@/lib/auth/policy";
 import { requireCsrf } from "@/lib/security/csrf";
 import { buildRateLimitHeaders, getRateLimitKey, rateLimit } from "@/lib/security/rate-limit";
 import { requireIdempotencyKey } from "@/lib/idempotency";
 
-export type Method = "GET" | "POST";
-export type AuthMode = "public" | "auth" | "onboarded";
+// ============================================================================
+// Configuration
+// ============================================================================
 
-export type ApiServerErrorCode =
-  | "METHOD_NOT_ALLOWED"
-  | "UNSUPPORTED_MEDIA_TYPE"
-  | "PAYLOAD_TOO_LARGE"
-  | "QUERY_STRING_TOO_LARGE"
-  | "INVALID_JSON"
-  | "REQUEST_READ_FAILED"
-  | "INVALID_REQUEST"
-  | "FORBIDDEN"
-  | "CSRF_FAILED"
-  | "RATE_LIMITED"
-  | "IDEMPOTENCY_REQUIRED";
+const DEFAULT_MAX_JSON_BYTES = 262_144; // 256 KiB
+const DEFAULT_MAX_QUERY_BYTES = 8_192; // 8 KiB
 
-export type WithApiOpts = {
+// ============================================================================
+// Types
+// ============================================================================
+
+export type ApiMethod = "GET" | "POST";
+export type ApiAuthMode = "public" | "auth" | "onboarded";
+
+export type ApiOptions = {
   /** Allowed HTTP methods (default: ["POST"]) */
-  methods?: Method[];
-
+  methods?: ApiMethod[];
   /** Authentication mode (default: "auth") */
-  auth?: AuthMode;
-
+  auth?: ApiAuthMode;
   /** Require CSRF token for POST (default: true) */
   csrf?: boolean;
-
-  /**
-   * Enforce same-origin POSTs (default: true).
-   * Checks Origin header first, falls back to Referer.
-   * Missing headers are treated as forbidden.
-   */
+  /** Enforce same-origin POSTs (default: true) */
   checkOrigin?: boolean;
-
   /** Explicit origin allowlist (default: [req.nextUrl.origin]) */
   allowOrigins?: string[];
-
-  /** Enforce `application/json` for POST (default: true) */
+  /** Enforce application/json for POST (default: true) */
   requireJson?: boolean;
-
-  /** Max accepted JSON bytes for POST (default: 256 KiB) */
+  /** Max JSON body bytes for POST (default: 256 KiB) */
   maxJsonBytes?: number;
-
   /** Max query string bytes for GET (default: 8 KiB) */
   maxQueryBytes?: number;
-
-  /**
-   * If true and method is POST, Idempotency-Key header is required (default: false).
-   * Used for operations that should be safely retryable.
-   */
+  /** Require Idempotency-Key header for POST (default: false) */
   requireIdempotency?: boolean;
-
-  /**
-   * Rate key builder (default: derived from userId or hashed-ip identity).
-   * IMPORTANT: Do NOT include request body values in the key.
-   * 
-   * Example:
-   *   rateKey: (viewerId, req) => `custom:${viewerId}:${req.nextUrl.pathname}`
-   */
-  rateKey?: (viewerId: string | null, req: NextRequest) => string;
-
-  /**
-   * Rate limit policy id (default: "api").
-   * Define policies in src/lib/rate-limit.ts
-   */
+  /** Rate limit policy ID (default: "api") */
   ratePolicyId?: string;
-
-  /**
-   * Include detailed rate limit headers in 429 responses (default: true).
-   * Set to false to prevent leaking rate limit thresholds to attackers.
-   */
+  /** Custom rate limit key builder */
+  rateKey?: (viewerId: string | null, req: NextRequest) => string;
+  /** Include rate limit headers in 429 responses (default: true) */
   exposeRateLimitHeaders?: boolean;
 };
 
@@ -102,305 +68,268 @@ export type ApiContext<T> = {
   handle: string | null;
   json: T;
   idempotencyKey: string | null;
-  /**
-   * If-Match header value (for ETag-based conditional requests).
-   * Use to implement optimistic concurrency control.
-   */
   ifMatch: string | null;
+  requestId: string;
+  /** The auth mode used for this request (for observability/logging) */
+  authMode: ApiAuthMode;
 };
 
-export type ApiHandler<T> = (ctx: ApiContext<T>) => Promise<NextResponse>;
+// ============================================================================
+// Zod Schema for Catching Thrown Errors
+// ============================================================================
 
-function okJson<T>(data: T, init?: ResponseInit) {
+const ErrorWithStatusSchema = z.object({
+  status: z.number(),
+  message: z.string(),
+});
+
+// ============================================================================
+// Response Helpers
+// ============================================================================
+
+export function okJson<T>(data: T, init?: ResponseInit): NextResponse {
   const headers = new Headers(init?.headers);
-  if (!headers.has("Cache-Control")) headers.set("Cache-Control", "no-store");
-
-  return NextResponse.json<ApiEnvelope<T>>(okEnvelope(data), { ...(init ?? {}), headers });
+  if (!headers.has("Cache-Control")) {
+    headers.set("Cache-Control", "no-store");
+  }
+  return NextResponse.json<ApiEnvelope<T>>(apiOk(data), { ...init, headers });
 }
 
-function errJson(error: ApiError, init?: ResponseInit) {
+export function errJson(error: ApiError, init?: ResponseInit): NextResponse {
   const headers = new Headers(init?.headers);
-  if (!headers.has("Cache-Control")) headers.set("Cache-Control", "no-store");
-
-  return NextResponse.json<ApiEnvelope<never>>(errEnvelope(error), {
-    ...(init ?? {}),
+  if (!headers.has("Cache-Control")) {
+    headers.set("Cache-Control", "no-store");
+  }
+  if (
+    typeof error.meta === "object" &&
+    error.meta !== null &&
+    "requestId" in error.meta &&
+    typeof error.meta.requestId === "string" &&
+    !headers.has("X-Request-ID")
+  ) {
+    headers.set("X-Request-ID", error.meta.requestId);
+  }
+  return NextResponse.json<ApiEnvelope<never>>(apiErr(error), {
+    ...init,
     status: error.status,
     headers,
   });
 }
 
-function extractErrorStatus(err: unknown, defaultStatus: number): number {
-  if (typeof (err as any)?.status === "number") {
-    return (err as any).status;
-  }
-  if (typeof (err as any)?.cause?.status === "number") {
-    return (err as any).cause.status;
-  }
-  return defaultStatus;
+// ============================================================================
+// Internal Helpers
+// ============================================================================
+
+function getRequestId(req: NextRequest): string {
+  return req.headers.get("x-request-id") ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function extractErrorMessage(err: unknown, defaultMessage: string): string {
-  if (typeof (err as any)?.message === "string") {
-    return (err as any).message;
-  }
-  return defaultMessage;
-}
-
-async function readJsonBody(req: NextRequest, maxBytes: number): Promise<
-  | { ok: true; value: unknown }
-  | { ok: false; error: ApiError }
-> {
-  let text: string;
-  try {
-    text = await req.text();
-  } catch (e) {
-    // Network errors, timeouts, or other read failures
-    return {
-      ok: false,
-      error: {
-        code: "REQUEST_READ_FAILED",
-        message: "Failed to read request body",
-        status: 400,
-      },
-    };
-  }
-
-  const bytes = new TextEncoder().encode(text).byteLength;
-  if (bytes > maxBytes) {
-    return {
-      ok: false,
-      error: {
-        code: "PAYLOAD_TOO_LARGE",
-        message: "Payload too large",
-        status: 413,
-        meta: { maxBytes, actualBytes: bytes },
-      },
-    };
-  }
-
-  // Empty body is invalid JSON for our API routes.
-  if (!text.trim()) {
-    return { ok: false, error: { code: "INVALID_JSON", message: "Invalid JSON", status: 400 } };
-  }
-
-  try {
-    return { ok: true, value: JSON.parse(text) };
-  } catch (e) {
-    return { ok: false, error: { code: "INVALID_JSON", message: "Invalid JSON", status: 400 } };
-  }
-}
-
-function detectRequestOrigin(req: NextRequest): string | null {
-  const originHdr = req.headers.get("origin");
-  if (originHdr) {
+function getOrigin(req: NextRequest): string | null {
+  const origin = req.headers.get("origin");
+  if (origin) {
     try {
-      const u = new URL(originHdr);
+      const u = new URL(origin);
       return `${u.protocol}//${u.host}`;
     } catch {
       return null;
     }
   }
-
-  // Fallback to Referer (less reliable, includes path)
-  const refererHdr = req.headers.get("referer");
-  if (refererHdr) {
-    try {
-      const u = new URL(refererHdr);
-      return `${u.protocol}//${u.host}`;
-    } catch {
-      return null;
-    }
-  }
-
   return null;
 }
 
-function originAllowed(req: NextRequest, explicit?: string[]): boolean {
-  const origin = detectRequestOrigin(req);
-  if (!origin) return false;
+async function parseBody(req: NextRequest, maxBytes: number): Promise<Result<unknown, ApiError>> {
+  let text: string;
+  try {
+    text = await req.text();
+  } catch {
+    return err({ code: "REQUEST_READ_FAILED", message: "Failed to read request body", status: 400 });
+  }
 
-  const allow = explicit && explicit.length > 0 ? explicit : [req.nextUrl.origin];
-  return allow.includes(origin);
+  const actualBytes = new TextEncoder().encode(text).byteLength;
+  if (actualBytes > maxBytes) {
+    return err({ code: "PAYLOAD_TOO_LARGE", message: "Payload too large", status: 413, meta: { maxBytes, actualBytes } });
+  }
+
+  if (!text.trim()) {
+    return err({ code: "INVALID_JSON", message: "Invalid JSON", status: 400 });
+  }
+
+  try {
+    return ok(JSON.parse(text));
+  } catch {
+    return err({ code: "INVALID_JSON", message: "Invalid JSON", status: 400 });
+  }
 }
 
-function asApiErrorFromAuthProblem(p: AuthProblem): ApiError {
-  return { code: p.code, message: p.message, status: p.status };
-}
-
-/**
- * withApi: validates the request and returns either a NextResponse error
- * or a hydrated context object for the route handler.
- * 
- * Validation order (optimized for security):
- * 1. HTTP method check
- * 2. Authentication (if required)
- * 3. Origin check (POST)
- * 4. CSRF validation (POST, session-dependent)
- * 5. Content-Type validation (POST)
- * 6. Rate limiting (before parsing to prevent abuse)
- * 7. Payload parsing and size check
- * 8. Schema validation
- * 9. Idempotency key extraction
- */
-export async function withApi<S extends z.ZodTypeAny>(
-  req: NextRequest,
+async function validateWithSchema<S extends z.ZodTypeAny>(
   schema: S,
-  opts: WithApiOpts = {},
-): Promise<NextResponse | Omit<ApiContext<z.infer<S>>, "req">> {
-  // 1. Methods
-  const methods = opts.methods ?? ["POST"];
-  if (!methods.includes(req.method as Method)) {
-    return errJson(
-      {
-        code: "METHOD_NOT_ALLOWED",
-        message: "Method not allowed",
-        status: 405,
-        meta: { allowed: methods },
-      },
-      { headers: { Allow: methods.join(", ") } },
-    );
+  payload: unknown,
+): Promise<Result<z.infer<S>, ApiError>> {
+  const result = await schema.safeParseAsync(payload);
+  if (result.success) {
+    return ok(result.data);
   }
-
-  // 2. Auth
-  const authMode = opts.auth ?? "auth";
-  let session: Session | null = null;
-  let viewerId: string | null = null;
-  let handle: string | null = null;
-
-  if (authMode === "auth") {
-    try {
-      const a = await requireAuth();
-      session = a.session;
-      viewerId = a.userId;
-    } catch (e) {
-      return errJson(asApiErrorFromAuthProblem(e as AuthProblem));
-    }
-  } else if (authMode === "onboarded") {
-    try {
-      const a = await requireOnboarded();
-      session = a.session;
-      viewerId = a.userId;
-      handle = a.handle;
-    } catch (e) {
-      return errJson(asApiErrorFromAuthProblem(e as AuthProblem));
-    }
-  }
-
-  // 3. Same-origin check (browser POSTs)
-  const checkOrigin = opts.checkOrigin !== false;
-  if (checkOrigin && req.method === "POST") {
-    if (!originAllowed(req, opts.allowOrigins)) {
-      return errJson({ code: "FORBIDDEN", message: "Forbidden", status: 403 });
-    }
-  }
-
-  // 4. CSRF (POST by default). Set opts.csrf=false only for explicit non-browser/machine routes.
-  const needsCsrf = opts.csrf !== false && req.method === "POST";
-  if (needsCsrf) {
-    try {
-      await requireCsrf(req);
-    } catch (err: any) {
-      const status = extractErrorStatus(err, 419);
-      const message = extractErrorMessage(err, "Security check failed");
-      return errJson({ code: "CSRF_FAILED", message, status });
-    }
-  }
-
-  // 5. Enforce JSON Content-Type on POST
-  const requireJson = opts.requireJson !== false;
-  if (requireJson && req.method === "POST") {
-    const ct = (req.headers.get("content-type") || "").toLowerCase();
-    if (!ct.includes("application/json")) {
-      return errJson({ code: "UNSUPPORTED_MEDIA_TYPE", message: "Expected application/json", status: 415 });
-    }
-  }
-
-  // 6. Rate limit (before parsing to prevent abuse)
-  const policyId = opts.ratePolicyId ?? "api";
-  const key = opts.rateKey ? opts.rateKey(viewerId, req) : getRateLimitKey(req, viewerId ?? undefined);
-  const rl = await rateLimit({ key, policyId });
-  if (!rl.allowed) {
-    const exposeHeaders = opts.exposeRateLimitHeaders !== false;
-    return errJson(
-      { code: "RATE_LIMITED", message: "Too many requests", status: 429 },
-      { headers: exposeHeaders ? buildRateLimitHeaders(rl) : undefined },
-    );
-  }
-
-  // 7. Parse payload
-  let payload: unknown;
-  if (req.method === "GET") {
-    // Check query string size to prevent abuse
-    const maxQueryBytes = opts.maxQueryBytes ?? 8_192; // 8 KiB
-    const queryString = req.nextUrl.search;
-    const queryBytes = new TextEncoder().encode(queryString).byteLength;
-
-    if (queryBytes > maxQueryBytes) {
-      return errJson({
-        code: "QUERY_STRING_TOO_LARGE",
-        message: "Query string too large",
-        status: 414,
-        meta: { maxBytes: maxQueryBytes, actualBytes: queryBytes },
-      });
-    }
-
-    // Note: All query params are strings. Use z.coerce.number() etc. in your schema.
-    payload = Object.fromEntries(req.nextUrl.searchParams.entries());
-  } else {
-    const max = opts.maxJsonBytes ?? 262_144; // 256 KiB
-    const parsed = await readJsonBody(req, max);
-    if (!parsed.ok) return errJson(parsed.error);
-    payload = parsed.value;
-  }
-
-  // 8. Zod validation (async-safe)
-  const parsed = await schema.safeParseAsync(payload);
-  if (!parsed.success) {
-    return errJson({
-      code: "INVALID_REQUEST",
-      message: "Invalid request",
-      status: 400,
-      issues: parsed.error.issues.map((iss) => ({
-        path: iss.path.map((seg) => (typeof seg === "number" ? seg : String(seg))),
-        message: iss.message,
-      })),
-    });
-  }
-
-  // 9. Extract conditional and idempotency headers
-  const ifMatch = req.headers.get("if-match");
-  let idempotencyKey: string | null = null;
-
-  if (opts.requireIdempotency && req.method === "POST") {
-    try {
-      idempotencyKey = requireIdempotencyKey(req);
-    } catch (err: any) {
-      const status = extractErrorStatus(err, 400);
-      const message = extractErrorMessage(err, "Idempotency-Key required");
-      return errJson({ code: "IDEMPOTENCY_REQUIRED", message, status });
-    }
-  } else {
-    // Optional idempotency key (not required but available if provided)
-    const headerKey = req.headers.get("idempotency-key") || req.headers.get("Idempotency-Key");
-    idempotencyKey = headerKey;
-  }
-
-  return { session, viewerId, handle, json: parsed.data, idempotencyKey, ifMatch };
+  const issues: ApiIssue[] = result.error.issues.map((iss) => ({
+    path: iss.path.map((seg) => (typeof seg === "number" ? seg : String(seg))),
+    message: iss.message,
+  }));
+  return err({ code: "INVALID_REQUEST", message: "Invalid request", status: 400, issues });
 }
 
+// ============================================================================
+// Main API Builder
+// ============================================================================
+
 /**
- * api: sugar to build a Next.js route handler from a Zod schema and an async handler.
+ * Build a Next.js route handler with validation, auth, CSRF, and rate limiting.
+ *
+ * @example
+ * export const POST = api(schema, async (ctx) => {
+ *   const { viewerId, json, requestId } = ctx;
+ *   return okJson({ success: true });
+ * }, { auth: 'onboarded' });
  */
 export function api<S extends z.ZodTypeAny>(
   schema: S,
-  handler: ApiHandler<z.infer<S>>,
-  opts?: WithApiOpts,
+  handler: (ctx: ApiContext<z.infer<S>>) => Promise<NextResponse>,
+  opts: ApiOptions = {},
 ) {
-  return async (req: NextRequest) => {
-    const ctx = await withApi(req, schema, opts);
-    if (ctx instanceof NextResponse) return ctx;
-    return handler({ req, ...ctx });
+  const methods = opts.methods ?? ["POST"];
+  const authMode = opts.auth ?? "auth";
+
+  return async (req: NextRequest): Promise<NextResponse> => {
+    const requestId = getRequestId(req);
+    const isPost = req.method === "POST";
+
+    const withMeta = (error: ApiError): ApiError => ({
+      ...error,
+      meta: { ...(typeof error.meta === "object" && error.meta !== null ? error.meta : {}), requestId },
+    });
+
+    try {
+      // 1. Method
+      if (!methods.includes(req.method as ApiMethod)) {
+        return errJson(withMeta({ code: "METHOD_NOT_ALLOWED", message: "Method not allowed", status: 405, meta: { allowed: methods } }), {
+          headers: { Allow: methods.join(", ") },
+        });
+      }
+
+      // 2. Auth
+      let session: Session | null = null;
+      let viewerId: string | null = null;
+      let handle: string | null = null;
+
+      if (authMode !== "public") {
+        try {
+          if (authMode === "auth") {
+            const auth = await requireAuth();
+            session = auth.session;
+            viewerId = auth.userId;
+          } else {
+            const auth = await requireOnboarded();
+            session = auth.session;
+            viewerId = auth.userId;
+            handle = auth.handle;
+          }
+        } catch (e) {
+          const parsed = AuthErrorSchema.safeParse(e);
+          if (parsed.success) {
+            return errJson(withMeta({ code: parsed.data.code, message: parsed.data.message, status: parsed.data.status }));
+          }
+          return errJson(withMeta({ code: "AUTH_FAILED", message: "Authentication failed", status: 401 }));
+        }
+      }
+
+      // 3. Origin (POST only)
+      if (isPost && opts.checkOrigin !== false) {
+        const origin = getOrigin(req);
+        const allowed = opts.allowOrigins?.length ? opts.allowOrigins : [req.nextUrl.origin];
+        if (!origin || !allowed.includes(origin)) {
+          return errJson(withMeta({ code: "FORBIDDEN", message: "Forbidden", status: 403 }));
+        }
+      }
+
+      // 4. CSRF (POST only)
+      if (isPost && opts.csrf !== false) {
+        try {
+          await requireCsrf(req);
+        } catch (e) {
+          const parsed = ErrorWithStatusSchema.safeParse(e);
+          const message = parsed.success ? parsed.data.message : "Security check failed";
+          const status = parsed.success ? parsed.data.status : 419;
+          return errJson(withMeta({ code: "CSRF_FAILED", message, status }));
+        }
+      }
+
+      // 5. Content-Type (POST only)
+      if (isPost && opts.requireJson !== false) {
+        const ct = (req.headers.get("content-type") ?? "").toLowerCase();
+        if (!ct.includes("application/json")) {
+          return errJson(withMeta({ code: "UNSUPPORTED_MEDIA_TYPE", message: "Expected application/json", status: 415 }));
+        }
+      }
+
+      // 6. Rate limit
+      const rlKey = opts.rateKey ? opts.rateKey(viewerId, req) : getRateLimitKey(req, viewerId ?? undefined);
+      const rlResult = await rateLimit({ key: rlKey, policyId: opts.ratePolicyId ?? "api" });
+      if (!rlResult.allowed) {
+        const headers = opts.exposeRateLimitHeaders !== false ? buildRateLimitHeaders(rlResult) : undefined;
+        return errJson(withMeta({ code: "RATE_LIMITED", message: "Too many requests", status: 429 }), { headers });
+      }
+
+      // 7. Payload
+      let payload: unknown;
+      if (isPost) {
+        const body = await parseBody(req, opts.maxJsonBytes ?? DEFAULT_MAX_JSON_BYTES);
+        if (!body.ok) return errJson(withMeta(body.error));
+        payload = body.value;
+      } else {
+        const queryBytes = new TextEncoder().encode(req.nextUrl.search).byteLength;
+        const maxQuery = opts.maxQueryBytes ?? DEFAULT_MAX_QUERY_BYTES;
+        if (queryBytes > maxQuery) {
+          return errJson(withMeta({ code: "QUERY_STRING_TOO_LARGE", message: "Query string too large", status: 414, meta: { maxBytes: maxQuery, actualBytes: queryBytes } }));
+        }
+        payload = Object.fromEntries(req.nextUrl.searchParams.entries());
+      }
+
+      // 8. Schema validation
+      const validated = await validateWithSchema(schema, payload);
+      if (!validated.ok) return errJson(withMeta(validated.error));
+
+      // 9. Idempotency key
+      let idempotencyKey: string | null = null;
+      if (opts.requireIdempotency && isPost) {
+        try {
+          idempotencyKey = requireIdempotencyKey(req);
+        } catch (e) {
+          const parsed = ErrorWithStatusSchema.safeParse(e);
+          const message = parsed.success ? parsed.data.message : "Idempotency-Key required";
+          const status = parsed.success ? parsed.data.status : 400;
+          return errJson(withMeta({ code: "IDEMPOTENCY_REQUIRED", message, status }));
+        }
+      } else {
+        idempotencyKey = req.headers.get("idempotency-key") ?? req.headers.get("Idempotency-Key") ?? null;
+      }
+
+      // 10. If-Match header
+      const ifMatch = req.headers.get("if-match");
+
+      // Execute handler
+      return await handler({
+        req,
+        session,
+        viewerId,
+        handle,
+        json: validated.value,
+        idempotencyKey,
+        ifMatch,
+        requestId,
+        authMode,
+      });
+    } catch (e) {
+      // Unexpected error — log and return clean 500
+      console.error("[api] Unexpected error:", e);
+      return errJson(withMeta({ code: "INTERNAL_ERROR", message: "Internal server error", status: 500 }));
+    }
   };
 }
-
-export { okJson, errJson };

@@ -6,7 +6,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
 import type { ApiEnvelope, ApiError, Result } from "@/lib/api/shapes";
-import { err, errEnvelope, ok, okEnvelope } from "@/lib/api/shapes";
+import { err, apiErr, ok, apiOk } from "@/lib/api/shapes";
 
 /**
  * CSRF protection (server-only)
@@ -159,7 +159,7 @@ export function jsonWithCsrfToken(
 ): NextResponse<ApiEnvelope<CsrfResponse>> {
   const csrfToken = issueCsrfToken();
 
-  const res = NextResponse.json(okEnvelope({ csrfToken }), {
+  const res = NextResponse.json(apiOk({ csrfToken }), {
     status: init?.status ?? 200,
     headers: init?.headers,
   });
@@ -173,7 +173,7 @@ export function jsonWithCsrfToken(
  * Convenience helper: return a CSRF error as an ApiEnvelope.
  */
 export function csrfErrorResponse(problem: CsrfProblem): NextResponse<ApiEnvelope<never>> {
-  const res = NextResponse.json(errEnvelope(problem), { status: problem.status });
+  const res = NextResponse.json(apiErr(problem), { status: problem.status });
   applyCsrfRouteHeaders(res);
   return res;
 }
