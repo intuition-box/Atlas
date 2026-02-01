@@ -3,10 +3,10 @@ import { z } from "zod";
 
 import { NextResponse, type NextRequest } from "next/server";
 
-import type { ApiEnvelope, ApiError, ApiIssue } from "@/lib/api-shapes";
-import { errEnvelope, okEnvelope } from "@/lib/api-shapes";
-import { db } from "@/lib/database";
-import { requireAuth } from "@/lib/guards";
+import type { ApiEnvelope, ApiError, ApiIssue } from "@/lib/api/shapes";
+import { errEnvelope, okEnvelope } from "@/lib/api/shapes";
+import { db } from "@/lib/db/client";
+import { requireAuth } from "@/lib/auth/policy";
 import { resolveCommunityIdFromHandle } from "@/lib/handle-registry";
 import { requireCsrf } from "@/lib/security/csrf";
 

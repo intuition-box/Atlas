@@ -2,9 +2,9 @@ import { HandleOwnerType, Prisma } from "@prisma/client";
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 
-import { auth } from "@/lib/auth";
-import { errJson, okJson } from "@/lib/api-server";
-import { db } from "@/lib/database";
+import { auth } from "@/lib/auth/session";
+import { errJson, okJson } from "@/lib/api/server";
+import { db } from "@/lib/db/client";
 import { resolveHandleNameForOwner } from "@/lib/handle-registry";
 import { requireCsrf } from "@/lib/security/csrf";
 

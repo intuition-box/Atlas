@@ -3,8 +3,8 @@
 import * as React from "react"
 import { useParams, useRouter } from "next/navigation"
 
-import { apiGet } from "@/lib/api-client"
-import { parseApiClientError, parseApiProblem } from "@/lib/api-errors"
+import { apiGet } from "@/lib/api/client"
+import { parseApiClientError, parseApiProblem } from "@/lib/api/errors"
 import { normalizeHandle, validateHandle } from "@/lib/handle"
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"

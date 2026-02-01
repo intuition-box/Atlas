@@ -5,8 +5,8 @@ import { useParams, useRouter } from "next/navigation"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
 
-import { apiGet, apiPost } from "@/lib/api-client"
-import { parseApiClientError, parseApiProblem } from "@/lib/api-errors"
+import { apiGet, apiPost } from "@/lib/api/client"
+import { parseApiClientError, parseApiProblem } from "@/lib/api/errors"
 
 import { PageHeader } from "@/components/common/page-header"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"

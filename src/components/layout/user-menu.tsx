@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { auth, signOut } from "@/lib/auth";
+import { auth, signOut } from "@/lib/auth/session";
 import { Button } from "@/components/ui/button";
 import { Separator } from "../ui/separator";
 import { ROUTES } from "@/lib/routes";

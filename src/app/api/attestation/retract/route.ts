@@ -3,9 +3,9 @@ import { z } from "zod";
 
 import { MembershipRole, MembershipStatus, ScoringType } from "@prisma/client";
 
-import { auth } from "@/lib/auth";
-import { errJson, okJson } from "@/lib/api-server";
-import { db } from "@/lib/database";
+import { auth } from "@/lib/auth/session";
+import { errJson, okJson } from "@/lib/api/server";
+import { db } from "@/lib/db/client";
 import { requireCsrf } from "@/lib/security/csrf";
 
 export const runtime = "nodejs";

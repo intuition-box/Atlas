@@ -7,10 +7,10 @@ import {
 } from "@prisma/client";
 import type { NextRequest } from "next/server";
 
-import { auth } from "@/lib/auth";
-import { errJson, okJson } from "@/lib/api-server";
-import type { ApiError, ApiIssue } from "@/lib/api-shapes";
-import { db } from "@/lib/database";
+import { auth } from "@/lib/auth/session";
+import { errJson, okJson } from "@/lib/api/server";
+import type { ApiError, ApiIssue } from "@/lib/api/shapes";
+import { db } from "@/lib/db/client";
 import { checkHandlePubliclyAvailable, claimHandle } from "@/lib/handle-registry";
 import { requireCsrf } from "@/lib/security/csrf";
 import { CommunityCreateSchema } from "@/lib/validations";

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import OrbitUniverse from "@/components/orbit/orbit-universe";
-import { apiGet } from "@/lib/api-client";
+import { apiGet } from "@/lib/api/client";
 import { ROUTES, communityPath } from "@/lib/routes";
 
 type CommunityListItem = {

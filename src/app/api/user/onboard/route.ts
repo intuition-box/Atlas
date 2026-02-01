@@ -2,9 +2,9 @@ import { HandleOwnerType, Prisma } from "@prisma/client";
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 
-import { auth } from "@/lib/auth";
-import { errJson, okJson } from "@/lib/api-server";
-import { db } from "@/lib/database";
+import { auth } from "@/lib/auth/session";
+import { errJson, okJson } from "@/lib/api/server";
+import { db } from "@/lib/db/client";
 import { requireCsrf } from "@/lib/security/csrf";
 import { HandleSchema } from "@/lib/handle";
 
@@ -153,9 +153,16 @@ export async function POST(req: NextRequest) {
 
       const handleName = claim.value.handle;
 
+      const current = await tx.user.findUnique({
+        where: { id: userId },
+        select: { onboardedAt: true },
+      });
+
       const updated = await tx.user.update({
         where: { id: userId },
         data: {
+          onboarded: true,
+          onboardedAt: current?.onboardedAt ?? new Date(),
           ...(input.name !== undefined ? { name: input.name } : {}),
           ...(input.image !== undefined ? { image: input.image } : {}),
           ...(input.headline !== undefined ? { headline: input.headline } : {}),

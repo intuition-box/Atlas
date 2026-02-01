@@ -3,8 +3,8 @@
 import * as React from "react"
 import { useParams, useRouter } from "next/navigation"
 
-import { apiGet, apiPost } from "@/lib/api-client"
-import { parseApiClientError, parseApiProblem } from "@/lib/api-errors"
+import { apiGet, apiPost } from "@/lib/api/client"
+import { parseApiClientError, parseApiProblem } from "@/lib/api/errors"
 import { ROUTES, userPath } from "@/lib/routes"
 import { PageHeader } from "@/components/common/page-header"
 

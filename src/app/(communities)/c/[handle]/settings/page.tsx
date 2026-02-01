@@ -6,8 +6,8 @@ import { zodResolver } from "@hookform/resolvers/zod"
 import { useParams, useRouter } from "next/navigation"
 import { getSession } from "next-auth/react"
 
-import { apiGet, apiPost } from "@/lib/api-client"
-import { parseApiClientError, parseApiProblem } from "@/lib/api-errors"
+import { apiGet, apiPost } from "@/lib/api/client"
+import { parseApiClientError, parseApiProblem } from "@/lib/api/errors"
 
 import { AvatarDropzone } from "@/components/common/avatar-dropzone"
 import { PageHeader } from "@/components/common/page-header"

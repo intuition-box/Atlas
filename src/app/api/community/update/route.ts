@@ -7,9 +7,9 @@ import {
 } from "@prisma/client";
 import type { NextRequest } from "next/server";
 
-import { auth } from "@/lib/auth";
-import { errJson, okJson } from "@/lib/api-server";
-import { db } from "@/lib/database";
+import { auth } from "@/lib/auth/session";
+import { errJson, okJson } from "@/lib/api/server";
+import { db } from "@/lib/db/client";
 import { resolveHandleNameForOwner } from "@/lib/handle-registry";
 import { requireCsrf } from "@/lib/security/csrf";
 import { CommunityUpdateSchema } from "@/lib/validations";
@@ -106,7 +106,11 @@ export async function POST(req: NextRequest) {
         return { kind: "not_found" } as const;
       }
 
-      if (membership.role !== MembershipRole.OWNER && membership.role !== MembershipRole.ADMIN) {
+      if (
+        membership.role !== MembershipRole.OWNER &&
+        membership.role !== MembershipRole.ADMIN &&
+        membership.role !== MembershipRole.MODERATOR
+      ) {
         return { kind: "forbidden" } as const;
       }
 

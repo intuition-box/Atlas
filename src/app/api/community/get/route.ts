@@ -1,9 +1,9 @@
 import type { NextRequest } from "next/server";
 import { HandleOwnerType, MembershipStatus } from "@prisma/client";
 
-import { auth } from "@/lib/auth";
-import { errJson, okJson } from "@/lib/api-server";
-import { db } from "@/lib/database";
+import { auth } from "@/lib/auth/session";
+import { errJson, okJson } from "@/lib/api/server";
+import { db } from "@/lib/db/client";
 import {
   resolveCommunityIdFromHandle,
   resolveHandleNameForOwner,

@@ -2,7 +2,7 @@ import "server-only";
 
 import type { NextRequest } from "next/server";
 
-import { errJson } from "@/lib/api-server";
+import { errJson } from "@/lib/api/server";
 import { applyCsrfRouteHeaders, isSameOrigin, jsonWithCsrfToken } from "@/lib/security/csrf";
 
 export const runtime = "nodejs";

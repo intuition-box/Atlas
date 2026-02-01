@@ -8,9 +8,9 @@ import {
   resolveHandleNamesForOwners,
   resolveUserIdFromHandle,
 } from "@/lib/handle-registry";
-import { auth } from "@/lib/auth";
-import { errJson, okJson } from "@/lib/api-server";
-import { db } from "@/lib/database";
+import { auth } from "@/lib/auth/session";
+import { errJson, okJson } from "@/lib/api/server";
+import { db } from "@/lib/db/client";
 
 export const runtime = "nodejs";
 

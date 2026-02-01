@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { AttestationType, MembershipStatus, ScoringType } from "@prisma/client";
 
-import { db } from "@/lib/database";
-import { auth } from "@/lib/auth";
-import { errJson, okJson } from "@/lib/api-server";
+import { db } from "@/lib/db/client";
+import { auth } from "@/lib/auth/session";
+import { errJson, okJson } from "@/lib/api/server";
 import { resolveCommunityIdFromHandle, resolveUserIdFromHandle } from "@/lib/handle-registry";
 import { requireCsrf } from "@/lib/security/csrf";
 import type { NextRequest } from "next/server";

@@ -2,8 +2,8 @@ import { HandleOwnerType } from "@prisma/client";
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 
-import { db } from "@/lib/database";
-import { errJson, okJson } from "@/lib/api-server";
+import { db } from "@/lib/db/client";
+import { errJson, okJson } from "@/lib/api/server";
 import { resolveHandleNamesForOwners } from "@/lib/handle-registry";
 
 export const runtime = "nodejs";

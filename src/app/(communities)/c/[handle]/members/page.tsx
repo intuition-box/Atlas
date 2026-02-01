@@ -4,7 +4,7 @@ import * as React from "react"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 
-import { apiGet } from "@/lib/api-client"
+import { apiGet } from "@/lib/api/client"
 import { ROUTES, userPath } from "@/lib/routes"
 import { COUNTRIES } from "@/config/countries"
 import { SKILLS } from "@/config/skills"

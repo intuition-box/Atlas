@@ -10,9 +10,9 @@ import type { NextRequest } from "next/server"
 import { NextResponse } from "next/server"
 import { z } from "zod"
 
-import { errEnvelope, okEnvelope } from "@/lib/api-shapes"
-import { requireAuth } from "@/lib/guards"
-import { db } from "@/lib/database"
+import { errEnvelope, okEnvelope } from "@/lib/api/shapes"
+import { requireAuth } from "@/lib/auth/policy"
+import { db } from "@/lib/db/client"
 
 export const runtime = "nodejs"
 
