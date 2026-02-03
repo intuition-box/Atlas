@@ -119,23 +119,26 @@ export const NODE_SPACING = {
  * This is used by the custom D3 orbital force, not by CSS animation.
  */
 export const ORBITAL_MOTION = {
-  /** Base angular velocity (radians per tick) */
-  ANGULAR_VELOCITY: 0.0025,
+  /**
+   * Base angular velocity applied as tangential force.
+   * Higher = faster orbiting. The actual speed depends on alpha and strength.
+   */
+  ANGULAR_VELOCITY: 0.8,
 
   /**
    * Speed multiplier per orbit level.
    * Inner rings move faster to mimic gravitational dynamics.
    */
   RING_SPEED_MULTIPLIER: {
-    ADVOCATE: 1.25,
+    ADVOCATE: 1.4,
     CONTRIBUTOR: 1.0,
-    PARTICIPANT: 0.85,
-    EXPLORER: 0.7,
+    PARTICIPANT: 0.75,
+    EXPLORER: 0.55,
   },
 
   /**
    * How strongly orbital rotation is enforced.
    * 0 = disabled, 1 = fully enforced.
    */
-  ROTATION_STRENGTH: 0.9,
+  ROTATION_STRENGTH: 1.0,
 } as const;

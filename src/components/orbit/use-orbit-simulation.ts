@@ -39,7 +39,10 @@ type UseOrbitSimulationReturn = {
 };
 
 /* ────────────────────────────
-   Custom Elliptical Force
+   Custom Elliptical Force (Radial Only)
+
+   This force only constrains the RADIAL distance from center,
+   allowing free tangential (angular) motion for orbital rotation.
 ──────────────────────────── */
 
 function forceElliptical<N extends SimulatedNode>(
@@ -65,25 +68,32 @@ function forceElliptical<N extends SimulatedNode>(
       // Current distance from center
       const currentDist = Math.sqrt(x * x + y * y);
 
-      // If node is at center, give it a random angle
-      let angle: number;
+      // If node is at center, give it a random push outward
       if (currentDist < 1) {
-        angle = Math.random() * Math.PI * 2;
-      } else {
-        // Calculate angle using normalized ellipse coordinates
-        angle = Math.atan2(y / targetRy, x / targetRx);
+        const randomAngle = Math.random() * Math.PI * 2;
+        node.vx = (node.vx ?? 0) + Math.cos(randomAngle) * 10 * alpha;
+        node.vy = (node.vy ?? 0) + Math.sin(randomAngle) * 10 * alpha;
+        continue;
       }
 
-      // Target position on the ellipse
-      const targetX = cx + Math.cos(angle) * targetRx;
-      const targetY = cy + Math.sin(angle) * targetRy;
+      // Calculate angle using normalized ellipse coordinates
+      const angle = Math.atan2(y / targetRy, x / targetRx);
 
-      // Apply force toward the ellipse
-      const dx = targetX - (node.x ?? cx);
-      const dy = targetY - (node.y ?? cy);
+      // Target position on the ellipse at the CURRENT angle
+      const targetX = Math.cos(angle) * targetRx;
+      const targetY = Math.sin(angle) * targetRy;
+      const targetDist = Math.sqrt(targetX * targetX + targetY * targetY);
 
-      node.vx = (node.vx ?? 0) + dx * strength * alpha;
-      node.vy = (node.vy ?? 0) + dy * strength * alpha;
+      // Calculate how far off we are from the ellipse (radial error only)
+      const radialError = targetDist - currentDist;
+
+      // Apply force only in the RADIAL direction (toward/away from center)
+      // This preserves tangential motion for orbital rotation
+      const radialUnitX = x / currentDist;
+      const radialUnitY = y / currentDist;
+
+      node.vx = (node.vx ?? 0) + radialUnitX * radialError * strength * alpha;
+      node.vy = (node.vy ?? 0) + radialUnitY * radialError * strength * alpha;
     }
   }
 
@@ -96,6 +106,9 @@ function forceElliptical<N extends SimulatedNode>(
 
 /* ────────────────────────────
    Custom Orbital (Tangential) Force
+
+   Applies a constant tangential velocity to create orbital motion.
+   Does NOT depend on alpha so rotation continues even when simulation cools.
 ──────────────────────────── */
 
 function forceOrbitalRotation<N extends SimulatedNode>(
@@ -105,7 +118,7 @@ function forceOrbitalRotation<N extends SimulatedNode>(
 ) {
   let nodes: N[] = [];
 
-  function force(alpha: number) {
+  function force(_alpha: number) {
     for (const node of nodes) {
       if (node.fx != null || node.fy != null) continue;
 
@@ -116,6 +129,7 @@ function forceOrbitalRotation<N extends SimulatedNode>(
       if (r === 0) continue;
 
       // Perpendicular (tangential) unit vector (clockwise)
+      // For clockwise: tangent = (y, -x) normalized
       const tx = y / r;
       const ty = -x / r;
 
@@ -125,8 +139,10 @@ function forceOrbitalRotation<N extends SimulatedNode>(
       const angularVelocity =
         ORBITAL_MOTION.ANGULAR_VELOCITY * ringMultiplier;
 
-      node.vx = (node.vx ?? 0) + tx * angularVelocity * strength * alpha;
-      node.vy = (node.vy ?? 0) + ty * angularVelocity * strength * alpha;
+      // Apply constant tangential velocity (not scaled by alpha)
+      // This ensures continuous rotation regardless of simulation cooling
+      node.vx = (node.vx ?? 0) + tx * angularVelocity * strength;
+      node.vy = (node.vy ?? 0) + ty * angularVelocity * strength;
     }
   }
 
