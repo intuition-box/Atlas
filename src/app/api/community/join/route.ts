@@ -1,10 +1,9 @@
 import { MembershipRole, MembershipStatus, ScoringType } from "@prisma/client";
 import { z } from "zod";
 
-import { NextResponse, type NextRequest } from "next/server";
+import type { NextRequest } from "next/server";
 
-import type { ApiEnvelope, ApiError, ApiIssue } from "@/lib/api/shapes";
-import { errEnvelope, okEnvelope } from "@/lib/api/shapes";
+import { errJson, okJson } from "@/lib/api/server";
 import { db } from "@/lib/db/client";
 import { requireAuth } from "@/lib/auth/policy";
 import { resolveCommunityIdFromHandle } from "@/lib/handle-registry";
@@ -29,142 +28,127 @@ const JoinCommunitySchema = z
     path: ["communityId"],
   });
 
-type StatusErr = ApiError<string, number, unknown>;
-
-function zodIssues(e: z.ZodError): ApiIssue[] {
-  return e.issues.map((iss) => ({
-    path: iss.path.map((seg) => (typeof seg === "number" ? seg : String(seg))),
-    message: iss.message,
-  }));
-}
-
-function jsonError<E extends StatusErr>(e: E): NextResponse<ApiEnvelope<never>> {
-  const res = NextResponse.json(errEnvelope(e), { status: e.status });
-  res.headers.set("cache-control", "no-store");
-  return res;
-}
-
-export async function POST(req: NextRequest): Promise<NextResponse<ApiEnvelope<JoinCommunityOk>>> {
-  const { userId } = await requireAuth();
-
-  const csrf = requireCsrf(req);
-  if (!csrf.ok) return jsonError(csrf.error);
-
-  let raw: unknown;
+export async function POST(req: NextRequest) {
   try {
-    raw = await req.json();
-  } catch {
-    return jsonError({ code: "INVALID_REQUEST", message: "Invalid JSON", status: 400 });
-  }
+    const { userId } = await requireAuth();
 
-  const parsed = JoinCommunitySchema.safeParse(raw);
-  if (!parsed.success) {
-    return jsonError({
-      code: "INVALID_REQUEST",
-      message: "Invalid request",
-      status: 400,
-      issues: zodIssues(parsed.error),
-    });
-  }
+    const csrf = requireCsrf(req);
+    if (!csrf.ok) return errJson(csrf.error);
 
-  const input = parsed.data;
-
-  let communityId: string | null = input.communityId ?? null;
-
-  if (!communityId && input.handle) {
-    const resolved = await resolveCommunityIdFromHandle(input.handle);
-    if (!resolved.ok) return jsonError(resolved.error);
-    communityId = resolved.value;
-  }
-
-  if (!communityId) {
-    return jsonError({ code: "NOT_FOUND", message: "Community not found", status: 404 });
-  }
-
-  const community = await db.community.findUnique({
-    where: { id: communityId },
-    select: {
-      id: true,
-      isMembershipOpen: true,
-    },
-  });
-
-  if (!community) {
-    return jsonError({ code: "NOT_FOUND", message: "Community not found", status: 404 });
-  }
-
-  if (!community.isMembershipOpen) {
-    return jsonError({
-      code: "APPLICATION_CLOSED",
-      message: "This community is not accepting new members.",
-      status: 409,
-    });
-  }
-
-  const now = new Date();
-
-  const existing = await db.membership.findUnique({
-    where: { userId_communityId: { userId, communityId } },
-    select: { id: true, status: true },
-  });
-
-  if (existing) {
-    if (existing.status === MembershipStatus.BANNED) {
-      return jsonError({ code: "FORBIDDEN", message: "You are banned from this community.", status: 403 });
+    let raw: unknown;
+    try {
+      raw = await req.json();
+    } catch {
+      return errJson({ code: "INVALID_REQUEST", message: "Invalid JSON", status: 400 });
     }
 
-    // Repeated joins update activity timestamp, but do not create additional JOINED scoring events.
-    await db.membership.update({
-      where: { id: existing.id },
-      data: { lastActiveAt: now },
-      select: { id: true },
-    });
+    const parsed = JoinCommunitySchema.safeParse(raw);
+    if (!parsed.success) {
+      return errJson({
+        code: "INVALID_REQUEST",
+        message: "Invalid request",
+        status: 400,
+        issues: parsed.error.issues.map((iss) => ({
+          path: iss.path.map((seg) => (typeof seg === "number" ? seg : String(seg))),
+          message: iss.message,
+        })),
+      });
+    }
 
-    const body = okEnvelope<JoinCommunityOk>({
-      communityId,
-      membershipId: existing.id,
-      status: existing.status,
-    });
-    const res = NextResponse.json(body, { status: 200 });
-    res.headers.set("cache-control", "no-store");
-    return res;
-  }
+    const input = parsed.data;
 
-  // Create a pending membership request and record a single JOINED scoring event.
-  // Scores default to 0; role/status are explicit.
-  const created = await db.$transaction(async (tx) => {
-    const membership = await tx.membership.create({
-      data: {
-        userId,
-        communityId,
-        role: MembershipRole.MEMBER,
-        status: MembershipStatus.PENDING,
-        lastActiveAt: now,
-        ...(input.note ? { note: input.note } : {}),
+    let communityId: string | null = input.communityId ?? null;
+
+    if (!communityId && input.handle) {
+      const resolved = await resolveCommunityIdFromHandle(input.handle);
+      if (!resolved.ok) return errJson(resolved.error);
+      communityId = resolved.value;
+    }
+
+    if (!communityId) {
+      return errJson({ code: "NOT_FOUND", message: "Community not found", status: 404 });
+    }
+
+    const community = await db.community.findUnique({
+      where: { id: communityId },
+      select: {
+        id: true,
+        isMembershipOpen: true,
       },
+    });
+
+    if (!community) {
+      return errJson({ code: "NOT_FOUND", message: "Community not found", status: 404 });
+    }
+
+    if (!community.isMembershipOpen) {
+      return errJson({
+        code: "APPLICATION_CLOSED",
+        message: "This community is not accepting new members.",
+        status: 409,
+      });
+    }
+
+    const now = new Date();
+
+    const existing = await db.membership.findUnique({
+      where: { userId_communityId: { userId, communityId } },
       select: { id: true, status: true },
     });
 
-    await tx.scoringEvent.create({
-      data: {
+    if (existing) {
+      if (existing.status === MembershipStatus.BANNED) {
+        return errJson({ code: "FORBIDDEN", message: "You are banned from this community.", status: 403 });
+      }
+
+      // Repeated joins update activity timestamp, but do not create additional JOINED scoring events.
+      await db.membership.update({
+        where: { id: existing.id },
+        data: { lastActiveAt: now },
+        select: { id: true },
+      });
+
+      return okJson<JoinCommunityOk>({
         communityId,
-        actorId: userId,
-        type: ScoringType.JOINED,
-        // Keep metadata minimal; we can expand later if needed.
-      },
-      select: { id: true },
+        membershipId: existing.id,
+        status: existing.status,
+      });
+    }
+
+    // Create a pending membership request and record a single JOINED scoring event.
+    // Scores default to 0; role/status are explicit.
+    const created = await db.$transaction(async (tx) => {
+      const membership = await tx.membership.create({
+        data: {
+          userId,
+          communityId,
+          role: MembershipRole.MEMBER,
+          status: MembershipStatus.PENDING,
+          lastActiveAt: now,
+          ...(input.note ? { note: input.note } : {}),
+        },
+        select: { id: true, status: true },
+      });
+
+      await tx.scoringEvent.create({
+        data: {
+          communityId,
+          actorId: userId,
+          type: ScoringType.JOINED,
+          // Keep metadata minimal; we can expand later if needed.
+        },
+        select: { id: true },
+      });
+
+      return membership;
     });
 
-    return membership;
-  });
-
-  const body = okEnvelope<JoinCommunityOk>({
-    communityId,
-    membershipId: created.id,
-    status: created.status,
-  });
-
-  const res = NextResponse.json(body, { status: 200 });
-  res.headers.set("cache-control", "no-store");
-  return res;
+    return okJson<JoinCommunityOk>({
+      communityId,
+      membershipId: created.id,
+      status: created.status,
+    });
+  } catch {
+    return errJson({ code: "INTERNAL_ERROR", message: "Something went wrong", status: 500 });
+  }
 }
