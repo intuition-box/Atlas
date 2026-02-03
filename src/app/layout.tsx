@@ -3,7 +3,7 @@ import localFont from "next/font/local";
 import { IBM_Plex_Mono } from "next/font/google";
 
 import { Providers } from "@/components/providers";
-import { Navigation } from "@/components/layout/navigation";
+import { NavigationController } from "@/components/navigation/navigation-controller";
 
 import "./globals.css";
 
@@ -54,7 +54,7 @@ export default function RootLayout({
     <html lang="en">
       <body className={`${sans.variable} ${mono.variable} dark`}>
         <Providers>
-          <Navigation />
+          <NavigationController />
           <main>
             {children}
           </main>

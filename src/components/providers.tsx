@@ -5,6 +5,8 @@ import { SessionProvider, useSession } from "next-auth/react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { ROUTES, isPublicRoute, isOnboardingRoute } from "@/lib/routes";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { NavigationProvider } from "@/components/navigation/navigation-provider";
 
 /**
  * Client-side guard for onboarding flow:
@@ -77,7 +79,11 @@ function OnboardingGuard({ children }: { children: React.ReactNode }) {
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <SessionProvider refetchOnWindowFocus={true} refetchInterval={0}>
-      <OnboardingGuard>{children}</OnboardingGuard>
+      <TooltipProvider delay={300}>
+        <NavigationProvider>
+          <OnboardingGuard>{children}</OnboardingGuard>
+        </NavigationProvider>
+      </TooltipProvider>
     </SessionProvider>
   );
 }

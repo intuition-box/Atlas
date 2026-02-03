@@ -157,7 +157,7 @@ export default function UserProfilePage() {
   if (state.status === "error") {
     return (
       <main className="mx-auto w-full max-w-3xl px-4 py-10">
-        <h1 className="text-lg font-semibold">Couldn’t load profile</h1>
+        <h1 className="text-lg font-semibold">Couldn't load profile</h1>
         <p className="text-muted-foreground mt-1 text-sm">{state.message}</p>
         <div className="mt-4">
           <Button type="button" variant="secondary" onClick={() => setState({ status: "idle" })}>
@@ -166,6 +166,10 @@ export default function UserProfilePage() {
         </div>
       </main>
     )
+  }
+
+  if (state.status !== "ready") {
+    return null
   }
 
   const { user, isSelf, attestations } = state.data

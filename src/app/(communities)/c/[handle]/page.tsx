@@ -7,10 +7,13 @@ import { apiGet } from "@/lib/api/client";
 import { parseApiError } from "@/lib/api/errors";
 import { normalizeHandle, validateHandle } from "@/lib/handle";
 
+import { Scroll, Users, UserPlus, FileText, Settings } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 
 import { OrbitView } from "@/components/orbit/orbit-view";
 import type { OrbitMember, MemberLink } from "@/components/orbit/types";
+import { useNavigation, type NavigationControls } from "@/components/navigation/navigation-provider";
 
 /* ────────────────────────────
    Types
@@ -211,38 +214,106 @@ export default function CommunityPage() {
   const links = parseLinks(state.data.memberLinks);
 
   return (
-    <>
-      {state.data.canViewDirectory ? (
-        <OrbitView
-          members={members}
-          links={links}
-          centerLogoUrl={community.avatarUrl}
-          centerName={community.name}
-        />
-      ) : state.data.mode === "splash" ? (
-        <main className="mx-auto w-full max-w-5xl px-4 py-10">
-          <div className="rounded-2xl border border-border p-6">
-            <h2 className="text-base font-semibold">Members-only</h2>
-            <p className="mt-2 text-sm text-muted-foreground">
-              This community is private. Apply to join to view the directory.
-            </p>
-            <div className="mt-4 flex flex-wrap gap-2">
-              {community.isMembershipOpen && (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => router.push(`/c/${communityHandle}/apply`)}
-                >
-                  Apply to join
-                </Button>
-              )}
-              <Button type="button" variant="ghost" onClick={() => router.back()}>
-                Back
-              </Button>
-            </div>
-          </div>
-        </main>
-      ) : null}
-    </>
+    <CommunityReadyState
+      community={community}
+      communityHandle={communityHandle}
+      members={members}
+      links={links}
+      canViewDirectory={state.data.canViewDirectory}
+      isAdmin={state.data.isAdmin}
+      mode={state.data.mode}
+      isMembershipOpen={community.isMembershipOpen}
+      router={router}
+    />
   );
+}
+
+/* ────────────────────────────
+   Ready State Component
+   (Separate component to use hooks)
+──────────────────────────── */
+
+type CommunityReadyStateProps = {
+  community: CommunityGetResponse["community"];
+  communityHandle: string;
+  members: OrbitMember[];
+  links: MemberLink[];
+  canViewDirectory: boolean;
+  isAdmin: boolean;
+  mode: "full" | "splash";
+  isMembershipOpen: boolean;
+  router: ReturnType<typeof useRouter>;
+};
+
+function CommunityReadyState({
+  community,
+  communityHandle,
+  members,
+  links,
+  canViewDirectory,
+  isAdmin,
+  mode,
+  isMembershipOpen,
+  router,
+}: CommunityReadyStateProps) {
+  // Build navigation controls based on context
+  const navigationControls = React.useMemo<NavigationControls>(() => {
+    const bottomLeft = [
+      { icon: Scroll, label: "Attestations", href: `/c/${communityHandle}/attestations` },
+      { icon: Users, label: "Members", href: `/c/${communityHandle}/members` },
+      { icon: UserPlus, label: "Apply", href: `/c/${communityHandle}/apply` },
+    ];
+
+    const bottomRight = isAdmin
+      ? [
+          { icon: FileText, label: "Applications", href: `/c/${communityHandle}/applications` },
+          { icon: Settings, label: "Settings", href: `/c/${communityHandle}/settings` },
+        ]
+      : [];
+
+    return { bottomLeft, bottomRight };
+  }, [communityHandle, isAdmin]);
+
+  // Register navigation controls
+  useNavigation(navigationControls);
+
+  if (canViewDirectory) {
+    return (
+      <OrbitView
+        members={members}
+        links={links}
+        centerLogoUrl={community.avatarUrl}
+        centerName={community.name}
+      />
+    );
+  }
+
+  if (mode === "splash") {
+    return (
+      <main className="mx-auto w-full max-w-5xl px-4 py-10">
+        <div className="rounded-2xl border border-border p-6">
+          <h2 className="text-base font-semibold">Members-only</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            This community is private. Apply to join to view the directory.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {isMembershipOpen && (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => router.push(`/c/${communityHandle}/apply`)}
+              >
+                Apply to join
+              </Button>
+            )}
+            <Button type="button" variant="ghost" onClick={() => router.back()}>
+              Back
+            </Button>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  return null;
 }
