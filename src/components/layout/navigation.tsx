@@ -21,7 +21,7 @@ export function Navigation() {
   }
 
   return (
-    <header className="group fixed z-50 flex flex-col p-6 text-sm text-white/60">
+    <header className="absolute group fixed z-50 flex flex-col p-6 text-sm text-white/60">
       <Logo />
       <nav className="ml-auto flex flex-col gap-2 py-4 transition-all duration-200">
         {isAuthed && (
