@@ -99,15 +99,8 @@ export const INTERACTION = {
   HOVER_SCALE: 1.15,
   /** Delay before resuming rotation after hover (ms) */
   RESUME_ROTATION_DELAY: 3000,
-} as const;
-
-/* ────────────────────────────
-   Node Spacing Config
-──────────────────────────── */
-
-export const NODE_SPACING = {
-  /** Minimum gap between node edges (in pixels) */
-  MIN_GAP: 4,
+  /** Duration for rotation to decelerate to a stop on hover (ms) */
+  ROTATION_DECEL_DURATION: 1000,
 } as const;
 
 /* ────────────────────────────
@@ -140,5 +133,5 @@ export const ORBITAL_MOTION = {
    * How strongly orbital rotation is enforced.
    * 0 = disabled, 1 = fully enforced.
    */
-  ROTATION_STRENGTH: 1.0,
+  ROTATION_STRENGTH: 0.4,
 } as const;

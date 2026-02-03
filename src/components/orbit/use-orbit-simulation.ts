@@ -14,8 +14,8 @@ import {
   LEVEL_COLORS,
   NODE_RADIUS,
   SIMULATION,
-  NODE_SPACING,
   ORBITAL_MOTION,
+  INTERACTION,
 } from "./constants";
 
 /* ────────────────────────────
@@ -116,6 +116,7 @@ interface OrbitalForce<N extends SimulatedNode> {
   (alpha: number): void;
   initialize: (nodes: N[]) => void;
   paused: (value?: boolean) => boolean | OrbitalForce<N>;
+  speedMultiplier: (value?: number) => number | OrbitalForce<N>;
 }
 
 function forceOrbitalRotation<N extends SimulatedNode>(
@@ -125,10 +126,11 @@ function forceOrbitalRotation<N extends SimulatedNode>(
 ): OrbitalForce<N> {
   let nodes: N[] = [];
   let paused = false;
+  let speedMult = 1; // 0 = stopped, 1 = full speed
 
   const force: OrbitalForce<N> = (_alpha: number) => {
-    // Skip orbital motion when paused (but simulation can still run for collisions)
-    if (paused) return;
+    // Skip orbital motion when paused or speed is zero
+    if (paused || speedMult <= 0) return;
 
     for (const node of nodes) {
       if (node.fx != null || node.fy != null) continue;
@@ -148,7 +150,7 @@ function forceOrbitalRotation<N extends SimulatedNode>(
         ORBITAL_MOTION.RING_SPEED_MULTIPLIER[node.orbitLevel] ?? 1;
 
       const angularVelocity =
-        ORBITAL_MOTION.ANGULAR_VELOCITY * ringMultiplier;
+        ORBITAL_MOTION.ANGULAR_VELOCITY * ringMultiplier * speedMult;
 
       // Apply constant tangential velocity (not scaled by alpha)
       // This ensures continuous rotation regardless of simulation cooling
@@ -164,6 +166,12 @@ function forceOrbitalRotation<N extends SimulatedNode>(
   force.paused = (value?: boolean) => {
     if (value === undefined) return paused;
     paused = value;
+    return force;
+  };
+
+  force.speedMultiplier = (value?: number) => {
+    if (value === undefined) return speedMult;
+    speedMult = Math.max(0, Math.min(1, value)); // Clamp 0-1
     return force;
   };
 
@@ -219,7 +227,8 @@ function createNodes(
   centerY: number
 ): SimulatedNode[] {
   const perspectiveRatio = SIMULATION.PERSPECTIVE_RATIO;
-  const minGap = NODE_SPACING.MIN_GAP;
+  // Use collision padding for initial placement gap - keeps it consistent with runtime collision
+  const minGap = SIMULATION.COLLISION_PADDING;
 
   // Group members by level
   const membersByLevel = groupMembersByLevel(members);
@@ -390,6 +399,7 @@ export function useOrbitSimulation({
   const simulationRef = useRef<Simulation<SimulatedNode, SimulatedLink> | null>(null);
   const lastMemberIdsRef = useRef<string>("");
   const rotationPausedRef = useRef(false);
+  const decelAnimationRef = useRef<number | null>(null);
 
   // Initialize or update simulation when members/dimensions change
   useEffect(() => {
@@ -495,6 +505,11 @@ export function useOrbitSimulation({
 
     return () => {
       sim.stop();
+      // Clean up deceleration animation
+      if (decelAnimationRef.current !== null) {
+        cancelAnimationFrame(decelAnimationRef.current);
+        decelAnimationRef.current = null;
+      }
     };
   }, [members, links, width, height]);
 
@@ -551,9 +566,9 @@ export function useOrbitSimulation({
     simulationRef.current?.alphaTarget(0.12).restart();
   }, []);
 
-  // Pause/resume orbital rotation
-  // When paused: orbital force disabled, velocities zeroed, but simulation stays ready for drag
-  // When resumed: orbital force re-enabled
+  // Pause/resume orbital rotation with smooth deceleration
+  // When pausing: gradually decrease speed over ROTATION_DECEL_DURATION
+  // When resuming: immediately restore full speed
   const setRotationPaused = useCallback((paused: boolean) => {
     rotationPausedRef.current = paused;
 
@@ -561,23 +576,52 @@ export function useOrbitSimulation({
     if (!sim) return;
 
     const orbitForce = sim.force("orbit") as OrbitalForce<SimulatedNode> | null;
+    if (!orbitForce) return;
+
+    // Cancel any ongoing deceleration animation
+    if (decelAnimationRef.current !== null) {
+      cancelAnimationFrame(decelAnimationRef.current);
+      decelAnimationRef.current = null;
+    }
 
     if (paused) {
-      // Pause the orbital force
-      orbitForce?.paused(true);
+      // Gradually decelerate to a stop
+      const duration = INTERACTION.ROTATION_DECEL_DURATION;
+      const startTime = performance.now();
+      const startSpeed = orbitForce.speedMultiplier() as number;
 
-      // Zero out velocities to stop all motion immediately
-      for (const node of sim.nodes()) {
-        node.vx = 0;
-        node.vy = 0;
-      }
+      const animate = (now: number) => {
+        const elapsed = now - startTime;
+        const progress = Math.min(1, elapsed / duration);
 
-      // Set alpha very low so simulation is "dormant" but ready
-      // It won't do much without velocities, but will respond to drag
-      sim.alphaTarget(0).alpha(0.01);
+        // Ease out curve for natural deceleration
+        const easeOut = 1 - Math.pow(1 - progress, 2);
+        const newSpeed = startSpeed * (1 - easeOut);
+
+        orbitForce.speedMultiplier(newSpeed);
+
+        if (progress < 1) {
+          decelAnimationRef.current = requestAnimationFrame(animate);
+        } else {
+          // Fully stopped - zero out velocities and go dormant
+          orbitForce.speedMultiplier(0);
+          orbitForce.paused(true);
+
+          for (const node of sim.nodes()) {
+            node.vx = 0;
+            node.vy = 0;
+          }
+
+          sim.alphaTarget(0).alpha(0.01);
+          decelAnimationRef.current = null;
+        }
+      };
+
+      decelAnimationRef.current = requestAnimationFrame(animate);
     } else {
-      // Resume orbital rotation
-      orbitForce?.paused(false);
+      // Resume immediately at full speed
+      orbitForce.paused(false);
+      orbitForce.speedMultiplier(1);
       sim.alphaTarget(0.12).restart();
     }
   }, []);
