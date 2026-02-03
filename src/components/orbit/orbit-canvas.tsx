@@ -131,8 +131,9 @@ export function OrbitCanvas({
   onNodeDrag,
   onNodeDragEnd,
   onHoverChange,
+  onNodeHoverChange,
   className = "",
-}: OrbitCanvasProps) {
+}: OrbitCanvasProps & { onNodeHoverChange?: (isHovering: boolean) => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationRef = useRef<number>(0);
   const transformRef = useRef<Transform>({ x: 0, y: 0, k: 1 });
@@ -534,6 +535,11 @@ export function OrbitCanvas({
           hoveredNodeRef.current = node;
           canvas.style.cursor = node ? "pointer" : "grab";
 
+          // Notify about node hover change for rotation pause
+          if (onNodeHoverChange) {
+            onNodeHoverChange(node !== null);
+          }
+
           if (onNodeHover) {
             if (node) {
               const pos = getNodePosition(node, centerX, centerY);
@@ -546,7 +552,7 @@ export function OrbitCanvas({
         }
       }
     },
-    [nodes, width, height, onNodeHover, onNodeDrag]
+    [nodes, width, height, onNodeHover, onNodeDrag, onNodeHoverChange]
   );
 
   const handlePointerUp = useCallback(
@@ -603,11 +609,14 @@ export function OrbitCanvas({
 
     if (hoveredNodeRef.current) {
       hoveredNodeRef.current = null;
+      if (onNodeHoverChange) {
+        onNodeHoverChange(false);
+      }
       if (onNodeHover) {
         onNodeHover(null, { x: 0, y: 0 });
       }
     }
-  }, [onNodeHover]);
+  }, [onNodeHover, onNodeHoverChange]);
 
   const handleMouseEnter = useCallback(() => {
     const canvas = canvasRef.current;

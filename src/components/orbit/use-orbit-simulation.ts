@@ -36,6 +36,7 @@ type UseOrbitSimulationReturn = {
   updateNodePosition: (nodeId: string, x: number, y: number, pin?: boolean) => void;
   unpinNode: (nodeId: string) => void;
   reheat: () => void;
+  setRotationPaused: (paused: boolean) => void;
 };
 
 /* ────────────────────────────
@@ -117,8 +118,11 @@ function forceOrbitalRotation<N extends SimulatedNode>(
   strength: number
 ) {
   let nodes: N[] = [];
+  let paused = false;
 
   function force(_alpha: number) {
+    if (paused) return;
+
     for (const node of nodes) {
       if (node.fx != null || node.fy != null) continue;
 
@@ -129,9 +133,9 @@ function forceOrbitalRotation<N extends SimulatedNode>(
       if (r === 0) continue;
 
       // Perpendicular (tangential) unit vector (clockwise)
-      // For clockwise: tangent = (y, -x) normalized
-      const tx = y / r;
-      const ty = -x / r;
+      // For clockwise rotation: tangent = (-y, x) normalized
+      const tx = -y / r;
+      const ty = x / r;
 
       const ringMultiplier =
         ORBITAL_MOTION.RING_SPEED_MULTIPLIER[node.orbitLevel] ?? 1;
@@ -148,6 +152,12 @@ function forceOrbitalRotation<N extends SimulatedNode>(
 
   force.initialize = (n: N[]) => {
     nodes = n;
+  };
+
+  force.paused = (value?: boolean) => {
+    if (value === undefined) return paused;
+    paused = value;
+    return force;
   };
 
   return force;
@@ -520,6 +530,17 @@ export function useOrbitSimulation({
     simulationRef.current?.alphaTarget(0.12).restart();
   }, []);
 
+  // Pause/resume orbital rotation
+  const setRotationPaused = useCallback((paused: boolean) => {
+    const sim = simulationRef.current;
+    if (!sim) return;
+
+    const orbitForce = sim.force("orbit") as ReturnType<typeof forceOrbitalRotation> | null;
+    if (orbitForce && typeof orbitForce.paused === "function") {
+      orbitForce.paused(paused);
+    }
+  }, []);
+
   return {
     nodes,
     links: simulatedLinks,
@@ -527,5 +548,6 @@ export function useOrbitSimulation({
     updateNodePosition,
     unpinNode,
     reheat,
+    setRotationPaused,
   };
 }

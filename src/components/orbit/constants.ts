@@ -123,7 +123,7 @@ export const ORBITAL_MOTION = {
    * Base angular velocity applied as tangential force.
    * Higher = faster orbiting. The actual speed depends on alpha and strength.
    */
-  ANGULAR_VELOCITY: 0.8,
+  ANGULAR_VELOCITY: 0.15,
 
   /**
    * Speed multiplier per orbit level.

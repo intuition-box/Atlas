@@ -7,6 +7,7 @@ import { OrbitCanvas } from "./orbit-canvas";
 import { useOrbitSimulation } from "./use-orbit-simulation";
 import type { OrbitViewProps, SimulatedNode, TooltipState } from "./types";
 import { Spinner } from "../ui/spinner";
+import { INTERACTION } from "./constants";
 
 /* ────────────────────────────
    Tooltip Component
@@ -182,12 +183,46 @@ export function OrbitView({
   }, []);
 
   // Initialize simulation
-  const { nodes, links: simulatedLinks, updateNodePosition, unpinNode } = useOrbitSimulation({
+  const { nodes, links: simulatedLinks, updateNodePosition, unpinNode, setRotationPaused } = useOrbitSimulation({
     members,
     links,
     width: containerSize.width,
     height: containerSize.height,
   });
+
+  // Rotation pause logic with 3-second resume delay
+  const resumeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleNodeHoverChange = useCallback(
+    (isHovering: boolean) => {
+      // Clear any pending resume timeout
+      if (resumeTimeoutRef.current) {
+        clearTimeout(resumeTimeoutRef.current);
+        resumeTimeoutRef.current = null;
+      }
+
+      if (isHovering) {
+        // Pause immediately when hovering a node
+        setRotationPaused(true);
+      } else {
+        // Resume after delay when hover ends
+        resumeTimeoutRef.current = setTimeout(() => {
+          setRotationPaused(false);
+          resumeTimeoutRef.current = null;
+        }, INTERACTION.RESUME_ROTATION_DELAY);
+      }
+    },
+    [setRotationPaused]
+  );
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (resumeTimeoutRef.current) {
+        clearTimeout(resumeTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Track if we're actually dragging (moved more than a few pixels)
   const isDraggingRef = useRef(false);
@@ -261,6 +296,7 @@ export function OrbitView({
           onNodeDragStart={handleNodeDragStart}
           onNodeDrag={handleNodeDrag}
           onNodeDragEnd={handleNodeDragEnd}
+          onNodeHoverChange={handleNodeHoverChange}
         />
       ) : (
         <Spinner />
