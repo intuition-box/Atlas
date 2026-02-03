@@ -1,941 +1,742 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useRef, useEffect, useCallback, useState } from "react";
+import type { SimulatedNode, SimulatedLink, OrbitCanvasProps } from "./types";
+import {
+  RING_RADII,
+  RING_LABELS,
+  ANIMATION,
+  INTERACTION,
+  SIMULATION,
+} from "./constants";
+import type { OrbitLevel } from "./types";
 
-type OrbitLevel = "EXPLORER" | "PARTICIPANT" | "CONTRIBUTOR" | "ADVOCATE";
+/* ────────────────────────────
+   Types
+──────────────────────────── */
 
-export type OrbitMember = {
-  id: string;
-  name: string;
-  avatarUrl?: string | null;
-  headline?: string | null;
-  tags?: string[];
-  orbitLevel: OrbitLevel;
-  reachScore: number;
-  lastActiveAt?: string | null; // ISO
+type Transform = {
+  x: number;
+  y: number;
+  k: number;
 };
 
-type HoverPayload = { id: string; x: number; y: number } | null;
+type DragState =
+  | { type: "none" }
+  | { type: "pan"; startX: number; startY: number; startTransformX: number; startTransformY: number };
 
-type Props = {
-  members: OrbitMember[];
-  onClickMember: (id: string) => void;
-  onHoverChange?: (payload: HoverPayload) => void;
-  centerTitle?: string;
-  centerSubtitle?: string;
-  resetToken?: number;
-};
+type RingLabelOpacities = Record<OrbitLevel, number>;
 
-function mulberry32(seed: number) {
-  return function () {
-    let t = (seed += 0x6d2b79f5);
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+/* ────────────────────────────
+   Helpers
+──────────────────────────── */
+
+function screenToWorld(
+  screenX: number,
+  screenY: number,
+  transform: Transform,
+  rect: DOMRect
+): { x: number; y: number } {
+  const canvasX = screenX - rect.left;
+  const canvasY = screenY - rect.top;
+  return {
+    x: (canvasX - transform.x) / transform.k,
+    y: (canvasY - transform.y) / transform.k,
   };
 }
 
-function clamp(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, n));
+function worldToScreen(
+  worldX: number,
+  worldY: number,
+  transform: Transform
+): { x: number; y: number } {
+  return {
+    x: worldX * transform.k + transform.x,
+    y: worldY * transform.k + transform.y,
+  };
 }
 
-function initials(name: string) {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
-  return (
-    parts[0]!.slice(0, 1) + parts[parts.length - 1]!.slice(0, 1)
-  ).toUpperCase();
+function getNodePosition(
+  node: SimulatedNode,
+  rotationOffset: number,
+  perspectiveRatio: number
+): { x: number; y: number } {
+  const radiusX = RING_RADII[node.orbitLevel];
+  const radiusY = radiusX * perspectiveRatio;
+  const angle = node.baseAngle + rotationOffset;
+  return {
+    x: Math.cos(angle) * radiusX,
+    y: Math.sin(angle) * radiusY,
+  };
 }
 
-type CacheEntry = {
-  img: HTMLImageElement;
-  status: "loading" | "loaded" | "error";
-  url: string;
-  lastUsed: number;
-};
-
-type Circle = { id: string; x: number; y: number; r: number };
-
-class Quadtree {
-  private bounds: { x: number; y: number; w: number; h: number };
-  private capacity: number;
-  private depth: number;
-  private maxDepth: number;
-  private items: Circle[];
-  private children: Quadtree[] | null;
-
-  constructor(
-    bounds: { x: number; y: number; w: number; h: number },
-    capacity = 12,
-    depth = 0,
-    maxDepth = 8
-  ) {
-    this.bounds = bounds;
-    this.capacity = capacity;
-    this.depth = depth;
-    this.maxDepth = maxDepth;
-    this.items = [];
-    this.children = null;
-  }
-
-  clear() {
-    this.items = [];
-    this.children = null;
-  }
-
-  insert(c: Circle) {
-    if (!this.intersectsCircle(this.bounds, c)) return false;
-
-    if (!this.children) {
-      this.items.push(c);
-      if (this.items.length > this.capacity && this.depth < this.maxDepth) {
-        this.subdivide();
-        const old = this.items;
-        this.items = [];
-        for (const it of old) this.insert(it);
-      }
-      return true;
-    }
-
-    let inserted = false;
-    for (const child of this.children) if (child.insert(c)) inserted = true;
-    return inserted;
-  }
-
-  queryPoint(px: number, py: number, radius = 0): Circle[] {
-    const out: Circle[] = [];
-    const range = {
-      x: px - radius,
-      y: py - radius,
-      w: radius * 2,
-      h: radius * 2,
-    };
-    this.queryRect(range, out);
-    return out;
-  }
-
-  private queryRect(
-    range: { x: number; y: number; w: number; h: number },
-    out: Circle[]
-  ) {
-    if (!this.intersectsRect(this.bounds, range)) return;
-
-    if (!this.children) {
-      for (const it of this.items) {
-        if (
-          it.x + it.r >= range.x &&
-          it.x - it.r <= range.x + range.w &&
-          it.y + it.r >= range.y &&
-          it.y - it.r <= range.y + range.h
-        ) {
-          out.push(it);
-        }
-      }
-      return;
-    }
-
-    for (const child of this.children) child.queryRect(range, out);
-  }
-
-  private subdivide() {
-    const { x, y, w, h } = this.bounds;
-    const hw = w / 2;
-    const hh = h / 2;
-    this.children = [
-      new Quadtree(
-        { x, y, w: hw, h: hh },
-        this.capacity,
-        this.depth + 1,
-        this.maxDepth
-      ),
-      new Quadtree(
-        { x: x + hw, y, w: hw, h: hh },
-        this.capacity,
-        this.depth + 1,
-        this.maxDepth
-      ),
-      new Quadtree(
-        { x, y: y + hh, w: hw, h: hh },
-        this.capacity,
-        this.depth + 1,
-        this.maxDepth
-      ),
-      new Quadtree(
-        { x: x + hw, y: y + hh, w: hw, h: hh },
-        this.capacity,
-        this.depth + 1,
-        this.maxDepth
-      ),
-    ];
-  }
-
-  private intersectsRect(
-    a: { x: number; y: number; w: number; h: number },
-    b: { x: number; y: number; w: number; h: number }
-  ) {
-    return !(
-      b.x > a.x + a.w ||
-      b.x + b.w < a.x ||
-      b.y > a.y + a.h ||
-      b.y + b.h < a.y
-    );
-  }
-
-  private intersectsCircle(
-    rect: { x: number; y: number; w: number; h: number },
-    c: Circle
-  ) {
-    const cx = clamp(c.x, rect.x, rect.x + rect.w);
-    const cy = clamp(c.y, rect.y, rect.y + rect.h);
-    const dx = c.x - cx;
-    const dy = c.y - cy;
-    return dx * dx + dy * dy <= c.r * c.r;
-  }
-}
-
-function roundRect(
-  c: CanvasRenderingContext2D,
+function findNodeAtPoint(
+  nodes: SimulatedNode[],
   x: number,
   y: number,
-  w: number,
-  h: number,
-  r: number
-) {
-  const rr = Math.min(r, w / 2, h / 2);
-  c.beginPath();
-  c.moveTo(x + rr, y);
-  c.arcTo(x + w, y, x + w, y + h, rr);
-  c.arcTo(x + w, y + h, x, y + h, rr);
-  c.arcTo(x, y + h, x, y, rr);
-  c.arcTo(x, y, x + w, y, rr);
-  c.closePath();
+  rotationOffset: number,
+  perspectiveRatio: number,
+  hitRadiusMultiplier = 1.3
+): SimulatedNode | null {
+  // Search in reverse to find topmost node first
+  for (let i = nodes.length - 1; i >= 0; i--) {
+    const node = nodes[i];
+    const pos = getNodePosition(node, rotationOffset, perspectiveRatio);
+    const dx = x - pos.x;
+    const dy = y - pos.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist <= node.radius * hitRadiusMultiplier) {
+      return node;
+    }
+  }
+  return null;
 }
 
-function usePrefersReducedMotion() {
-  const [reduced, setReduced] = useState(false);
-  useEffect(() => {
-    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const onChange = () => setReduced(mq.matches);
-    onChange();
-    mq.addEventListener?.("change", onChange);
-    return () => mq.removeEventListener?.("change", onChange);
-  }, []);
-  return reduced;
+function findHoveredRing(
+  x: number,
+  y: number,
+  perspectiveRatio: number,
+  ringThreshold = 20
+): OrbitLevel | null {
+  const orbitLevels: OrbitLevel[] = ["ADVOCATE", "CONTRIBUTOR", "PARTICIPANT", "EXPLORER"];
+
+  for (const level of orbitLevels) {
+    const radiusX = RING_RADII[level];
+    const radiusY = radiusX * perspectiveRatio;
+
+    // Calculate distance from point to ellipse
+    // Normalized ellipse equation: (x/a)^2 + (y/b)^2 = 1
+    const normalizedDist = Math.sqrt((x * x) / (radiusX * radiusX) + (y * y) / (radiusY * radiusY));
+    const distFromRing = Math.abs(normalizedDist - 1) * Math.min(radiusX, radiusY);
+
+    if (distFromRing < ringThreshold) {
+      return level;
+    }
+  }
+
+  return null;
 }
 
-type CssPalette = {
-  background: string;
-  foreground: string;
-  border: string;
-  muted: string;
-  mutedForeground: string;
-};
-
-function readVar(cs: CSSStyleDeclaration, name: string, fallback: string) {
-  const v = cs.getPropertyValue(name).trim();
-  return v || fallback;
-}
-
-function hslA(triplet: string, a: number) {
-  return `hsl(${triplet} / ${clamp(a, 0, 1)})`;
-}
+/* ────────────────────────────
+   Component
+──────────────────────────── */
 
 export function OrbitCanvas({
-  members,
-  onClickMember,
+  nodes,
+  links,
+  width,
+  height,
+  centerLogoUrl,
+  centerName,
+  onNodeClick,
+  onNodeHover,
   onHoverChange,
-  centerTitle,
-  centerSubtitle,
-  resetToken,
-}: Props) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  className = "",
+}: OrbitCanvasProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const animationRef = useRef<number>(0);
+  const transformRef = useRef<Transform>({ x: 0, y: 0, k: 1 });
+  const dragRef = useRef<DragState>({ type: "none" });
+  const hoveredNodeRef = useRef<SimulatedNode | null>(null);
+  const imageCache = useRef<Map<string, HTMLImageElement>>(new Map());
+  const centerLogoRef = useRef<HTMLImageElement | null>(null);
 
-  const hoverIdRef = useRef<string | null>(null);
-  const pausedRef = useRef(false);
-  // Animation time that only advances when not paused (prevents time-jumps after hover)
-  const animTimeRef = useRef(0);
-  const lastNowRef = useRef<number | null>(null);
+  // Animation state
+  const animationStartRef = useRef<number>(0);
+  const prevNodesLengthRef = useRef(0);
+  const rotationStartRef = useRef<number>(performance.now());
+  const pausedAtRef = useRef<number | null>(null);
+  const isPausedRef = useRef(false);
+  const resumeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const qtRef = useRef<Quadtree | null>(null);
-  const cacheRef = useRef<Map<string, CacheEntry>>(new Map());
+  // Store stable rotation offset for hit testing during pause
+  const stableRotationOffsetRef = useRef<number>(0);
 
-  // viewport (screen-space pan + scale)
-  const viewRef = useRef({ scale: 1, panX: 0, panY: 0 });
-
-  const paletteRef = useRef<CssPalette>({
-    background: "0 0% 100%",
-    foreground: "0 0% 10%",
-    border: "0 0% 80%",
-    muted: "0 0% 96%",
-    mutedForeground: "0 0% 45%",
+  // Ring label opacity state (for fade in/out)
+  const ringLabelOpacitiesRef = useRef<RingLabelOpacities>({
+    ADVOCATE: 0,
+    CONTRIBUTOR: 0,
+    PARTICIPANT: 0,
+    EXPLORER: 0,
   });
+  const hoveredRingRef = useRef<OrbitLevel | null>(null);
 
+  // Center transform when dimensions change
   useEffect(() => {
-    const root = document.documentElement;
-
-    const sync = () => {
-      const cs = getComputedStyle(root);
-      paletteRef.current = {
-        background: readVar(cs, "--background", "0 0% 100%"),
-        foreground: readVar(cs, "--foreground", "0 0% 10%"),
-        border: readVar(cs, "--border", "0 0% 80%"),
-        muted: readVar(cs, "--muted", "0 0% 96%"),
-        mutedForeground: readVar(cs, "--muted-foreground", "0 0% 45%"),
+    if (width > 0 && height > 0) {
+      transformRef.current = {
+        x: width / 2,
+        y: height / 2,
+        k: 1,
       };
-    };
-
-    sync();
-
-    const mo = new MutationObserver(sync);
-    mo.observe(root, { attributes: true, attributeFilter: ["class", "style"] });
-    return () => mo.disconnect();
-  }, []);
-
-  useEffect(() => {
-    // Reset zoom + pan
-    viewRef.current.scale = 1;
-    viewRef.current.panX = 0;
-    viewRef.current.panY = 0;
-    hoverIdRef.current = null;
-    pausedRef.current = false;
-    animTimeRef.current = 0;
-    lastNowRef.current = null;
-    onHoverChange?.(null);
-  }, [onHoverChange, resetToken]);
-
-  const prefersReducedMotion = usePrefersReducedMotion();
-  const [showLegend, setShowLegend] = useState(false);
-
-  const prepared = useMemo(() => {
-    return members.map((m) => {
-      const seed = [...m.id].reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
-      const rand = mulberry32(seed);
-      const angle0 = rand() * Math.PI * 2;
-
-      const ring =
-        m.orbitLevel === "ADVOCATE"
-          ? 0
-          : m.orbitLevel === "CONTRIBUTOR"
-            ? 1
-            : m.orbitLevel === "PARTICIPANT"
-              ? 2
-              : 3;
-
-      return {
-        ...m,
-        angle0,
-        ring,
-        initials: initials(m.name || "Unknown"),
-        avatarUrl: m.avatarUrl || null,
-      };
-    });
-  }, [members]);
-
-  useEffect(() => {
-    const canvasEl = canvasRef.current;
-    if (!canvasEl) return;
-
-    const ctx2d = canvasEl.getContext("2d");
-    if (!ctx2d) return;
-
-    // Keep narrowed, non-null locals for the rest of the effect (including closures)
-    const canvas = canvasEl;
-    const ctx = ctx2d;
-
-    function resize() {
-      const dpr = window.devicePixelRatio || 1;
-      const rect = canvas.getBoundingClientRect();
-      canvas.width = Math.floor(rect.width * dpr);
-      canvas.height = Math.floor(rect.height * dpr);
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      qtRef.current = new Quadtree({ x: 0, y: 0, w: rect.width, h: rect.height });
-
-      // reset pan if canvas shrinks a lot (avoid lost view)
-      const v = viewRef.current;
-      v.panX = clamp(v.panX, -rect.width * 0.6, rect.width * 0.6);
-      v.panY = clamp(v.panY, -rect.height * 0.6, rect.height * 0.6);
     }
+  }, [width, height]);
 
-    resize();
-    const ro = new ResizeObserver(resize);
-    ro.observe(canvas);
+  // Reset animation when nodes change
+  useEffect(() => {
+    if (nodes.length > 0 && nodes.length !== prevNodesLengthRef.current) {
+      animationStartRef.current = performance.now();
+      prevNodesLengthRef.current = nodes.length;
+    }
+  }, [nodes.length]);
 
-    function ensureImage(memberId: string, url: string) {
-      const cache = cacheRef.current;
-      const existing = cache.get(memberId);
-      if (existing && existing.url !== url) cache.delete(memberId);
-      if (cache.has(memberId)) return;
+  // Preload avatar images
+  useEffect(() => {
+    nodes.forEach((node) => {
+      if (node.avatarUrl && !imageCache.current.has(node.avatarUrl)) {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.src = node.avatarUrl;
+        imageCache.current.set(node.avatarUrl, img);
+      }
+    });
+  }, [nodes]);
 
+  // Track when center logo is loaded to trigger re-render
+  const [centerLogoLoaded, setCenterLogoLoaded] = useState(false);
+
+  // Load center logo
+  useEffect(() => {
+    if (centerLogoUrl) {
+      setCenterLogoLoaded(false);
       const img = new Image();
-      img.decoding = "async";
-      img.loading = "eager";
-      const entry: CacheEntry = {
-        img,
-        status: "loading",
-        url,
-        lastUsed: Date.now(),
-      };
-      cache.set(memberId, entry);
-
+      img.crossOrigin = "anonymous";
+      img.src = centerLogoUrl;
       img.onload = () => {
-        const cur = cache.get(memberId);
-        if (cur) cur.status = "loaded";
+        centerLogoRef.current = img;
+        setCenterLogoLoaded(true);
       };
       img.onerror = () => {
-        const cur = cache.get(memberId);
-        if (cur) cur.status = "error";
+        console.warn("Failed to load center logo:", centerLogoUrl);
+        centerLogoRef.current = null;
+        setCenterLogoLoaded(true); // Still mark as "loaded" to show fallback
       };
+    } else {
+      centerLogoRef.current = null;
+      setCenterLogoLoaded(true);
+    }
+  }, [centerLogoUrl]);
 
-      img.src = url;
+  // Main render function
+  const render = useCallback(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx || width === 0 || height === 0) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    ctx.scale(dpr, dpr);
+
+    const transform = transformRef.current;
+    const now = performance.now();
+    const elapsed = now - animationStartRef.current;
+
+    // Calculate animation progress
+    const nodeProgress = Math.min(1, elapsed / ANIMATION.FADE_IN_DURATION);
+    const bridgeElapsed = Math.max(0, elapsed - ANIMATION.BRIDGE_DELAY);
+    const bridgeProgress = Math.min(1, bridgeElapsed / ANIMATION.BRIDGE_DURATION);
+
+    // Calculate rotation offset (continuous rotation, pausable)
+    let rotationOffset: number;
+    if (isPausedRef.current && pausedAtRef.current !== null) {
+      const rotationElapsed = (pausedAtRef.current - rotationStartRef.current) / 1000;
+      rotationOffset = rotationElapsed * SIMULATION.ROTATION_SPEED;
+    } else {
+      const rotationElapsed = (now - rotationStartRef.current) / 1000;
+      rotationOffset = rotationElapsed * SIMULATION.ROTATION_SPEED;
     }
 
-    function maybeEvictCache() {
-      const cache = cacheRef.current;
-      const MAX = 900;
-      if (cache.size <= MAX) return;
-      const entries = [...cache.entries()].sort(
-        (a, b) => a[1].lastUsed - b[1].lastUsed
-      );
-      for (const [k] of entries.slice(0, cache.size - MAX)) cache.delete(k);
-    }
+    // Store stable rotation offset for hit testing
+    stableRotationOffsetRef.current = rotationOffset;
 
-    function recencyAlpha(iso: string | null | undefined) {
-      if (!iso) return 0.25;
-      const ts = Date.parse(iso);
-      if (!Number.isFinite(ts)) return 0.25;
-      const days = (Date.now() - ts) / (1000 * 60 * 60 * 24);
-      const a = 1 - clamp(days / 30, 0, 1);
-      return clamp(0.25 + a * 0.75, 0.25, 1);
-    }
-
-    function ringStyle(ring: number) {
-      const p = paletteRef.current;
-      const strength = clamp(1 - ring * 0.18, 0.46, 1);
-      return {
-        stroke: hslA(p.foreground, 0.14 * strength),
-        label: hslA(p.foreground, 0.55 * strength),
-      };
-    }
-
-    function drawRingLabels(cx: number, cy: number, radii: number[]) {
-      const labels = [
-        { ring: 0, text: "Advocates" },
-        { ring: 1, text: "Contributors" },
-        { ring: 2, text: "Participants" },
-        { ring: 3, text: "Explorers" },
-      ];
-
-      ctx.save();
-      ctx.font = `12px system-ui, -apple-system, Segoe UI, sans-serif`;
-      ctx.textBaseline = "middle";
-      ctx.textAlign = "left";
-
-      const angle = -Math.PI / 8;
-      for (const l of labels) {
-        const r = radii[l.ring] ?? radii[radii.length - 1]!;
-        const x = cx + Math.cos(angle) * r;
-        const y = cy + Math.sin(angle) * r;
-
-        const { label } = ringStyle(l.ring);
-        const paddingX = 8;
-        const paddingY = 5;
-        const metrics = ctx.measureText(l.text);
-        const w = Math.ceil(metrics.width) + paddingX * 2;
-        const h = 12 + paddingY * 2;
-
-        const bx = x + 10;
-        const by = y;
-
-        ctx.fillStyle = hslA(paletteRef.current.background, 0.70);
-        roundRect(ctx, bx, by - h / 2, w, h, 10);
-        ctx.fill();
-
-        ctx.strokeStyle = hslA(paletteRef.current.border, 0.55);
-        ctx.lineWidth = 1;
-        ctx.stroke();
-
-        ctx.fillStyle = label;
-        ctx.fillText(l.text, bx + paddingX, by);
+    // Update ring label opacities (fade in/out)
+    const hoveredRing = hoveredRingRef.current;
+    const fadeSpeed = 0.1; // Opacity change per frame
+    const orbitLevels: OrbitLevel[] = ["ADVOCATE", "CONTRIBUTOR", "PARTICIPANT", "EXPLORER"];
+    orbitLevels.forEach((level) => {
+      const currentOpacity = ringLabelOpacitiesRef.current[level];
+      const targetOpacity = hoveredRing === level ? 1 : 0;
+      if (currentOpacity < targetOpacity) {
+        ringLabelOpacitiesRef.current[level] = Math.min(1, currentOpacity + fadeSpeed);
+      } else if (currentOpacity > targetOpacity) {
+        ringLabelOpacitiesRef.current[level] = Math.max(0, currentOpacity - fadeSpeed);
       }
+    });
 
-      ctx.restore();
-    }
+    // Perspective ratio
+    const perspectiveRatio = SIMULATION.PERSPECTIVE_RATIO;
 
-    function drawCenterLabel(cx: number, cy: number) {
-      const title = (centerTitle ?? "").trim();
-      const sub = (centerSubtitle ?? "").trim();
+    // Clear canvas (transparent background)
+    ctx.clearRect(0, 0, width, height);
 
-      if (!title) return;
+    ctx.save();
+    ctx.translate(transform.x, transform.y);
+    ctx.scale(transform.k, transform.k);
 
-      const titleFont = 14;
-      const subFont = 11;
+    const centerX = 0;
+    const centerY = 0;
 
-      ctx.save();
+    // Draw orbit rings as ellipses for perspective effect
+    orbitLevels.forEach((level) => {
+      const radiusX = RING_RADII[level];
+      const radiusY = radiusX * perspectiveRatio;
 
-      ctx.font = `600 ${titleFont}px system-ui, -apple-system, Segoe UI, sans-serif`;
-      const tw = ctx.measureText(title).width;
-
-      const clippedSub = sub
-        ? sub.length > 56
-          ? sub.slice(0, 56) + "…"
-          : sub
-        : "";
-      ctx.font = `${subFont}px system-ui, -apple-system, Segoe UI, sans-serif`;
-      const sw = clippedSub ? ctx.measureText(clippedSub).width : 0;
-
-      const w = Math.ceil(Math.max(tw, sw)) + 22;
-      const h = clippedSub ? 52 : 36;
-
-      const x = cx - w / 2;
-      const y = cy - h / 2;
-
-      ctx.fillStyle = hslA(paletteRef.current.background, 0.75);
-      roundRect(ctx, x, y, w, h, 14);
-      ctx.fill();
-
-      ctx.strokeStyle = hslA(paletteRef.current.border, 0.55);
-      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.ellipse(centerX, centerY, radiusX, radiusY, 0, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(148, 163, 184, 0.25)";
+      ctx.lineWidth = 1 / transform.k;
       ctx.stroke();
 
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-
-      ctx.fillStyle = hslA(paletteRef.current.foreground, 0.85);
-      ctx.font = `600 ${titleFont}px system-ui, -apple-system, Segoe UI, sans-serif`;
-      ctx.fillText(title, cx, clippedSub ? cy - 8 : cy);
-
-      if (clippedSub) {
-        ctx.fillStyle = hslA(paletteRef.current.mutedForeground, 0.90);
-        ctx.font = `${subFont}px system-ui, -apple-system, Segoe UI, sans-serif`;
-        ctx.fillText(clippedSub, cx, cy + 12);
-      }
-
-      ctx.restore();
-    }
-
-    function drawAvatarCircle(params: {
-      x: number;
-      y: number;
-      r: number;
-      memberId: string;
-      avatarUrl: string | null;
-      initials: string;
-      hovered: boolean;
-      recencyAlpha: number;
-      ring: number;
-    }) {
-      const {
-        x,
-        y,
-        r,
-        memberId,
-        avatarUrl,
-        initials,
-        hovered,
-        recencyAlpha,
-        ring,
-      } = params;
-
-      if (avatarUrl) ensureImage(memberId, avatarUrl);
-
-      const entry = cacheRef.current.get(memberId);
-      if (entry) entry.lastUsed = Date.now();
-
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.clip();
-
-      if (entry?.status === "loaded") {
-        ctx.globalAlpha = clamp(0.7 + recencyAlpha * 0.3, 0.7, 1);
-        ctx.drawImage(entry.img, x - r, y - r, r * 2, r * 2);
-        ctx.globalAlpha = 1;
-      } else {
-        ctx.fillStyle = hslA(paletteRef.current.muted, 0.80);
-        ctx.fillRect(x - r, y - r, r * 2, r * 2);
-
-        ctx.fillStyle = hslA(paletteRef.current.foreground, 0.70);
-        ctx.font = `${Math.max(10, Math.floor(r * 0.95))}px system-ui, -apple-system, Segoe UI, sans-serif`;
+      // Draw ring label at the top of ellipse with fade opacity
+      const labelOpacity = ringLabelOpacitiesRef.current[level];
+      if (labelOpacity > 0.01) {
+        const label = RING_LABELS[level];
+        ctx.font = `${10 / transform.k}px system-ui, sans-serif`;
+        ctx.fillStyle = `rgba(148, 163, 184, ${0.8 * labelOpacity})`;
         ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(initials, x, y + 0.5);
+        ctx.fillText(label, centerX, centerY - radiusY - 6 / transform.k);
       }
+    });
 
+    // Draw center logo/avatar as a planet circle (smaller)
+    const centerLogoImg = centerLogoRef.current;
+    const logoRadius = 32;
+    const nameOffset = logoRadius + 14 / transform.k;
+
+    if (centerLogoImg && centerLogoImg.complete && centerLogoImg.naturalWidth > 0) {
+      // Draw image
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, logoRadius, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.drawImage(
+        centerLogoImg,
+        centerX - logoRadius,
+        centerY - logoRadius,
+        logoRadius * 2,
+        logoRadius * 2
+      );
       ctx.restore();
 
-      const innerBoost = clamp(1 - ring * 0.22, 0.45, 1);
+      // Add subtle glow/border around the logo
       ctx.beginPath();
-      ctx.arc(x, y, r + 0.5, 0, Math.PI * 2);
-      ctx.lineWidth = hovered ? 2.2 : 1.1;
-      ctx.strokeStyle = hovered
-        ? hslA(paletteRef.current.foreground, 0.50 * innerBoost)
-        : hslA(paletteRef.current.foreground, 0.14 * innerBoost);
+      ctx.arc(centerX, centerY, logoRadius, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
+      ctx.lineWidth = 2 / transform.k;
       ctx.stroke();
+    } else {
+      // Draw fallback with users icon
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, logoRadius, 0, Math.PI * 2);
+      ctx.fillStyle = "#3b82f6"; // Brand blue
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
+      ctx.lineWidth = 2 / transform.k;
+      ctx.stroke();
+
+      // Draw users icon (multi-person icon)
+      ctx.save();
+      ctx.fillStyle = "white";
+      const iconScale = logoRadius / 16;
+      ctx.translate(centerX, centerY);
+      ctx.scale(iconScale, iconScale);
+      // Center person (head)
+      ctx.beginPath();
+      ctx.arc(0, -4, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+      // Center person (body)
+      ctx.beginPath();
+      ctx.ellipse(0, 6, 5.5, 4, 0, Math.PI, 0, true);
+      ctx.fill();
+      // Left person (smaller, behind)
+      ctx.globalAlpha = 0.6;
+      ctx.beginPath();
+      ctx.arc(-8, -2, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(-8, 6, 4, 3, 0, Math.PI, 0, true);
+      ctx.fill();
+      // Right person (smaller, behind)
+      ctx.beginPath();
+      ctx.arc(8, -2, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(8, 6, 4, 3, 0, Math.PI, 0, true);
+      ctx.fill();
+      ctx.restore();
     }
 
-    function pick(mx: number, my: number) {
-      const qt = qtRef.current;
-      if (!qt) return null;
-      const candidates = qt.queryPoint(mx, my, 26 * viewRef.current.scale);
-      for (const c of candidates) {
-        const dx = mx - c.x;
-        const dy = my - c.y;
-        if (dx * dx + dy * dy <= c.r * c.r) return c;
-      }
-      return null;
+    // Draw community name below the logo
+    if (centerName) {
+      ctx.font = `500 ${12 / transform.k}px system-ui, sans-serif`;
+      ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      ctx.fillText(centerName, centerX, centerY + nameOffset);
     }
 
-    function setHover(next: { id: string; x: number; y: number } | null) {
-      const nextId = next?.id ?? null;
-      const prevId = hoverIdRef.current;
+    // Draw links with animation
+    if (bridgeProgress > 0) {
+      links.forEach((link) => {
+        const source = typeof link.source === "object" ? link.source : null;
+        const target = typeof link.target === "object" ? link.target : null;
+        if (!source || !target) return;
 
-      if (nextId !== prevId) {
-        hoverIdRef.current = nextId;
-        pausedRef.current = !!nextId;
-        onHoverChange?.(nextId ? next : null);
-        canvas.style.cursor = nextId ? "pointer" : "default";
-        return;
-      }
+        // Get rotated positions
+        const sourcePos = getNodePosition(source, rotationOffset, perspectiveRatio);
+        const targetPos = getNodePosition(target, rotationOffset, perspectiveRatio);
 
-      if (nextId) onHoverChange?.(next);
-    }
-
-    // Pan / zoom interactions (Pointer Events: mouse + touch)
-    let dragging = false;
-    let pointerDown = false;
-    let activePointerId: number | null = null;
-    let downX = 0;
-    let downY = 0;
-    let lastX = 0;
-    let lastY = 0;
-    let panStartX = 0;
-    let panStartY = 0;
-    let moved = false;
-
-    const DRAG_THRESHOLD_PX = 3;
-
-    function eventPoint(e: PointerEvent) {
-      const br = canvas.getBoundingClientRect();
-      return { mx: e.clientX - br.left, my: e.clientY - br.top };
-    }
-
-    function onPointerDown(e: PointerEvent) {
-      // Only primary button for mouse; touches are always "primary".
-      if (e.pointerType === "mouse" && e.button !== 0) return;
-
-      const { mx, my } = eventPoint(e);
-
-      pointerDown = true;
-      activePointerId = e.pointerId;
-      downX = mx;
-      downY = my;
-      lastX = mx;
-      lastY = my;
-      moved = false;
-
-      const hit = pick(mx, my);
-      if (hit) {
-        // Don't start a drag; allow click/tap on pointer up.
-        dragging = false;
-        return;
-      }
-
-      dragging = true;
-      const v = viewRef.current;
-      panStartX = v.panX;
-      panStartY = v.panY;
-
-      // clear hover while dragging
-      setHover(null);
-      canvas.style.cursor = "grabbing";
-
-      // capture so we keep getting move/up even if pointer leaves canvas
-      try {
-        canvas.setPointerCapture(e.pointerId);
-      } catch {
-        // ignore
-      }
-    }
-
-    function onPointerMove(e: PointerEvent) {
-      const { mx, my } = eventPoint(e);
-
-      // Hover only for mouse pointers.
-      if (!pointerDown && e.pointerType === "mouse") {
-        const found = pick(mx, my);
-        setHover(found ? { id: found.id, x: mx, y: my } : null);
-        return;
-      }
-
-      if (!pointerDown || activePointerId !== e.pointerId) return;
-
-      const dxFromDown = mx - downX;
-      const dyFromDown = my - downY;
-      if (!moved && (Math.abs(dxFromDown) > DRAG_THRESHOLD_PX || Math.abs(dyFromDown) > DRAG_THRESHOLD_PX)) {
-        moved = true;
-      }
-
-      if (!dragging) {
-        lastX = mx;
-        lastY = my;
-        return;
-      }
-
-      const v = viewRef.current;
-      v.panX = panStartX + dxFromDown;
-      v.panY = panStartY + dyFromDown;
-
-      lastX = mx;
-      lastY = my;
-    }
-
-    function onPointerUp(e: PointerEvent) {
-      if (!pointerDown || activePointerId !== e.pointerId) return;
-
-      const { mx, my } = eventPoint(e);
-
-      // Click/tap if we weren't dragging and didn't move meaningfully.
-      if (!dragging || !moved) {
-        const found = pick(mx, my);
-        if (found) onClickMember(found.id);
-      }
-
-      pointerDown = false;
-      activePointerId = null;
-      dragging = false;
-
-      canvas.style.cursor = hoverIdRef.current ? "pointer" : "default";
-
-      try {
-        canvas.releasePointerCapture(e.pointerId);
-      } catch {
-        // ignore
-      }
-    }
-
-    function onPointerCancel(e: PointerEvent) {
-      if (activePointerId !== e.pointerId) return;
-      pointerDown = false;
-      activePointerId = null;
-      dragging = false;
-      canvas.style.cursor = "default";
-      setHover(null);
-      try {
-        canvas.releasePointerCapture(e.pointerId);
-      } catch {
-        // ignore
-      }
-    }
-
-    function onPointerLeave(e: PointerEvent) {
-      // Only clear hover for mouse pointers. Touch pointers use drag/click behavior.
-      if (e.pointerType !== "mouse") return;
-      if (dragging) return;
-      hoverIdRef.current = null;
-      pausedRef.current = false;
-      onHoverChange?.(null);
-      canvas.style.cursor = "default";
-    }
-
-    const wheelOpts: AddEventListenerOptions = { passive: false };
-
-    function onWheel(e: WheelEvent) {
-      e.preventDefault();
-
-      const br = canvas.getBoundingClientRect();
-      const mx = e.clientX - br.left;
-      const my = e.clientY - br.top;
-
-      const v = viewRef.current;
-      const oldScale = v.scale;
-
-      // trackpad-friendly zoom
-      const delta = -e.deltaY;
-      const zoomFactor = 1 + clamp(delta / 900, -0.18, 0.18);
-      const newScale = clamp(oldScale * zoomFactor, 0.7, 2.4);
-
-      if (newScale === oldScale) return;
-
-      // zoom around cursor (keep point under cursor stable)
-      const rect = canvas.getBoundingClientRect();
-      const cx = rect.width / 2;
-      const cy = rect.height / 2;
-
-      const dx = mx - cx - v.panX;
-      const dy = my - cy - v.panY;
-
-      const k = newScale / oldScale;
-      v.panX = mx - cx - dx * k;
-      v.panY = my - cy - dy * k;
-
-      v.scale = newScale;
-    }
-
-    canvas.addEventListener("pointerdown", onPointerDown);
-    canvas.addEventListener("pointermove", onPointerMove);
-    canvas.addEventListener("pointerup", onPointerUp);
-    canvas.addEventListener("pointercancel", onPointerCancel);
-    canvas.addEventListener("pointerleave", onPointerLeave);
-    canvas.addEventListener("wheel", onWheel, wheelOpts);
-
-    let raf = 0;
-
-    function render(now: number) {
-      const rect = canvas.getBoundingClientRect();
-      const w = rect.width;
-      const h = rect.height;
-
-      const shouldRotate = !prefersReducedMotion;
-      const paused = pausedRef.current || !shouldRotate;
-
-      // Advance time only when running to avoid any jump when resuming.
-      if (lastNowRef.current === null) lastNowRef.current = now;
-      const dt = now - lastNowRef.current;
-      lastNowRef.current = now;
-      if (!paused) animTimeRef.current += dt;
-      const t = animTimeRef.current;
-
-      ctx.clearRect(0, 0, w, h);
-
-      if (!qtRef.current) qtRef.current = new Quadtree({ x: 0, y: 0, w, h });
-      const qt = qtRef.current;
-      qt.clear();
-
-      const cx = w / 2;
-      const cy = h / 2;
-
-      const v = viewRef.current;
-      const scale = v.scale;
-      const panX = v.panX;
-      const panY = v.panY;
-
-      // base radii in “world units”, then scaled
-      const radiiWorld = [92, 142, 196, 248];
-
-      // rings
-      ctx.lineWidth = 1;
-      for (let ring = 0; ring < radiiWorld.length; ring++) {
-        const { stroke } = ringStyle(ring);
-        ctx.strokeStyle = stroke;
+        const dx = targetPos.x - sourcePos.x;
+        const dy = targetPos.y - sourcePos.y;
+        const currentX = sourcePos.x + dx * bridgeProgress;
+        const currentY = sourcePos.y + dy * bridgeProgress;
 
         ctx.beginPath();
-        ctx.arc(
-          cx + panX,
-          cy + panY,
-          radiiWorld[ring]! * scale,
-          0,
-          Math.PI * 2
-        );
+        ctx.moveTo(sourcePos.x, sourcePos.y);
+        ctx.lineTo(currentX, currentY);
+        ctx.strokeStyle = `rgba(148, 163, 184, ${0.3 * bridgeProgress})`;
+        ctx.lineWidth = (1 + link.weight * 0.5) / transform.k;
         ctx.stroke();
-      }
-
-      drawRingLabels(
-        cx + panX,
-        cy + panY,
-        radiiWorld.map((r) => r * scale)
-      );
-      drawCenterLabel(cx + panX, cy + panY);
-
-      const hoveredId = hoverIdRef.current;
-      const baseSpeed = 0.00009;
-
-      // draw outer-to-inner so inner sits “above”
-      const sorted = [...prepared].sort((a, b) => b.ring - a.ring);
-
-      for (const m of sorted) {
-        const base = radiiWorld[m.ring] ?? radiiWorld[radiiWorld.length - 1]!;
-        const angle = m.angle0 + t * baseSpeed * (m.ring + 1);
-
-        // world coords relative to center
-        const wx = Math.cos(angle) * base;
-        const wy = Math.sin(angle) * base;
-
-        // screen coords with pan+scale
-        const x = cx + panX + wx * scale;
-        const y = cy + panY + wy * scale;
-
-        const r = clamp((11 + m.reachScore * 0.15) * scale, 9, 26);
-        const hovered = hoveredId === m.id;
-
-        drawAvatarCircle({
-          x,
-          y,
-          r,
-          memberId: m.id,
-          avatarUrl: m.avatarUrl,
-          initials: m.initials,
-          hovered,
-          recencyAlpha: recencyAlpha(m.lastActiveAt ?? null),
-          ring: m.ring,
-        });
-
-        qt.insert({ id: m.id, x, y, r });
-      }
-
-      maybeEvictCache();
-      raf = requestAnimationFrame(render);
+      });
     }
 
-    raf = requestAnimationFrame(render);
+    // Draw nodes with animation
+    const hoveredNode = hoveredNodeRef.current;
+    nodes.forEach((node) => {
+      // Get rotated position
+      const pos = getNodePosition(node, rotationOffset, perspectiveRatio);
+      const nx = pos.x;
+      const ny = pos.y;
 
+      const isHovered = hoveredNode?.id === node.id;
+      const scale = isHovered ? INTERACTION.HOVER_SCALE : 1;
+      const radius = node.radius * scale;
+      const alpha = nodeProgress;
+
+      ctx.globalAlpha = alpha;
+
+      // Node background circle (gray like homepage)
+      ctx.beginPath();
+      ctx.arc(nx, ny, radius, 0, Math.PI * 2);
+      ctx.fillStyle = "#374151"; // Gray background
+      ctx.fill();
+
+      // Avatar image or user icon fallback
+      const avatarUrl = node.avatarUrl;
+      const img = avatarUrl ? imageCache.current.get(avatarUrl) : null;
+      if (img && img.complete && img.naturalWidth > 0) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(nx, ny, radius, 0, Math.PI * 2);
+        ctx.clip();
+        ctx.drawImage(img, nx - radius, ny - radius, radius * 2, radius * 2);
+        ctx.restore();
+      } else {
+        // Draw user icon fallback
+        ctx.save();
+        ctx.fillStyle = "rgba(255, 255, 255, 0.6)";
+        const iconSize = radius * 1.2;
+        ctx.translate(nx, ny);
+        ctx.scale(iconSize / 24, iconSize / 24);
+        // User icon path (simplified)
+        ctx.beginPath();
+        // Head circle
+        ctx.arc(0, -3, 4, 0, Math.PI * 2);
+        ctx.fill();
+        // Body arc
+        ctx.beginPath();
+        ctx.ellipse(0, 8, 7, 5, 0, Math.PI, 0, true);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // Border (always visible, brighter on hover - like homepage)
+      ctx.beginPath();
+      ctx.arc(nx, ny, radius, 0, Math.PI * 2);
+      ctx.strokeStyle = isHovered ? "rgba(255, 255, 255, 1)" : "rgba(255, 255, 255, 0.5)";
+      ctx.lineWidth = (isHovered ? 3 : 1.5) / transform.k;
+      ctx.stroke();
+
+      ctx.globalAlpha = 1;
+    });
+
+    ctx.restore();
+
+    // Always continue animation for rotation
+    animationRef.current = requestAnimationFrame(render);
+  }, [nodes, links, width, height, centerLogoUrl, centerLogoLoaded, centerName]);
+
+  // Start continuous render loop
+  useEffect(() => {
+    animationRef.current = requestAnimationFrame(render);
     return () => {
-      cancelAnimationFrame(raf);
-      ro.disconnect();
-
-      canvas.removeEventListener("pointerdown", onPointerDown);
-      canvas.removeEventListener("pointermove", onPointerMove);
-      canvas.removeEventListener("pointerup", onPointerUp);
-      canvas.removeEventListener("pointercancel", onPointerCancel);
-      canvas.removeEventListener("pointerleave", onPointerLeave);
-      canvas.removeEventListener("wheel", onWheel, wheelOpts);
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+      }
+      if (resumeTimeoutRef.current) {
+        clearTimeout(resumeTimeoutRef.current);
+      }
     };
-  }, [
-    prepared,
-    onClickMember,
-    onHoverChange,
-    centerTitle,
-    centerSubtitle,
-    prefersReducedMotion,
-    resetToken,
-  ]);
+  }, [render]);
+
+  // Get current rotation offset for hit testing (use stable value during pause)
+  const getCurrentRotationOffset = useCallback(() => {
+    return stableRotationOffsetRef.current;
+  }, []);
+
+  // Pointer event handlers
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const rect = canvas.getBoundingClientRect();
+      const world = screenToWorld(e.clientX, e.clientY, transformRef.current, rect);
+      const rotationOffset = getCurrentRotationOffset();
+      const perspectiveRatio = SIMULATION.PERSPECTIVE_RATIO;
+      const node = findNodeAtPoint(nodes, world.x, world.y, rotationOffset, perspectiveRatio);
+
+      // Only start panning if not clicking on a node
+      if (!node) {
+        canvas.setPointerCapture(e.pointerId);
+        dragRef.current = {
+          type: "pan",
+          startX: e.clientX,
+          startY: e.clientY,
+          startTransformX: transformRef.current.x,
+          startTransformY: transformRef.current.y,
+        };
+        canvas.style.cursor = "grabbing";
+      }
+    },
+    [nodes, getCurrentRotationOffset]
+  );
+
+  const handlePointerMove = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const rect = canvas.getBoundingClientRect();
+      const drag = dragRef.current;
+
+      if (drag.type === "pan") {
+        // Panning - update transform
+        const dx = e.clientX - drag.startX;
+        const dy = e.clientY - drag.startY;
+        transformRef.current = {
+          ...transformRef.current,
+          x: drag.startTransformX + dx,
+          y: drag.startTransformY + dy,
+        };
+      } else {
+        // Not dragging - check for hover
+        const world = screenToWorld(e.clientX, e.clientY, transformRef.current, rect);
+        const rotationOffset = getCurrentRotationOffset();
+        const perspectiveRatio = SIMULATION.PERSPECTIVE_RATIO;
+        const node = findNodeAtPoint(nodes, world.x, world.y, rotationOffset, perspectiveRatio);
+
+        // Update ring hover state
+        const hoveredRing = node ? null : findHoveredRing(world.x, world.y, perspectiveRatio);
+        hoveredRingRef.current = hoveredRing;
+
+        const prevNode = hoveredNodeRef.current;
+        const wasHoveringNode = prevNode !== null;
+        const isHoveringNode = node !== null;
+        const nodeChanged = node !== prevNode;
+
+        // Update hovered node reference
+        if (nodeChanged) {
+          hoveredNodeRef.current = node;
+          canvas.style.cursor = node ? "pointer" : "grab";
+
+          // Update tooltip
+          if (onNodeHover) {
+            if (node) {
+              const pos = getNodePosition(node, rotationOffset, perspectiveRatio);
+              const screen = worldToScreen(pos.x, pos.y, transformRef.current);
+              onNodeHover(node, { x: screen.x + rect.left, y: screen.y + rect.top });
+            } else {
+              onNodeHover(null, { x: 0, y: 0 });
+            }
+          }
+        }
+
+        // Pause/unpause animation based on node hover
+        if (isHoveringNode && !isPausedRef.current) {
+          // Started hovering a node - cancel any pending resume and pause
+          if (resumeTimeoutRef.current) {
+            clearTimeout(resumeTimeoutRef.current);
+            resumeTimeoutRef.current = null;
+          }
+          isPausedRef.current = true;
+          pausedAtRef.current = performance.now();
+        } else if (!isHoveringNode && wasHoveringNode && isPausedRef.current) {
+          // Stopped hovering all nodes - schedule resume after delay
+          if (resumeTimeoutRef.current) {
+            clearTimeout(resumeTimeoutRef.current);
+          }
+          resumeTimeoutRef.current = setTimeout(() => {
+            if (pausedAtRef.current !== null) {
+              const pauseDuration = performance.now() - pausedAtRef.current;
+              rotationStartRef.current += pauseDuration;
+            }
+            isPausedRef.current = false;
+            pausedAtRef.current = null;
+            resumeTimeoutRef.current = null;
+          }, INTERACTION.RESUME_ROTATION_DELAY);
+        }
+      }
+    },
+    [nodes, onNodeHover, getCurrentRotationOffset]
+  );
+
+  const handlePointerUp = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const drag = dragRef.current;
+
+      if (drag.type === "pan") {
+        canvas.releasePointerCapture(e.pointerId);
+      }
+      canvas.style.cursor = hoveredNodeRef.current ? "pointer" : "grab";
+      dragRef.current = { type: "none" };
+
+      // Handle click (if wasn't dragging or was minimal movement)
+      if (drag.type === "none" || (drag.type === "pan" &&
+          Math.abs(e.clientX - drag.startX) < 5 &&
+          Math.abs(e.clientY - drag.startY) < 5)) {
+        const rect = canvas.getBoundingClientRect();
+        const world = screenToWorld(e.clientX, e.clientY, transformRef.current, rect);
+        const rotationOffset = getCurrentRotationOffset();
+        const perspectiveRatio = SIMULATION.PERSPECTIVE_RATIO;
+        const node = findNodeAtPoint(nodes, world.x, world.y, rotationOffset, perspectiveRatio);
+
+        if (node && onNodeClick) {
+          onNodeClick(node);
+        }
+      }
+    },
+    [nodes, onNodeClick, getCurrentRotationOffset]
+  );
+
+  const handlePointerLeave = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (canvas) {
+      canvas.style.cursor = "grab";
+    }
+
+    // Clear ring hover
+    hoveredRingRef.current = null;
+
+    if (hoveredNodeRef.current) {
+      hoveredNodeRef.current = null;
+      // Resume rotation after delay
+      if (resumeTimeoutRef.current) {
+        clearTimeout(resumeTimeoutRef.current);
+      }
+      resumeTimeoutRef.current = setTimeout(() => {
+        if (pausedAtRef.current !== null) {
+          const pauseDuration = performance.now() - pausedAtRef.current;
+          rotationStartRef.current += pauseDuration;
+        }
+        isPausedRef.current = false;
+        pausedAtRef.current = null;
+        resumeTimeoutRef.current = null;
+      }, INTERACTION.RESUME_ROTATION_DELAY);
+      if (onNodeHover) {
+        onNodeHover(null, { x: 0, y: 0 });
+      }
+    }
+  }, [onNodeHover]);
+
+  // Handle mouse enter
+  const handleMouseEnter = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (canvas && dragRef.current.type === "none") {
+      canvas.style.cursor = "grab";
+    }
+    if (onHoverChange) {
+      onHoverChange(true);
+    }
+  }, [onHoverChange]);
+
+  // Handle mouse leave - hide labels and resume animation after delay if paused
+  const handleMouseLeave = useCallback(() => {
+    // Clear ring hover
+    hoveredRingRef.current = null;
+
+    if (onHoverChange) {
+      onHoverChange(false);
+    }
+    // Clear node hover and resume animation after delay if was paused
+    if (hoveredNodeRef.current) {
+      hoveredNodeRef.current = null;
+      if (resumeTimeoutRef.current) {
+        clearTimeout(resumeTimeoutRef.current);
+      }
+      resumeTimeoutRef.current = setTimeout(() => {
+        if (pausedAtRef.current !== null) {
+          const pauseDuration = performance.now() - pausedAtRef.current;
+          rotationStartRef.current += pauseDuration;
+        }
+        isPausedRef.current = false;
+        pausedAtRef.current = null;
+        resumeTimeoutRef.current = null;
+      }, INTERACTION.RESUME_ROTATION_DELAY);
+      if (onNodeHover) {
+        onNodeHover(null, { x: 0, y: 0 });
+      }
+    }
+  }, [onHoverChange, onNodeHover]);
+
+  // Wheel handler for zoom
+  const handleWheel = useCallback(
+    (e: React.WheelEvent<HTMLCanvasElement>) => {
+      e.preventDefault();
+
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      const transform = transformRef.current;
+      const scaleFactor = e.deltaY < 0 ? 1.1 : 0.9;
+      const newK = Math.min(
+        INTERACTION.MAX_ZOOM,
+        Math.max(INTERACTION.MIN_ZOOM, transform.k * scaleFactor)
+      );
+
+      // Zoom toward mouse position
+      const ratio = newK / transform.k;
+      transformRef.current = {
+        x: mouseX - (mouseX - transform.x) * ratio,
+        y: mouseY - (mouseY - transform.y) * ratio,
+        k: newK,
+      };
+    },
+    []
+  );
 
   return (
-    <div className="relative w-full">
-      {/* minimal controls */}
-      <div className="pointer-events-none absolute right-2 top-2 z-10 flex items-center gap-2">
-        <button
-          type="button"
-          className="pointer-events-auto rounded-lg border border-border bg-background/70 px-2 py-1 text-xs text-foreground opacity-80 backdrop-blur hover:opacity-100"
-          onClick={() => setShowLegend((v) => !v)}
-          aria-pressed={showLegend}
-        >
-          {showLegend ? "Hide" : "Legend"}
-        </button>
-
-        {prefersReducedMotion ? (
-          <span className="rounded-lg border border-border bg-background/70 px-2 py-1 text-xs text-foreground/80 opacity-70 backdrop-blur">
-            Reduced motion
-          </span>
-        ) : null}
-      </div>
-
-      {showLegend ? (
-        <div className="absolute left-2 top-2 z-10 w-[260px] rounded-xl border border-border bg-background/85 p-3 text-xs text-foreground shadow-sm backdrop-blur">
-          <div className="font-medium">Legend</div>
-          <div className="mt-2 space-y-1 text-foreground/80">
-            <div>Ring: level</div>
-            <div>Size: reach</div>
-            <div>Brightness: recency</div>
-            <div>Drag: pan</div>
-            <div>Wheel: zoom</div>
-          </div>
-        </div>
-      ) : null}
-
-      <div className="h-[420px] w-full">
-        <canvas ref={canvasRef} className="h-full w-full rounded-xl" />
-      </div>
-    </div>
+    <canvas
+      ref={canvasRef}
+      width={width}
+      height={height}
+      className={className}
+      style={{ width, height, cursor: "grab" }}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerLeave={handlePointerLeave}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+      onWheel={handleWheel}
+    />
   );
 }

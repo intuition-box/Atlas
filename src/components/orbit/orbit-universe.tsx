@@ -469,18 +469,20 @@ export function OrbitUniverse({
 
           // Determine direction based on randomized linkDirections
           const reversed = linkDirections[i] ?? false;
-          const startNode = reversed ? tgt : s;
-          const endNode = reversed ? s : tgt;
+          const startX = reversed ? tgt.x : s.x;
+          const startY = reversed ? tgt.y : s.y;
+          const endX = reversed ? s.x : tgt.x;
+          const endY = reversed ? s.y : tgt.y;
 
-          const dx = endNode.x - startNode.x;
-          const dy = endNode.y - startNode.y;
+          const dx = endX - startX;
+          const dy = endY - startY;
 
           // Draw partial line based on bridge progress
-          const currentEndX = startNode.x + dx * easedBridgeProgress;
-          const currentEndY = startNode.y + dy * easedBridgeProgress;
+          const currentEndX = startX + dx * easedBridgeProgress;
+          const currentEndY = startY + dy * easedBridgeProgress;
 
           ctx.beginPath();
-          ctx.moveTo(startNode.x, startNode.y);
+          ctx.moveTo(startX, startY);
           ctx.lineTo(currentEndX, currentEndY);
           ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
           ctx.lineWidth = 1.5 / t.k;

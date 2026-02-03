@@ -1,163 +1,246 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
-import { OrbitCanvas, type OrbitMember } from "./orbit-canvas";
-import OrbitTooltip, { type TooltipMember } from "./orbit-tooltip";
+import { OrbitCanvas } from "./orbit-canvas";
+import { useOrbitSimulation } from "./use-orbit-simulation";
+import type { OrbitViewProps, SimulatedNode, TooltipState } from "./types";
+import { Spinner } from "../ui/spinner";
 
-const LEVELS = ["ADVOCATE", "CONTRIBUTOR", "PARTICIPANT", "EXPLORER"] as const;
+/* ────────────────────────────
+   Tooltip Component
+──────────────────────────── */
 
-type Level = (typeof LEVELS)[number];
+const LEVEL_LABELS = {
+  ADVOCATE: "Advocate",
+  CONTRIBUTOR: "Contributor",
+  PARTICIPANT: "Participant",
+  EXPLORER: "Explorer",
+} as const;
 
-type Hover = { id: string; x: number; y: number } | null;
+const LEVEL_BADGE_COLORS = {
+  ADVOCATE: "bg-blue-500",
+  CONTRIBUTOR: "bg-sky-400",
+  PARTICIPANT: "bg-slate-300",
+  EXPLORER: "bg-slate-500",
+} as const;
 
-type Props = {
-  members: OrbitMember[];
-  centerTitle?: string;
-  centerSubtitle?: string;
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
+  return (parts[0]!.slice(0, 1) + parts[parts.length - 1]!.slice(0, 1)).toUpperCase();
+}
+
+function formatRelativeTime(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const ts = Date.parse(iso);
+  if (!Number.isFinite(ts)) return null;
+
+  const diff = Date.now() - ts;
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+
+  if (days === 0) return "Active today";
+  if (days === 1) return "Active yesterday";
+  if (days < 7) return `Active ${days} days ago`;
+  if (days < 30) return `Active ${Math.floor(days / 7)} weeks ago`;
+  if (days < 365) return `Active ${Math.floor(days / 30)} months ago`;
+  return `Active ${Math.floor(days / 365)} years ago`;
+}
+
+type MemberTooltipProps = {
+  node: SimulatedNode;
+  x: number;
+  y: number;
+  containerRect: DOMRect;
 };
 
-export function OrbitView({ members, centerTitle, centerSubtitle }: Props) {
-  const router = useRouter();
-  const containerRef = useRef<HTMLDivElement | null>(null);
+function MemberTooltip({ node, x, y, containerRect }: MemberTooltipProps) {
+  const tooltipWidth = 260;
+  const tooltipHeight = 140;
+  const padding = 12;
 
-  const totalCount = members.length;
+  // Calculate position relative to container
+  let left = x - containerRect.left + 16;
+  let top = y - containerRect.top + 16;
 
-  const membersById = useMemo(() => {
-    const map = new Map<string, OrbitMember>();
-    for (const m of members) map.set(m.id, m);
-    return map;
-  }, [members]);
+  // Avoid overflow
+  if (left + tooltipWidth > containerRect.width - padding) {
+    left = x - containerRect.left - tooltipWidth - 16;
+  }
+  if (top + tooltipHeight > containerRect.height - padding) {
+    top = y - containerRect.top - tooltipHeight - 16;
+  }
+  if (left < padding) left = padding;
+  if (top < padding) top = padding;
 
-  const [hover, setHover] = useState<Hover>(null);
-
-  const [levelOn, setLevelOn] = useState<Record<Level, boolean>>(() => {
-    return Object.fromEntries(LEVELS.map((lvl) => [lvl, true])) as Record<Level, boolean>;
-  });
-
-  const [tagQuery, setTagQuery] = useState("");
-  const [resetToken, setResetToken] = useState(0);
-
-  const filteredMembers = useMemo(() => {
-    const q = tagQuery.trim().toLowerCase();
-
-    return members.filter((m) => {
-      const lvl = m.orbitLevel as Level;
-      if (!(lvl in levelOn)) return false;
-      if (!levelOn[lvl]) return false;
-      if (!q) return true;
-
-      for (const raw of m.tags ?? []) {
-        if (raw.toLowerCase().includes(q)) return true;
-      }
-      return false;
-    });
-  }, [members, levelOn, tagQuery]);
-
-  useEffect(() => {
-    setHover(null);
-  }, [tagQuery, levelOn]);
-
-  const shownCount = filteredMembers.length;
-
-  const hoveredMember: TooltipMember | null = hover
-    ? (membersById.get(hover.id) ?? null)
-    : null;
-
-  const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-
-    const ro = new ResizeObserver(() => {
-      const rect = el.getBoundingClientRect();
-      setContainerSize({ width: rect.width, height: rect.height });
-    });
-
-    ro.observe(el);
-    // initial
-    const rect = el.getBoundingClientRect();
-    setContainerSize({ width: rect.width, height: rect.height });
-
-    return () => ro.disconnect();
-  }, []);
+  const lastActive = formatRelativeTime(node.lastActiveAt);
 
   return (
-    <div ref={containerRef} className="relative w-full">
-      {/* Controls row */}
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex flex-wrap gap-1.5">
-            {LEVELS.map((lvl) => {
-              const on = levelOn[lvl];
+    <div
+      className="pointer-events-none absolute z-50 w-[260px] rounded-xl border border-border bg-background/95 p-3 shadow-lg backdrop-blur-md"
+      style={{ left, top }}
+    >
+      <div className="flex items-start gap-3">
+        <Avatar className="size-10 rounded-lg">
+          <AvatarImage src={node.avatarUrl ?? ""} alt={node.name} />
+          <AvatarFallback className="rounded-lg text-xs">{initials(node.name)}</AvatarFallback>
+        </Avatar>
 
-              return (
-                <button
-                  key={lvl}
-                  type="button"
-                  aria-pressed={on}
-                  className={[
-                    "rounded-full border border-border bg-background px-2 py-1 text-xs text-foreground transition-opacity",
-                    on ? "opacity-90" : "opacity-40",
-                  ].join(" ")}
-                  onClick={() =>
-                    setLevelOn((s) => ({
-                      ...s,
-                      [lvl]: !s[lvl],
-                    }))
-                  }
-                >
-                  {lvl}
-                </button>
-              );
-            })}
-          </div>
-
-          <input
-            value={tagQuery}
-            onChange={(e) => setTagQuery(e.target.value)}
-            placeholder="Filter tag…"
-            className="h-8 w-[180px] rounded-lg border border-border bg-background px-2 text-sm text-foreground outline-none placeholder:text-foreground/50"
-          />
-
-          <button
-            type="button"
-            className="h-8 rounded-lg border border-border bg-background px-2 text-xs text-foreground/80 transition-opacity hover:text-foreground"
-            onClick={() => {
-              setHover(null);
-              setResetToken((x) => x + 1);
-            }}
-            title="Reset zoom and pan"
-          >
-            Fit to view
-          </button>
-        </div>
-
-        <div className="text-xs text-foreground/60">
-          {shownCount} / {totalCount} shown
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-medium text-foreground">{node.name}</div>
+          {node.headline && (
+            <div className="mt-0.5 truncate text-xs text-muted-foreground">{node.headline}</div>
+          )}
         </div>
       </div>
 
-      <OrbitCanvas
-        members={filteredMembers}
-        centerTitle={centerTitle}
-        centerSubtitle={centerSubtitle}
-        resetToken={resetToken}
-        onClickMember={(id) => router.push(`/u/${id}`)}
-        onHoverChange={setHover}
-      />
+      <div className="mt-3 flex items-center gap-2">
+        <span
+          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium text-white ${LEVEL_BADGE_COLORS[node.orbitLevel]}`}
+        >
+          {LEVEL_LABELS[node.orbitLevel]}
+        </span>
+        <span className="text-xs text-muted-foreground">Reach: {node.reachScore}</span>
+      </div>
 
-      {hoveredMember && hover ? (
-        <OrbitTooltip
-          member={hoveredMember}
-          x={hover.x}
-          y={hover.y}
-          containerWidth={containerSize.width}
-          containerHeight={containerSize.height}
+      {node.tags && node.tags.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {node.tags.slice(0, 4).map((tag) => (
+            <span
+              key={tag}
+              className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+            >
+              {tag}
+            </span>
+          ))}
+          {node.tags.length > 4 && (
+            <span className="text-[10px] text-muted-foreground">+{node.tags.length - 4}</span>
+          )}
+        </div>
+      )}
+
+      {lastActive && <div className="mt-2 text-[10px] text-muted-foreground">{lastActive}</div>}
+    </div>
+  );
+}
+
+/* ────────────────────────────
+   Main OrbitView Component
+──────────────────────────── */
+
+export function OrbitView({
+  members,
+  links = [],
+  centerLogoUrl,
+  centerName,
+  onMemberClick,
+  className = "",
+}: OrbitViewProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
+  const [tooltip, setTooltip] = useState<TooltipState>(null);
+  const [containerRect, setContainerRect] = useState<DOMRect | null>(null);
+
+  // Track container size with debouncing to prevent resize animation
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    let resizeTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const updateSize = () => {
+      const rect = container.getBoundingClientRect();
+      const w = Math.round(rect.width);
+      const h = Math.round(rect.height);
+
+      // Only update if size actually changed (rounded to avoid sub-pixel jitter)
+      setContainerSize((prev) => {
+        if (prev.width === w && prev.height === h) {
+          return prev;
+        }
+        return { width: w, height: h };
+      });
+      setContainerRect(rect);
+    };
+
+    // Initial size - immediate
+    updateSize();
+
+    const observer = new ResizeObserver(() => {
+      // Debounce resize events
+      if (resizeTimeout) clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(updateSize, 50);
+    });
+
+    observer.observe(container);
+    return () => {
+      if (resizeTimeout) clearTimeout(resizeTimeout);
+      observer.disconnect();
+    };
+  }, []);
+
+  // Initialize simulation
+  const { nodes, links: simulatedLinks } = useOrbitSimulation({
+    members,
+    links,
+    width: containerSize.width,
+    height: containerSize.height,
+  });
+
+  // Handle node hover
+  const handleNodeHover = useCallback(
+    (node: SimulatedNode | null, position: { x: number; y: number }) => {
+      if (node) {
+        setTooltip({ node, x: position.x, y: position.y });
+      } else {
+        setTooltip(null);
+      }
+    },
+    []
+  );
+
+  // Handle node click
+  const handleNodeClick = useCallback(
+    (node: SimulatedNode) => {
+      if (onMemberClick) {
+        onMemberClick(node.id);
+      }
+    },
+    [onMemberClick]
+  );
+
+  return (
+    <div
+      ref={containerRef}
+      className={`relative overflow-hidden ${className}`}
+      style={{ width: "100vw", height: "100vh" }}
+    >
+      {containerSize.width > 0 && containerSize.height > 0 ? (
+        <OrbitCanvas
+          nodes={nodes}
+          links={simulatedLinks}
+          width={containerSize.width}
+          height={containerSize.height}
+          centerLogoUrl={centerLogoUrl}
+          centerName={centerName}
+          onNodeClick={handleNodeClick}
+          onNodeHover={handleNodeHover}
         />
-      ) : null}
+      ) : (
+        <Spinner />
+      )}
+
+      {/* Tooltip */}
+      {tooltip && containerRect && (
+        <MemberTooltip
+          node={tooltip.node}
+          x={tooltip.x}
+          y={tooltip.y}
+          containerRect={containerRect}
+        />
+      )}
     </div>
   );
 }
