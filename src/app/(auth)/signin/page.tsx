@@ -1,7 +1,6 @@
-import { redirect } from "next/navigation";
 import Link from "next/link";
 
-import { auth, signIn } from "@/lib/auth/session";
+import { signIn } from "@/lib/auth/session";
 import { ROUTES } from "@/lib/routes";
 import { db } from "@/lib/db/client";
 
@@ -16,11 +15,11 @@ type SearchParams = {
 };
 
 function sanitizeReturnTo(value: string | undefined) {
-  if (!value) return ROUTES.onboarding;
+  if (!value) return ROUTES.home;
   // Only allow in-app relative redirects
-  if (!value.startsWith("/")) return ROUTES.onboarding;
+  if (!value.startsWith("/")) return ROUTES.home;
   // Prevent protocol-relative redirects (//evil.com)
-  if (value.startsWith("//")) return ROUTES.onboarding;
+  if (value.startsWith("//")) return ROUTES.home;
   return value;
 }
 
@@ -29,8 +28,6 @@ export default async function SignInPage({
 }: {
   searchParams?: SearchParams;
 }) {
-  const session = await auth();
-  const authed = !!(session?.user as any)?.id;
   const returnTo = sanitizeReturnTo(searchParams?.returnTo);
 
   // Pick a small pool of real avatars for the orbit (server-side).
@@ -47,7 +44,7 @@ export default async function SignInPage({
     .map((r) => r.avatarUrl)
     .filter((u): u is string => typeof u === "string" && u.trim().length > 0);
 
-  if (authed) redirect(returnTo);
+  // No redirect here - let providers.tsx OnboardingGuard handle all routing logic
 
   async function signinDiscord() {
     "use server";

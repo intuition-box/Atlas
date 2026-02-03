@@ -92,6 +92,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           select: {
             avatarUrl: true,
             image: true,
+            onboardedAt: true,
           },
         }),
         db.handleOwner.findUnique({
@@ -107,7 +108,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
       session.user.avatarUrl = dbUser?.avatarUrl ?? dbUser?.image ?? user.image ?? null;
       session.user.handle = owner?.handle.name ?? null;
-      session.user.onboarded = Boolean(session.user.handle);
+      // Use onboardedAt from DB as the source of truth
+      session.user.onboarded = Boolean(dbUser?.onboardedAt);
 
       return session;
     },

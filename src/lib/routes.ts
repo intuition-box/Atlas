@@ -25,6 +25,34 @@ export const ROUTES = {
   newCommunity: "/new",
 } as const;
 
+/**
+ * Routes that don't require authentication.
+ * Used by OnboardingGuard in providers.tsx to skip redirect logic.
+ */
+export const PUBLIC_ROUTES = [
+  ROUTES.signIn,
+  "/api/",
+  "/signin",
+  "/signout",
+  "/error",
+] as const;
+
+/**
+ * Check if a pathname is a public route (no auth required).
+ */
+export function isPublicRoute(pathname: string): boolean {
+  return PUBLIC_ROUTES.some(
+    (route) => pathname === route || pathname.startsWith(route)
+  );
+}
+
+/**
+ * Check if a pathname is the onboarding route.
+ */
+export function isOnboardingRoute(pathname: string): boolean {
+  return pathname === ROUTES.onboarding || pathname.startsWith(ROUTES.onboarding);
+}
+
 /** `/u/:handle` */
 export function userPath(handle: string): string {
   return `/u/${encodeURIComponent(handle)}`;
