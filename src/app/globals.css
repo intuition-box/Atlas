@@ -147,7 +147,7 @@
   body:after {
     content: "";
     z-index: -1;
-    opacity: 0.02;
+    opacity: 0.03;
     position: fixed;
     top: 0px;
     right: 0px;
