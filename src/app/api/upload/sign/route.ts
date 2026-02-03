@@ -1,9 +1,9 @@
 import "server-only";
 
-import { errJson, okJson } from "@/lib/api-server";
-import { db } from "@/lib/database";
-import { requireAuth } from "@/lib/guards";
-import { signR2Upload } from "@/lib/r2";
+import { errJson, okJson } from "@/lib/api/server";
+import { db } from "@/lib/db/client";
+import { requireAuth } from "@/lib/auth/policy";
+import { putR2Object, signR2Upload } from "@/lib/r2";
 import { requireCsrf } from "@/lib/security/csrf";
 import { MembershipRole } from "@prisma/client";
 import { randomUUID } from "node:crypto";
@@ -13,6 +13,12 @@ import { z } from "zod";
 export const runtime = "nodejs";
 
 const UploadTypeSchema = z.enum(["user.avatar", "community.avatar"]);
+
+function normalizeUploadType(value: unknown): unknown {
+  if (value === "avatar") return "user.avatar";
+  if (value === "communityAvatar") return "community.avatar";
+  return value;
+}
 
 // Keep this strict and explicit.
 // Add new types only when the product pipeline supports them end-to-end.
@@ -32,9 +38,15 @@ const EXT_BY_CONTENT_TYPE: Record<ContentType, string> = {
   "image/gif": "gif",
 };
 
+// Unique object name component for uploads.
+// We keep it opaque and collision-resistant.
+function makeUploadNonce(): string {
+  return randomUUID();
+}
+
 const SignUploadSchema = z
   .object({
-    type: UploadTypeSchema,
+    type: z.preprocess(normalizeUploadType, UploadTypeSchema),
     contentType: ContentTypeSchema,
 
     // Used for client-side UX + future guards. R2 signing itself is based on key + contentType.
@@ -57,8 +69,151 @@ function zodIssuesToApiIssues(
   }));
 }
 
+async function persistLatestAvatarUrl(args: {
+  type: z.infer<typeof UploadTypeSchema>;
+  userId: string;
+  communityId: string | null;
+  publicUrl: string;
+}) {
+  if (args.type === "user.avatar") {
+    await db.user.update({
+      where: { id: args.userId },
+      data: { avatarUrl: args.publicUrl },
+    });
+    return;
+  }
+
+  if (args.type === "community.avatar") {
+    if (!args.communityId) return;
+    await db.community.update({
+      where: { id: args.communityId },
+      data: { avatarUrl: args.publicUrl },
+    });
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
+    const contentTypeHeader = req.headers.get("content-type") ?? "";
+
+    // If the browser can’t PUT to R2 (CORS/preflight), we also support proxy uploads:
+    // POST multipart/form-data to this same endpoint with a `file` field.
+    if (contentTypeHeader.includes("multipart/form-data")) {
+      requireCsrf(req);
+      const { userId } = await requireAuth();
+      const form = await req.formData();
+      const file = form.get("file");
+
+      if (!(file instanceof File)) {
+        return errJson({
+          code: "INVALID_REQUEST",
+          message: "Missing file",
+          status: 400,
+          issues: [{ path: ["file"], message: "File is required" }],
+        });
+      }
+
+      const typeRaw = form.get("type");
+      const communityIdRaw = form.get("communityId");
+
+      const jsonLike = {
+        type: typeof typeRaw === "string" && typeRaw.length > 0 ? typeRaw : "avatar",
+        contentType: file.type,
+        size: file.size,
+        communityId:
+          typeof communityIdRaw === "string" && communityIdRaw.trim().length > 0
+            ? communityIdRaw.trim()
+            : undefined,
+      };
+
+      const parsed = await SignUploadSchema.safeParseAsync(jsonLike);
+      if (!parsed.success) {
+        return errJson({
+          code: "INVALID_REQUEST",
+          message: "Invalid request",
+          status: 400,
+          issues: zodIssuesToApiIssues(parsed.error),
+        });
+      }
+
+      const input = parsed.data;
+      const ext = EXT_BY_CONTENT_TYPE[input.contentType];
+
+      // Authorization for community assets.
+      let communityId: string | null = null;
+
+      if (input.type === "community.avatar") {
+        communityId = input.communityId ?? null;
+        if (!communityId) {
+          return errJson({
+            code: "INVALID_REQUEST",
+            message: "communityId is required for community.avatar",
+            status: 400,
+          });
+        }
+
+        const membership = await db.membership.findUnique({
+          where: {
+            userId_communityId: {
+              userId,
+              communityId,
+            },
+          },
+          select: { role: true },
+        });
+
+        const canUpload =
+          membership &&
+          (membership.role === MembershipRole.OWNER ||
+            membership.role === MembershipRole.ADMIN);
+
+        if (!canUpload) {
+          return errJson({ code: "FORBIDDEN", message: "Forbidden", status: 403 });
+        }
+      }
+
+      // Server chooses the object key. Never accept a raw key from clients.
+      const nonce = makeUploadNonce();
+
+      const key =
+        input.type === "user.avatar"
+          ? `avatars/users/${userId}/${nonce}.${ext}`
+          : `avatars/communities/${communityId}/${nonce}.${ext}`;
+
+      const body = Buffer.from(await file.arrayBuffer());
+
+      const uploaded = await putR2Object({
+        key,
+        body,
+        contentType: input.contentType,
+        cacheControl: "public, max-age=31536000, immutable",
+      });
+
+      const publicUrl = uploaded.publicUrl;
+      if (!publicUrl) {
+        return errJson({
+          code: "INTERNAL_ERROR",
+          message: "Upload succeeded but no publicUrl was returned",
+          status: 500,
+        });
+      }
+
+      await persistLatestAvatarUrl({
+        type: input.type,
+        userId,
+        communityId,
+        publicUrl,
+      });
+
+      return okJson({
+        publicUrl,
+        upload: {
+          key,
+          publicUrl,
+        },
+      });
+    }
+
     requireCsrf(req);
     const { userId } = await requireAuth();
 
@@ -112,7 +267,7 @@ export async function POST(req: NextRequest) {
 
     // Server chooses the object key. Never accept a raw key from clients.
     // Keep keys clear and scoped by owner id.
-    const nonce = randomUUID();
+    const nonce = makeUploadNonce();
 
     const key =
       input.type === "user.avatar"
@@ -127,11 +282,28 @@ export async function POST(req: NextRequest) {
       expiresInSeconds: 60,
     });
 
+    const publicUrl = upload.publicUrl;
+    if (!publicUrl) {
+      return errJson({
+        code: "INTERNAL_ERROR",
+        message: "Signing succeeded but no publicUrl was returned",
+        status: 500,
+      });
+    }
+
+    await persistLatestAvatarUrl({
+      type: input.type,
+      userId,
+      communityId,
+      publicUrl,
+    });
+
     return okJson({
+      publicUrl,
       upload: {
         key,
         uploadUrl: upload.uploadUrl,
-        publicUrl: upload.publicUrl,
+        publicUrl,
       },
     });
   } catch (e) {
