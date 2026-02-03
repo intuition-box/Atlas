@@ -112,14 +112,24 @@ function forceElliptical<N extends SimulatedNode>(
    Does NOT depend on alpha so rotation continues even when simulation cools.
 ──────────────────────────── */
 
+interface OrbitalForce<N extends SimulatedNode> {
+  (alpha: number): void;
+  initialize: (nodes: N[]) => void;
+  paused: (value?: boolean) => boolean | OrbitalForce<N>;
+}
+
 function forceOrbitalRotation<N extends SimulatedNode>(
   cx: number,
   cy: number,
   strength: number
-) {
+): OrbitalForce<N> {
   let nodes: N[] = [];
+  let paused = false;
 
-  function force(_alpha: number) {
+  const force: OrbitalForce<N> = (_alpha: number) => {
+    // Skip orbital motion when paused (but simulation can still run for collisions)
+    if (paused) return;
+
     for (const node of nodes) {
       if (node.fx != null || node.fy != null) continue;
 
@@ -145,10 +155,16 @@ function forceOrbitalRotation<N extends SimulatedNode>(
       node.vx = (node.vx ?? 0) + tx * angularVelocity * strength;
       node.vy = (node.vy ?? 0) + ty * angularVelocity * strength;
     }
-  }
+  };
 
   force.initialize = (n: N[]) => {
     nodes = n;
+  };
+
+  force.paused = (value?: boolean) => {
+    if (value === undefined) return paused;
+    paused = value;
+    return force;
   };
 
   return force;
@@ -373,6 +389,7 @@ export function useOrbitSimulation({
 
   const simulationRef = useRef<Simulation<SimulatedNode, SimulatedLink> | null>(null);
   const lastMemberIdsRef = useRef<string>("");
+  const rotationPausedRef = useRef(false);
 
   // Initialize or update simulation when members/dimensions change
   useEffect(() => {
@@ -495,6 +512,7 @@ export function useOrbitSimulation({
       node.x = x;
       node.y = y;
 
+      // Restart simulation for collision physics during drag
       // Use low alpha to minimize disturbance to other nodes
       sim.alphaTarget(SIMULATION.DRAG_ALPHA).restart();
     },
@@ -512,8 +530,20 @@ export function useOrbitSimulation({
     node.fx = null;
     node.fy = null;
 
-    // Give the node a small push back toward its ring, keep simulation alive for orbiting
-    sim.alphaTarget(0.12).restart();
+    // If rotation is paused, keep it paused (let the node settle without orbiting)
+    // Otherwise resume full simulation with orbiting
+    if (rotationPausedRef.current) {
+      // Brief simulation to let the node settle, then go dormant
+      sim.alphaTarget(0.05).restart();
+      // After settling, go back to dormant state
+      setTimeout(() => {
+        if (rotationPausedRef.current && simulationRef.current) {
+          simulationRef.current.alphaTarget(0).alpha(0.01);
+        }
+      }, 500);
+    } else {
+      sim.alphaTarget(0.12).restart();
+    }
   }, []);
 
   // Reheat simulation
@@ -521,16 +551,33 @@ export function useOrbitSimulation({
     simulationRef.current?.alphaTarget(0.12).restart();
   }, []);
 
-  // Pause/resume orbital rotation (stops entire simulation to prevent jiggle)
+  // Pause/resume orbital rotation
+  // When paused: orbital force disabled, velocities zeroed, but simulation stays ready for drag
+  // When resumed: orbital force re-enabled
   const setRotationPaused = useCallback((paused: boolean) => {
+    rotationPausedRef.current = paused;
+
     const sim = simulationRef.current;
     if (!sim) return;
 
+    const orbitForce = sim.force("orbit") as OrbitalForce<SimulatedNode> | null;
+
     if (paused) {
-      // Stop the simulation entirely - this freezes all nodes in place
-      sim.stop();
+      // Pause the orbital force
+      orbitForce?.paused(true);
+
+      // Zero out velocities to stop all motion immediately
+      for (const node of sim.nodes()) {
+        node.vx = 0;
+        node.vy = 0;
+      }
+
+      // Set alpha very low so simulation is "dormant" but ready
+      // It won't do much without velocities, but will respond to drag
+      sim.alphaTarget(0).alpha(0.01);
     } else {
-      // Resume simulation with orbiting
+      // Resume orbital rotation
+      orbitForce?.paused(false);
       sim.alphaTarget(0.12).restart();
     }
   }, []);
