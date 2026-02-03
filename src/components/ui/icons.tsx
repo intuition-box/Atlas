@@ -75,7 +75,7 @@ export const CheckIcon = memo(forwardRef<SVGSVGElement, React.SVGProps<SVGSVGEle
 
 export const PlusIcon = memo(forwardRef<SVGSVGElement, React.SVGProps<SVGSVGElement>>((props, ref) => (
   <IconBase ref={ref} aria-label="Plus icon" {...props}>
-    <path d="M19.916 4.626a.75.75 0 0 1 .208 1.04l-9 13.5a.75.75 0 0 1-1.154.114l-6-6a.75.75 0 0 1 1.06-1.06l5.353 5.353 8.493-12.74a.75.75 0 0 1 1.04-.207Z" />
+    <path strokeWidth="1.5" d="M12 4.5v15m7.5-7.5h-15" />
   </IconBase>
 )));
 
@@ -102,3 +102,4 @@ export const NoIcon = memo(forwardRef<SVGSVGElement, React.SVGProps<SVGSVGElemen
     <path d="M18.364 18.364A9 9 0 0 0 5.636 5.636m12.728 12.728A9 9 0 0 1 5.636 5.636m12.728 12.728L5.636 5.636" />
   </IconBase>
 )));
+
