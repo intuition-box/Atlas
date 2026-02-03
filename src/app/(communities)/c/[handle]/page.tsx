@@ -4,7 +4,7 @@ import * as React from "react"
 import { useParams, useRouter } from "next/navigation"
 
 import { apiGet } from "@/lib/api/client"
-import { parseApiClientError, parseApiProblem } from "@/lib/api/errors"
+import { parseApiError } from "@/lib/api/errors"
 import { normalizeHandle, validateHandle } from "@/lib/handle"
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -83,7 +83,7 @@ export default function CommunityPage() {
       }
 
       if (result.error && typeof result.error === "object" && "status" in result.error) {
-        const parsedErr = parseApiProblem(result.error)
+        const parsedErr = parseApiError(result.error)
         if (parsedErr.status === 404) {
           setState({ status: "not-found" })
           return
@@ -92,7 +92,7 @@ export default function CommunityPage() {
         return
       }
 
-      const parsedErr = parseApiClientError(result.error)
+      const parsedErr = parseApiError(result.error)
       setState({ status: "error", message: parsedErr.formError || "Something went wrong." })
     })()
 

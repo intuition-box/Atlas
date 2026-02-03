@@ -5,7 +5,7 @@ import Link from "next/link"
 import { useParams } from "next/navigation"
 
 import { apiGet } from "@/lib/api/client"
-import { parseApiClientError, parseApiProblem } from "@/lib/api/errors"
+import { parseApiError } from "@/lib/api/errors"
 import { normalizeHandle, validateHandle } from "@/lib/handle"
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -114,7 +114,7 @@ export default function UserProfilePage() {
       }
 
       if (result.error && typeof result.error === "object" && "status" in result.error) {
-        const parsedErr = parseApiProblem(result.error)
+        const parsedErr = parseApiError(result.error)
         if (parsedErr.status === 404) {
           setState({ status: "not-found" })
           return
@@ -123,7 +123,7 @@ export default function UserProfilePage() {
         return
       }
 
-      const parsedErr = parseApiClientError(result.error)
+      const parsedErr = parseApiError(result.error)
       setState({ status: "error", message: parsedErr.formError || "Something went wrong." })
     })()
 
@@ -200,7 +200,7 @@ export default function UserProfilePage() {
         </div>
 
         {isSelf ? (
-          <Button asChild type="button" variant="secondary">
+          <Button type="button" variant="secondary">
             <Link href={`/u/${handleLabel}/settings`}>Edit profile</Link>
           </Button>
         ) : null}

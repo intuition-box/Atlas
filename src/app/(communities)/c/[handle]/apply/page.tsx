@@ -6,7 +6,7 @@ import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
 
 import { apiGet, apiPost } from "@/lib/api/client"
-import { parseApiClientError, parseApiProblem } from "@/lib/api/errors"
+import { parseApiError } from "@/lib/api/errors"
 
 import { PageHeader } from "@/components/common/page-header"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -235,7 +235,7 @@ function useCommunityData(handle: string) {
 
         if (!communityRes.ok) {
           const err = communityRes.error
-          const parsed = "issues" in err ? parseApiProblem(err) : parseApiClientError(err)
+          const parsed = parseApiError(err)
           setError(parsed.formError || "Couldn't load community.")
           setCommunity(null)
           setQuestions([])
@@ -487,7 +487,7 @@ export default function CommunityApplyPage() {
     }
 
     const err = result.error
-    const parsed = "issues" in err ? parseApiProblem(err) : parseApiClientError(err)
+    const parsed = parseApiError(err)
 
     for (const [key, message] of Object.entries(parsed.fieldErrors)) {
       if (key in form.getValues()) {

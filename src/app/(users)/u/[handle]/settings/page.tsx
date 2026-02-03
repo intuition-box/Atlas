@@ -8,7 +8,7 @@ import { useParams, useRouter } from "next/navigation"
 import { getSession } from "next-auth/react"
 
 import { apiGet, apiPost } from "@/lib/api/client"
-import { parseApiClientError, parseApiProblem } from "@/lib/api/errors"
+import { parseApiError } from "@/lib/api/errors"
 import { userPath } from "@/lib/routes"
 import { COUNTRIES } from "@/config/countries"
 import { SKILLS } from "@/config/skills"
@@ -544,7 +544,7 @@ export default function UserSettingsPage() {
 
     if (!signed.ok) {
       const err = signed.error
-      const parsed = "issues" in err ? parseApiProblem(err) : parseApiClientError(err)
+      const parsed = parseApiError(err)
       throw new Error(parsed.formError || "Couldn't upload avatar.")
     }
 
@@ -580,7 +580,7 @@ export default function UserSettingsPage() {
     }
 
     const err = result.error
-    const parsed = "issues" in err ? parseApiProblem(err) : parseApiClientError(err)
+    const parsed = parseApiError(err)
 
     for (const [key, message] of Object.entries(parsed.fieldErrors)) {
       if (key in form.getValues()) {

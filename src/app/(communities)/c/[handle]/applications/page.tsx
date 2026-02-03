@@ -4,7 +4,7 @@ import * as React from "react"
 import { useParams, useRouter } from "next/navigation"
 
 import { apiGet, apiPost } from "@/lib/api/client"
-import { parseApiClientError, parseApiProblem } from "@/lib/api/errors"
+import { parseApiError } from "@/lib/api/errors"
 import { ROUTES, userPath } from "@/lib/routes"
 import { PageHeader } from "@/components/common/page-header"
 
@@ -147,7 +147,7 @@ function useApplicationsData(handle: string) {
 
         if (!res.ok) {
           const err = res.error
-          const parsed = "issues" in err ? parseApiProblem(err) : parseApiClientError(err)
+          const parsed = parseApiError(err)
 
           if (parsed.status === 401) {
             router.replace(ROUTES.signIn)
@@ -703,7 +703,7 @@ export default function CommunityApplicationsPage() {
     }
 
     const err = res.error
-    const parsed = "issues" in err ? parseApiProblem(err) : parseApiClientError(err)
+    const parsed = parseApiError(err)
 
     if (parsed.status === 401) {
       router.replace(ROUTES.signIn)

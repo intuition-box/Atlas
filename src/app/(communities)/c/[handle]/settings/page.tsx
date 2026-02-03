@@ -7,7 +7,7 @@ import { useParams, useRouter } from "next/navigation"
 import { getSession } from "next-auth/react"
 
 import { apiGet, apiPost } from "@/lib/api/client"
-import { parseApiClientError, parseApiProblem } from "@/lib/api/errors"
+import { parseApiError } from "@/lib/api/errors"
 
 import { AvatarDropzone } from "@/components/common/avatar-dropzone"
 import { PageHeader } from "@/components/common/page-header"
@@ -165,7 +165,7 @@ function useCommunityData(handle: string) {
 
         if (!res.ok) {
           const err = res.error
-          const parsed = "issues" in err ? parseApiProblem(err) : parseApiClientError(err)
+          const parsed = parseApiError(err)
           setError(parsed.formError || "We couldn't load this community. Try again.")
           setLoading(false)
           return
@@ -306,7 +306,7 @@ export default function CommunitySettingsPage() {
     }
 
     const err = result.error
-    const parsed = "issues" in err ? parseApiProblem(err) : parseApiClientError(err)
+    const parsed = parseApiError(err)
 
     for (const [key, message] of Object.entries(parsed.fieldErrors)) {
       if (key in form.getValues()) {
@@ -329,7 +329,7 @@ export default function CommunitySettingsPage() {
 
     if (!signed.ok) {
       const err = signed.error
-      const parsed = "issues" in err ? parseApiProblem(err) : parseApiClientError(err)
+      const parsed = parseApiError(err)
       throw new Error(parsed.formError || "Couldn't upload avatar.")
     }
 
