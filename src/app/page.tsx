@@ -4,24 +4,21 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import OrbitUniverse from "@/components/orbit/orbit-universe";
+import { OrbitUniverse, type OrbitCommunity, type OrbitLink } from "@/components/orbit/orbit-universe";
+import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from "@/components/ui/empty";
 import { apiGet } from "@/lib/api/client";
 import { ROUTES, communityPath } from "@/lib/routes";
 
-type CommunityListItem = {
-  id: string;
-  handle: string;
-  name: string;
-  description?: string | null;
-  avatarUrl?: string | null;
-  isPublicDirectory: boolean;
-  membersCount?: number;
+type OrbitUniverseResponse = {
+  communities: OrbitCommunity[];
+  links: OrbitLink[];
 };
 
 export default function Home() {
   const router = useRouter();
-
-  const [communities, setCommunities] = useState<CommunityListItem[]>([]);
+  
+  const [communities, setCommunities] = useState<OrbitCommunity[]>([]);
+  const [links, setLinks] = useState<OrbitLink[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -33,27 +30,19 @@ export default function Home() {
         setLoading(true);
         setError(null);
 
-        // Keep the request GET-only. If the route rejects the query, treat it as an empty list.
-        const r = await apiGet<{ communities: CommunityListItem[] }>("/api/community/list?take=50");
+        const res = await apiGet<OrbitUniverseResponse>("/api/orbit/universe");
 
         if (!alive) return;
 
-        if (!r.ok) {
-          // Don’t show schema/validation copy on the homepage.
-          // If the route returns INVALID_REQUEST, behave like “no communities yet”.
-          if (r.error.code === "INVALID_REQUEST") {
-            setCommunities([]);
-            return;
-          }
-
-          throw new Error(r.error.message || "Failed to load communities");
+        if (!res.ok) {
+          throw new Error(res.error.message || "Failed to load communities");
         }
 
-        const onlyPublic = (r.value.communities ?? []).filter((c) => c.isPublicDirectory);
-        setCommunities(onlyPublic);
-      } catch (e: any) {
+        setCommunities(res.value.communities ?? []);
+        setLinks(res.value.links ?? []);
+      } catch (e: unknown) {
         if (!alive) return;
-        setError(e?.message ?? "Failed to load communities");
+        setError(e instanceof Error ? e.message : "Failed to load communities");
       } finally {
         if (!alive) return;
         setLoading(false);
@@ -70,7 +59,8 @@ export default function Home() {
     <main className="fixed inset-0 overflow-hidden">
       <OrbitUniverse
         communities={communities}
-        onSelect={(c: { handle: string }) => router.push(communityPath(c.handle))}
+        links={links}
+        onSelect={(c) => router.push(communityPath(c.handle))}
       />
 
       {/* Status */}
@@ -88,18 +78,21 @@ export default function Home() {
 
       {/* Empty state */}
       {!loading && !error && communities.length === 0 ? (
-        <div className="pointer-events-auto absolute left-6 top-24 z-10">
-          <div className="rounded-xl border border-border bg-background/80 p-4 text-sm text-foreground/80 shadow-sm backdrop-blur">
-            <p>No public communities yet.</p>
-            <div className="mt-3">
-              <Link
-                href={ROUTES.communityNew}
-                className="inline-flex h-9 items-center rounded-lg border border-border bg-background px-3 text-sm text-foreground hover:bg-muted"
-              >
-                Create community
-              </Link>
-            </div>
-          </div>
+        <div className="pointer-events-auto absolute inset-0 z-10 flex items-center justify-center">
+          <Empty className="border-border bg-background/80 backdrop-blur">
+            <EmptyHeader>
+              <EmptyTitle>No public communities yet</EmptyTitle>
+              <EmptyDescription>
+                Be the first to create a community and start building your orbit.
+              </EmptyDescription>
+            </EmptyHeader>
+            <Link
+              href={ROUTES.communityNew}
+              className="inline-flex h-9 items-center rounded-lg border border-border bg-background px-4 text-sm font-medium text-foreground hover:bg-muted"
+            >
+              Create community
+            </Link>
+          </Empty>
         </div>
       ) : null}
     </main>

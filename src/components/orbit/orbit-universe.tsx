@@ -1,358 +1,356 @@
 "use client";
 
 import * as React from "react";
+import {
+  forceSimulation,
+  forceLink,
+  forceManyBody,
+  forceCollide,
+  forceX,
+  forceY,
+  type Simulation,
+  type SimulationNodeDatum,
+  type SimulationLinkDatum,
+} from "d3-force";
 
-export type OrbitUniverseCommunity = {
+import { UsersIcon, UserIcon, CheckIcon, PlusIcon } from "@/components/ui/icons";
+
+/* ────────────────────────────
+   Types
+──────────────────────────── */
+
+export type OrbitCommunity = {
   id: string;
   handle: string;
   name: string;
   avatarUrl?: string | null;
-  icon?: string | null;
+  memberCount: number;
+  isPublic: boolean;
+  isMembershipOpen: boolean;
+  orbitStats: {
+    advocates: number;
+    contributors: number;
+    participants: number;
+    explorers: number;
+    dominantLevel: "advocates" | "contributors" | "participants" | "explorers";
+  };
 };
 
-type OrbitUniverseProps = {
-  communities: OrbitUniverseCommunity[];
+export type OrbitLink = {
+  source: string;
+  target: string;
+  sharedMembers: number;
+};
 
-  /** Optional: control navigation without hard-coding routing conventions in this component. */
-  hrefFor?: (c: OrbitUniverseCommunity) => string;
-  onSelect?: (c: OrbitUniverseCommunity) => void;
+interface SimNode extends SimulationNodeDatum {
+  id: string;
+  handle: string;
+  name: string;
+  avatarUrl?: string | null;
+  memberCount: number;
+  isPublic: boolean;
+  isMembershipOpen: boolean;
+  color: string;
+  radius: number;
+  image?: HTMLImageElement;
+}
 
-  /** Optional UI */
+interface SimLink extends SimulationLinkDatum<SimNode> {
+  sharedMembers: number;
+}
+
+type TooltipData = {
+  name: string;
+  handle: string;
+  memberCount: number;
+  isPublic: boolean;
+  isMembershipOpen: boolean;
+  x: number;
+  y: number;
+};
+
+/* ────────────────────────────
+   Props
+──────────────────────────── */
+
+interface OrbitUniverseProps {
+  communities: OrbitCommunity[];
+  links?: OrbitLink[];
+  hrefFor?: (c: OrbitCommunity) => string;
+  onSelect?: (c: OrbitCommunity) => void;
   className?: string;
   style?: React.CSSProperties;
+}
 
-  /** Visual density */
-  take?: number;
+/* ────────────────────────────
+   Constants
+──────────────────────────── */
+
+const MIN_RADIUS = 14;
+const MAX_RADIUS = 44;
+
+// Colors by dominant orbit level
+const ORBIT_COLORS = {
+  advocates: "#3b82f6",     // Blue
+  contributors: "#60a5fa",  // Lighter blue
+  participants: "#ffffff",  // White
+  explorers: "#9ca3af",     // Grey
 };
 
-type Point = { x: number; y: number };
+/* ────────────────────────────
+   Helpers
+──────────────────────────── */
 
-type Node = {
-  id: string;
-  handle: string;
-  name: string;
-  avatarUrl?: string | null;
-  icon?: string | null;
-  pos: Point; // world-space
-};
-
-function hashStringToU32(s: string): number {
-  // FNV-1a (32-bit)
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
+function computeRadius(memberCount: number, maxMembers: number): number {
+  if (maxMembers <= 0 || memberCount <= 0) return MIN_RADIUS;
+  const t = Math.sqrt(memberCount / maxMembers);
+  return MIN_RADIUS + t * (MAX_RADIUS - MIN_RADIUS);
 }
 
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
+/* ────────────────────────────
+   Tooltip Component
+──────────────────────────── */
+
+function Tooltip({ data }: { data: TooltipData }) {
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: data.x + 16,
+        top: data.y + 16,
+        pointerEvents: "none",
+        padding: "12px 14px",
+        borderRadius: 10,
+        backdropFilter: "blur(12px)",
+        background: "rgba(0, 0, 0, 0.75)",
+        color: "rgba(255, 255, 255, 0.95)",
+        fontSize: 13,
+        lineHeight: "20px",
+        minWidth: 180,
+        maxWidth: 280,
+        boxShadow: "0 4px 16px rgba(0, 0, 0, 0.4)",
+      }}
+    >
+      <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 14 }}>{data.name}</div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, opacity: 0.85 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <UsersIcon style={{ width: 14, height: 14, flexShrink: 0 }} />
+          <span>{data.memberCount} {data.memberCount === 1 ? "member" : "members"}</span>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <UserIcon style={{ width: 14, height: 14, flexShrink: 0 }} />
+          <span>{data.isPublic ? "Public" : "Private"} community</span>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {data.isMembershipOpen ? (
+            <CheckIcon style={{ width: 14, height: 14, flexShrink: 0 }} />
+          ) : (
+            <PlusIcon style={{ width: 14, height: 14, flexShrink: 0 }} />
+          )}
+          <span>{data.isMembershipOpen ? "Open" : "Closed"} membership</span>
+        </div>
+      </div>
+    </div>
+  );
 }
 
-function clamp(n: number, lo: number, hi: number): number {
-  return Math.max(lo, Math.min(hi, n));
-}
+/* ────────────────────────────
+   Component
+──────────────────────────── */
 
-function dist2(a: Point, b: Point): number {
-  const dx = a.x - b.x;
-  const dy = a.y - b.y;
-  return dx * dx + dy * dy;
-}
-
-function fitViewToBounds(args: {
-  bounds: { minX: number; minY: number; maxX: number; maxY: number };
-  width: number;
-  height: number;
-  paddingPx?: number;
-}): { offsetX: number; offsetY: number; scale: number } {
-  const pad = args.paddingPx ?? 48;
-  const w = Math.max(1, args.width - pad * 2);
-  const h = Math.max(1, args.height - pad * 2);
-
-  const bw = Math.max(1, args.bounds.maxX - args.bounds.minX);
-  const bh = Math.max(1, args.bounds.maxY - args.bounds.minY);
-
-  const scale = Math.min(w / bw, h / bh);
-  const cx = (args.bounds.minX + args.bounds.maxX) / 2;
-  const cy = (args.bounds.minY + args.bounds.maxY) / 2;
-
-  // We draw with: screen = (world * scale) + offset
-  // Want world center mapped to screen center.
-  const offsetX = args.width / 2 - cx * scale;
-  const offsetY = args.height / 2 - cy * scale;
-
-  return { offsetX, offsetY, scale };
-}
-
-function computeBounds(nodes: Node[]): { minX: number; minY: number; maxX: number; maxY: number } {
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-
-  for (const n of nodes) {
-    minX = Math.min(minX, n.pos.x);
-    minY = Math.min(minY, n.pos.y);
-    maxX = Math.max(maxX, n.pos.x);
-    maxY = Math.max(maxY, n.pos.y);
-  }
-
-  if (!Number.isFinite(minX)) {
-    return { minX: -1, minY: -1, maxX: 1, maxY: 1 };
-  }
-
-  return { minX, minY, maxX, maxY };
-}
-
-function layoutGalaxy(communities: OrbitUniverseCommunity[]): Node[] {
-  // Stable positions from ids (no timestamps, no randomness across reloads).
-  const n = communities.length;
-  const spread = Math.max(900, Math.sqrt(Math.max(1, n)) * 260);
-
-  const nodes: Node[] = communities.map((c) => {
-    const rnd = mulberry32(hashStringToU32(c.id));
-    // Random in a disk (galaxy-ish), biased towards center.
-    const a = rnd() * Math.PI * 2;
-    const r = Math.pow(rnd(), 0.62) * spread;
-    const x = Math.cos(a) * r;
-    const y = Math.sin(a) * r * 0.68; // mild ellipse
-
-    return {
-      id: c.id,
-      handle: c.handle,
-      name: c.name,
-      avatarUrl: c.avatarUrl ?? null,
-      icon: c.icon ?? null,
-      pos: { x, y },
-    };
-  });
-
-  // Cheap relaxation so nodes don’t overlap too much.
-  // Keep it light: a few iterations, small repulsion.
-  const minSep = 54;
-  const minSep2 = minSep * minSep;
-
-  for (let iter = 0; iter < 5; iter++) {
-    for (let i = 0; i < nodes.length; i++) {
-      for (let j = i + 1; j < nodes.length; j++) {
-        const a = nodes[i];
-        const b = nodes[j];
-        const d2 = dist2(a.pos, b.pos);
-        if (d2 >= minSep2) continue;
-
-        const d = Math.sqrt(Math.max(1e-6, d2));
-        const push = (minSep - d) * 0.5;
-        const ux = (a.pos.x - b.pos.x) / d;
-        const uy = (a.pos.y - b.pos.y) / d;
-
-        a.pos.x += ux * push;
-        a.pos.y += uy * push;
-        b.pos.x -= ux * push;
-        b.pos.y -= uy * push;
-      }
-    }
-  }
-
-  return nodes;
-}
-
-export default function OrbitUniverse(props: OrbitUniverseProps) {
-  const {
-    communities,
-    hrefFor,
-    onSelect,
-    className,
-    style,
-    take,
-  } = props;
-
+export function OrbitUniverse({
+  communities,
+  links = [],
+  hrefFor,
+  onSelect,
+  className,
+  style,
+}: OrbitUniverseProps) {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
 
-  const nodes = React.useMemo(() => {
-    const list = typeof take === "number" ? communities.slice(0, Math.max(0, take)) : communities;
-    return layoutGalaxy(list);
-  }, [communities, take]);
-
-  const viewRef = React.useRef({
-    offsetX: 0,
-    offsetY: 0,
-    scale: 1,
+  // All mutable state in a single ref
+  const stateRef = React.useRef({
+    simulation: null as Simulation<SimNode, SimLink> | null,
+    nodes: [] as SimNode[],
+    links: [] as SimLink[],
+    width: 0,
+    height: 0,
+    dpr: 1,
+    transform: { x: 0, y: 0, k: 1 },
+    draggedNode: null as SimNode | null,
+    dragStart: null as { x: number; y: number } | null,
+    pointer: { x: 0, y: 0, inside: false },
+    hoveredNode: null as SimNode | null,
+    tooltip: null as TooltipData | null,
+    raf: null as number | null,
+    lastCommunityIds: "",
+    imageCache: new Map<string, HTMLImageElement>(),
+    initialized: false,
+    fadeIn: 0, // 0 to 1 for fade-in animation
+    startTime: 0,
+    linkDirections: [] as boolean[], // true = source->target, false = target->source (randomized)
   });
 
-  const sizeRef = React.useRef({ width: 1, height: 1, dpr: 1 });
-  const rafRef = React.useRef<number | null>(null);
+  const [tooltipData, setTooltipData] = React.useState<TooltipData | null>(null);
 
-  const draggingRef = React.useRef<null | {
-    startX: number;
-    startY: number;
-    startOffsetX: number;
-    startOffsetY: number;
-  }>(null);
+  // Stable references to props
+  const onSelectRef = React.useRef(onSelect);
+  const hrefForRef = React.useRef(hrefFor);
+  onSelectRef.current = onSelect;
+  hrefForRef.current = hrefFor;
 
-  const pointerRef = React.useRef<{ x: number; y: number; inside: boolean }>({ x: 0, y: 0, inside: false });
-  const hoveredIdRef = React.useRef<string | null>(null);
+  /* ────────────────────────────
+     Load images
+  ──────────────────────────── */
 
-  const [tooltip, setTooltip] = React.useState<null | {
-    id: string;
-    name: string;
-    handle: string;
-    x: number;
-    y: number;
-  }>(null);
+  const loadImage = React.useCallback((url: string): Promise<HTMLImageElement | null> => {
+    const state = stateRef.current;
+    const cached = state.imageCache.get(url);
+    if (cached) return Promise.resolve(cached);
 
-  const resolveHref = React.useCallback(
-    (c: OrbitUniverseCommunity) => (hrefFor ? hrefFor(c) : `/c/${c.handle}`),
-    [hrefFor],
-  );
-
-  const selectCommunity = React.useCallback(
-    (c: OrbitUniverseCommunity) => {
-      if (onSelect) {
-        onSelect(c);
-        return;
-      }
-      const href = resolveHref(c);
-      // Keep it generic: navigation is handled by the browser.
-      window.location.assign(href);
-    },
-    [onSelect, resolveHref],
-  );
-
-  const screenToWorld = React.useCallback((sx: number, sy: number): Point => {
-    const v = viewRef.current;
-    return {
-      x: (sx - v.offsetX) / v.scale,
-      y: (sy - v.offsetY) / v.scale,
-    };
+    return new Promise((resolve) => {
+      const img = new Image();
+      // Don't set crossOrigin - allows loading from any origin
+      // Canvas will be tainted but we don't need to export it
+      img.onload = () => {
+        state.imageCache.set(url, img);
+        resolve(img);
+      };
+      img.onerror = () => {
+        // Image failed to load - don't cache, return null
+        resolve(null);
+      };
+      img.src = url;
+    });
   }, []);
 
-  const worldToScreen = React.useCallback((wx: number, wy: number): Point => {
-    const v = viewRef.current;
-    return {
-      x: wx * v.scale + v.offsetX,
-      y: wy * v.scale + v.offsetY,
-    };
-  }, []);
+  /* ────────────────────────────
+     Initialize/update simulation
+  ──────────────────────────── */
 
-  const pickNode = React.useCallback(
-    (sx: number, sy: number): Node | null => {
-      const w = screenToWorld(sx, sy);
+  const initializeSimulation = React.useCallback(() => {
+    const state = stateRef.current;
+    const { width, height } = state;
 
-      // Hit radius in world-space (constant-ish in screen space).
-      const hitPx = 20;
-      const hitW = hitPx / viewRef.current.scale;
-      const hitW2 = hitW * hitW;
+    // Don't initialize until we have actual dimensions
+    if (width === 0 || height === 0 || communities.length === 0) return;
 
-      let best: Node | null = null;
-      let bestD2 = Infinity;
+    const newIds = communities.map((c) => c.id).join(",");
+    if (newIds === state.lastCommunityIds && state.nodes.length > 0) {
+      return;
+    }
+    state.lastCommunityIds = newIds;
 
-      for (const n of nodes) {
-        const d2 = dist2(n.pos, w);
-        if (d2 > hitW2) continue;
-        if (d2 < bestD2) {
-          bestD2 = d2;
-          best = n;
-        }
-      }
+    const maxMembers = Math.max(1, ...communities.map((c) => c.memberCount));
 
-      return best;
-    },
-    [nodes, screenToWorld],
-  );
+    // Create nodes with initial positions near center
+    const centerX = width / 2;
+    const centerY = height / 2;
 
-  const draw = React.useCallback(
-    (ctx: CanvasRenderingContext2D) => {
-      const { width, height } = sizeRef.current;
-      ctx.clearRect(0, 0, width, height);
+    const newNodes: SimNode[] = communities.map((c, i) => {
+      const dominantLevel = c.orbitStats?.dominantLevel ?? "explorers";
+      const color = ORBIT_COLORS[dominantLevel];
+      const radius = computeRadius(c.memberCount, maxMembers);
 
-      // Draw nodes
-      for (const n of nodes) {
-        const p = worldToScreen(n.pos.x, n.pos.y);
+      // Start nodes in a circle around the center to avoid the slide-in glitch
+      const angle = (i / communities.length) * Math.PI * 2;
+      const spread = Math.min(width, height) * 0.15;
 
-        // Skip offscreen (small margin)
-        if (p.x < -80 || p.x > width + 80 || p.y < -80 || p.y > height + 80) continue;
+      return {
+        id: c.id,
+        handle: c.handle,
+        name: c.name,
+        avatarUrl: c.avatarUrl ?? null,
+        memberCount: c.memberCount,
+        isPublic: c.isPublic,
+        isMembershipOpen: c.isMembershipOpen,
+        color,
+        radius,
+        x: centerX + Math.cos(angle) * spread,
+        y: centerY + Math.sin(angle) * spread,
+      };
+    });
 
-        const isHover = hoveredIdRef.current === n.id;
-        const r = isHover ? 10 : 7;
+    state.nodes = newNodes;
 
-        // Keep colors neutral; globals/theme can override later.
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-        ctx.fillStyle = "rgba(255,255,255,0.85)";
-        ctx.fill();
-
-        ctx.lineWidth = 1;
-        ctx.strokeStyle = isHover ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.35)";
-        ctx.stroke();
-      }
-    },
-    [nodes, worldToScreen],
-  );
-
-  const frame = React.useCallback(
-    (_t: number) => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-
-      // Hover detection (doesn’t pause time; no jump behavior here)
-      const ptr = pointerRef.current;
-      if (ptr.inside && !draggingRef.current) {
-        const picked = pickNode(ptr.x, ptr.y);
-        const next = picked?.id ?? null;
-        if (hoveredIdRef.current !== next) {
-          hoveredIdRef.current = next;
-          if (picked) {
-            setTooltip({
-              id: picked.id,
-              name: picked.name,
-              handle: picked.handle,
-              x: ptr.x,
-              y: ptr.y,
-            });
-          } else {
-            setTooltip(null);
+    // Load avatar images
+    for (const node of newNodes) {
+      if (node.avatarUrl) {
+        loadImage(node.avatarUrl).then((img) => {
+          if (img) {
+            node.image = img;
           }
-        } else if (tooltip && picked) {
-          // keep tooltip tracking pointer
-          setTooltip((prev) => (prev ? { ...prev, x: ptr.x, y: ptr.y } : prev));
-        }
-      } else if (hoveredIdRef.current) {
-        hoveredIdRef.current = null;
-        setTooltip(null);
+        });
       }
+    }
 
-      draw(ctx);
-      rafRef.current = window.requestAnimationFrame(frame);
-    },
-    [draw, pickNode, tooltip],
-  );
+    // Create links
+    const nodeIds = new Set(newNodes.map((n) => n.id));
+    const newLinks: SimLink[] = links
+      .filter((l) => nodeIds.has(l.source) && nodeIds.has(l.target))
+      .map((l) => ({
+        source: l.source as unknown as SimNode,
+        target: l.target as unknown as SimNode,
+        sharedMembers: l.sharedMembers,
+      }));
 
-  // Resize handling
+    state.links = newLinks;
+
+    // Randomize link directions (which bubble the bridge grows from)
+    state.linkDirections = newLinks.map(() => Math.random() > 0.5);
+
+    // Stop existing simulation
+    state.simulation?.stop();
+
+    // Create new simulation - increased charge strength for more spacing
+    const sim = forceSimulation<SimNode>(newNodes)
+      .force("link", forceLink<SimNode, SimLink>(newLinks).id((d) => d.id).distance(120))
+      .force("charge", forceManyBody().strength(-350))
+      .force("x", forceX(width / 2).strength(0.04))
+      .force("y", forceY(height / 2).strength(0.04))
+      .force("collide", forceCollide<SimNode>().radius((d) => d.radius + 12).strength(1));
+
+    state.simulation = sim;
+
+    // Start fade-in animation
+    if (!state.initialized) {
+      state.initialized = true;
+      state.startTime = performance.now();
+      state.fadeIn = 0;
+    }
+  }, [communities, links, loadImage]);
+
+  // Try to initialize when communities change
+  React.useEffect(() => {
+    initializeSimulation();
+  }, [initializeSimulation]);
+
+  /* ────────────────────────────
+     Canvas setup and resize
+  ──────────────────────────── */
+
   React.useEffect(() => {
     const el = containerRef.current;
     const canvas = canvasRef.current;
     if (!el || !canvas) return;
 
-    const ro = new ResizeObserver((entries) => {
-      const box = entries[0]?.contentRect;
-      if (!box) return;
+    const state = stateRef.current;
 
+    const handleResize = () => {
+      const rect = el.getBoundingClientRect();
       const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
-      const width = Math.max(1, Math.floor(box.width));
-      const height = Math.max(1, Math.floor(box.height));
+      const width = Math.max(1, Math.floor(rect.width));
+      const height = Math.max(1, Math.floor(rect.height));
 
-      sizeRef.current = { width, height, dpr };
+      const isFirstResize = state.width === 0 && state.height === 0;
+
+      state.width = width;
+      state.height = height;
+      state.dpr = dpr;
 
       canvas.width = Math.floor(width * dpr);
       canvas.height = Math.floor(height * dpr);
@@ -364,86 +362,315 @@ export default function OrbitUniverse(props: OrbitUniverseProps) {
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       }
 
-      // Fit view on first resize / when nodes change.
-      const bounds = computeBounds(nodes);
-      const fit = fitViewToBounds({ bounds, width, height, paddingPx: 64 });
-      viewRef.current = {
-        offsetX: fit.offsetX,
-        offsetY: fit.offsetY,
-        scale: clamp(fit.scale, 0.25, 2.5),
-      };
-    });
-
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [nodes]);
-
-  // Animation loop
-  React.useEffect(() => {
-    if (rafRef.current) window.cancelAnimationFrame(rafRef.current);
-    rafRef.current = window.requestAnimationFrame(frame);
-    return () => {
-      if (rafRef.current) window.cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
+      // On first resize, initialize simulation. On subsequent resizes, just update forces.
+      if (isFirstResize) {
+        initializeSimulation();
+      } else {
+        const sim = state.simulation;
+        if (sim) {
+          sim.force("x", forceX(width / 2).strength(0.04));
+          sim.force("y", forceY(height / 2).strength(0.04));
+          // Don't restart alpha - avoid the zoom-out animation
+        }
+      }
     };
-  }, [frame]);
+
+    const ro = new ResizeObserver(handleResize);
+    ro.observe(el);
+    handleResize();
+
+    return () => ro.disconnect();
+  }, [initializeSimulation]);
+
+  /* ────────────────────────────
+     Animation loop
+  ──────────────────────────── */
+
+  React.useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const state = stateRef.current;
+    let running = true;
+
+    const screenToWorld = (sx: number, sy: number) => {
+      const t = state.transform;
+      return {
+        x: (sx - t.x) / t.k,
+        y: (sy - t.y) / t.k,
+      };
+    };
+
+    const pickNode = (sx: number, sy: number): SimNode | null => {
+      const world = screenToWorld(sx, sy);
+
+      for (let i = state.nodes.length - 1; i >= 0; i--) {
+        const n = state.nodes[i];
+        if (n.x === undefined || n.y === undefined) continue;
+
+        const dx = n.x - world.x;
+        const dy = n.y - world.y;
+        const dist2 = dx * dx + dy * dy;
+
+        if (dist2 <= n.radius * n.radius) {
+          return n;
+        }
+      }
+      return null;
+    };
+
+    const draw = () => {
+      const { width, height, transform: t, nodes, links: simLinks, hoveredNode, linkDirections } = state;
+
+      const elapsed = performance.now() - state.startTime;
+
+      // Animation timing:
+      // 0-600ms: bubbles fade in
+      // 600-1400ms: bridges grow (800ms duration)
+      const bubbleFadeDuration = 600;
+      const bridgeGrowDelay = bubbleFadeDuration;
+      const bridgeGrowDuration = 800;
+
+      // Update fade-in animation
+      if (state.initialized && state.fadeIn < 1) {
+        state.fadeIn = Math.min(1, elapsed / bubbleFadeDuration);
+      }
+
+      // Bridge growth progress (0 to 1, starts after bubbles fade in)
+      const bridgeProgress = state.initialized
+        ? Math.max(0, Math.min(1, (elapsed - bridgeGrowDelay) / bridgeGrowDuration))
+        : 0;
+
+      // Easing function for smooth bridge growth
+      const easeOutCubic = (x: number) => 1 - Math.pow(1 - x, 3);
+      const easedBridgeProgress = easeOutCubic(bridgeProgress);
+
+      const bubbleOpacity = state.fadeIn;
+
+      ctx.clearRect(0, 0, width, height);
+
+      // Don't draw anything until initialized
+      if (!state.initialized || bubbleOpacity === 0) return;
+
+      ctx.save();
+      ctx.translate(t.x, t.y);
+      ctx.scale(t.k, t.k);
+
+      // Draw links FIRST (behind nodes) - only after bubbles have faded in
+      if (bridgeProgress > 0) {
+        for (let i = 0; i < simLinks.length; i++) {
+          const link = simLinks[i];
+          const s = link.source as SimNode;
+          const tgt = link.target as SimNode;
+          if (s.x === undefined || s.y === undefined || tgt.x === undefined || tgt.y === undefined) continue;
+
+          // Determine direction based on randomized linkDirections
+          const reversed = linkDirections[i] ?? false;
+          const startNode = reversed ? tgt : s;
+          const endNode = reversed ? s : tgt;
+
+          const dx = endNode.x - startNode.x;
+          const dy = endNode.y - startNode.y;
+
+          // Draw partial line based on bridge progress
+          const currentEndX = startNode.x + dx * easedBridgeProgress;
+          const currentEndY = startNode.y + dy * easedBridgeProgress;
+
+          ctx.beginPath();
+          ctx.moveTo(startNode.x, startNode.y);
+          ctx.lineTo(currentEndX, currentEndY);
+          ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
+          ctx.lineWidth = 1.5 / t.k;
+          ctx.stroke();
+        }
+      }
+
+      // Draw nodes with fade-in
+      ctx.globalAlpha = bubbleOpacity;
+
+      for (const n of nodes) {
+        if (n.x === undefined || n.y === undefined) continue;
+
+        const isHovered = hoveredNode?.id === n.id;
+        const radius = isHovered ? n.radius * 1.1 : n.radius;
+
+        // Draw circle background
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, radius, 0, Math.PI * 2);
+        ctx.fillStyle = n.color;
+        ctx.fill();
+
+        // Draw avatar image if loaded
+        if (n.image && n.image.complete && n.image.naturalWidth > 0) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(n.x, n.y, radius, 0, Math.PI * 2);
+          ctx.clip();
+          ctx.drawImage(n.image, n.x - radius, n.y - radius, radius * 2, radius * 2);
+          ctx.restore();
+        }
+
+        // Draw border
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, radius, 0, Math.PI * 2);
+        ctx.strokeStyle = isHovered ? "rgba(255, 255, 255, 1)" : "rgba(255, 255, 255, 0.5)";
+        ctx.lineWidth = (isHovered ? 3 : 1.5) / t.k;
+        ctx.stroke();
+      }
+
+      ctx.restore();
+    };
+
+    const tick = () => {
+      if (!running) return;
+
+      const ptr = state.pointer;
+      if (ptr.inside && !state.draggedNode) {
+        const picked = pickNode(ptr.x, ptr.y);
+        const prevHovered = state.hoveredNode;
+
+        if (picked !== prevHovered) {
+          state.hoveredNode = picked;
+          if (picked) {
+            const newTooltip: TooltipData = {
+              name: picked.name,
+              handle: picked.handle,
+              memberCount: picked.memberCount,
+              isPublic: picked.isPublic,
+              isMembershipOpen: picked.isMembershipOpen,
+              x: ptr.x,
+              y: ptr.y,
+            };
+            state.tooltip = newTooltip;
+            setTooltipData(newTooltip);
+          } else {
+            state.tooltip = null;
+            setTooltipData(null);
+          }
+        } else if (picked && state.tooltip) {
+          state.tooltip.x = ptr.x;
+          state.tooltip.y = ptr.y;
+          setTooltipData({ ...state.tooltip });
+        }
+      }
+
+      draw();
+      state.raf = requestAnimationFrame(tick);
+    };
+
+    state.raf = requestAnimationFrame(tick);
+
+    return () => {
+      running = false;
+      if (state.raf) cancelAnimationFrame(state.raf);
+    };
+  }, []);
+
+  /* ────────────────────────────
+     Event handlers
+  ──────────────────────────── */
 
   const onPointerMove = React.useCallback((e: React.PointerEvent) => {
+    const state = stateRef.current;
     const rect = (e.currentTarget as HTMLCanvasElement).getBoundingClientRect();
-    pointerRef.current = {
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top,
-      inside: true,
-    };
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    state.pointer = { x, y, inside: true };
 
-    const drag = draggingRef.current;
-    if (!drag) return;
-
-    const dx = pointerRef.current.x - drag.startX;
-    const dy = pointerRef.current.y - drag.startY;
-
-    viewRef.current.offsetX = drag.startOffsetX + dx;
-    viewRef.current.offsetY = drag.startOffsetY + dy;
+    if (state.draggedNode) {
+      const t = state.transform;
+      state.draggedNode.fx = (x - t.x) / t.k;
+      state.draggedNode.fy = (y - t.y) / t.k;
+    }
   }, []);
 
   const onPointerDown = React.useCallback((e: React.PointerEvent) => {
+    const state = stateRef.current;
     (e.currentTarget as HTMLCanvasElement).setPointerCapture(e.pointerId);
 
     const rect = (e.currentTarget as HTMLCanvasElement).getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    draggingRef.current = {
-      startX: x,
-      startY: y,
-      startOffsetX: viewRef.current.offsetX,
-      startOffsetY: viewRef.current.offsetY,
-    };
+    const t = state.transform;
+    const wx = (x - t.x) / t.k;
+    const wy = (y - t.y) / t.k;
+
+    for (let i = state.nodes.length - 1; i >= 0; i--) {
+      const n = state.nodes[i];
+      if (n.x === undefined || n.y === undefined) continue;
+
+      const dx = n.x - wx;
+      const dy = n.y - wy;
+      if (dx * dx + dy * dy <= n.radius * n.radius) {
+        state.draggedNode = n;
+        state.dragStart = { x: n.x, y: n.y };
+        n.fx = n.x;
+        n.fy = n.y;
+
+        // Hide tooltip during drag
+        state.hoveredNode = null;
+        state.tooltip = null;
+        setTooltipData(null);
+
+        state.simulation?.alphaTarget(0.3).restart();
+        return;
+      }
+    }
   }, []);
 
   const onPointerUp = React.useCallback((e: React.PointerEvent) => {
+    const state = stateRef.current;
     const rect = (e.currentTarget as HTMLCanvasElement).getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    const drag = draggingRef.current;
-    draggingRef.current = null;
+    const draggedNode = state.draggedNode;
+    const dragStart = state.dragStart;
 
-    // Treat a short movement as a click/tap.
-    if (drag) {
-      const dx = x - drag.startX;
-      const dy = y - drag.startY;
+    if (draggedNode && dragStart) {
+      const dx = (draggedNode.x ?? 0) - dragStart.x;
+      const dy = (draggedNode.y ?? 0) - dragStart.y;
       const moved = Math.hypot(dx, dy);
-      if (moved < 6) {
-        const picked = pickNode(x, y);
-        if (picked) {
-          selectCommunity({
-            id: picked.id,
-            handle: picked.handle,
-            name: picked.name,
-            avatarUrl: picked.avatarUrl ?? null,
-            icon: picked.icon ?? null,
-          });
+
+      // Keep node pinned where it was dropped (don't reset fx/fy)
+      // This allows free positioning like the d3 example
+      state.simulation?.alphaTarget(0);
+      state.draggedNode = null;
+      state.dragStart = null;
+
+      if (moved < 5) {
+        // It was a click, not a drag - unpin so it can be clicked again
+        draggedNode.fx = null;
+        draggedNode.fy = null;
+        const t = state.transform;
+        const wx = (x - t.x) / t.k;
+        const wy = (y - t.y) / t.k;
+
+        for (let i = state.nodes.length - 1; i >= 0; i--) {
+          const n = state.nodes[i];
+          if (n.x === undefined || n.y === undefined) continue;
+
+          const ndx = n.x - wx;
+          const ndy = n.y - wy;
+          if (ndx * ndx + ndy * ndy <= n.radius * n.radius) {
+            const onSelect = onSelectRef.current;
+            const hrefFor = hrefForRef.current;
+
+            const community = communities.find((c) => c.id === n.id);
+            if (community) {
+              if (onSelect) {
+                onSelect(community);
+              } else {
+                const href = hrefFor ? hrefFor(community) : `/c/${n.handle}`;
+                window.location.assign(href);
+              }
+            }
+            break;
+          }
         }
       }
     }
@@ -453,41 +680,56 @@ export default function OrbitUniverse(props: OrbitUniverseProps) {
     } catch {
       // ignore
     }
-  }, [pickNode, selectCommunity]);
+  }, [communities]);
 
   const onPointerLeave = React.useCallback(() => {
-    pointerRef.current.inside = false;
+    const state = stateRef.current;
+    state.pointer.inside = false;
+    if (state.hoveredNode) {
+      state.hoveredNode = null;
+      state.tooltip = null;
+      setTooltipData(null);
+    }
   }, []);
 
   const onWheel = React.useCallback((e: React.WheelEvent) => {
     e.preventDefault();
 
-    const canvas = e.currentTarget as HTMLCanvasElement;
-    const rect = canvas.getBoundingClientRect();
-    const sx = e.clientX - rect.left;
-    const sy = e.clientY - rect.top;
+    const state = stateRef.current;
+    const rect = (e.currentTarget as HTMLCanvasElement).getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
 
-    const v = viewRef.current;
-    const before = screenToWorld(sx, sy);
-
-    // trackpad-friendly
+    const t = state.transform;
     const delta = -e.deltaY;
-    const factor = delta > 0 ? 1.1 : 0.9;
-    const nextScale = clamp(v.scale * factor, 0.18, 4);
+    const scaleFactor = delta > 0 ? 1.1 : 0.9;
+    const newK = Math.max(0.1, Math.min(10, t.k * scaleFactor));
 
-    v.scale = nextScale;
+    const wx = (x - t.x) / t.k;
+    const wy = (y - t.y) / t.k;
 
-    const after = screenToWorld(sx, sy);
-    // Adjust offsets so the point under cursor stays under cursor.
-    v.offsetX += (after.x - before.x) * v.scale;
-    v.offsetY += (after.y - before.y) * v.scale;
-  }, [screenToWorld]);
+    state.transform = {
+      k: newK,
+      x: x - wx * newK,
+      y: y - wy * newK,
+    };
+  }, []);
+
+  /* ────────────────────────────
+     JSX
+  ──────────────────────────── */
 
   return (
     <div
       ref={containerRef}
       className={className}
-      style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden", ...style }}
+      style={{
+        position: "relative",
+        width: "100%",
+        height: "100%",
+        overflow: "hidden",
+        ...style,
+      }}
     >
       <canvas
         ref={canvasRef}
@@ -496,49 +738,18 @@ export default function OrbitUniverse(props: OrbitUniverseProps) {
         onPointerUp={onPointerUp}
         onPointerLeave={onPointerLeave}
         onWheel={onWheel}
-        style={{ display: "block", width: "100%", height: "100%", touchAction: "none" }}
+        style={{
+          display: "block",
+          width: "100%",
+          height: "100%",
+          touchAction: "none",
+          cursor: stateRef.current.hoveredNode ? "pointer" : "default",
+        }}
         aria-label="Community universe"
         role="img"
       />
 
-      {tooltip ? (
-        <div
-          style={{
-            position: "absolute",
-            left: tooltip.x + 12,
-            top: tooltip.y + 12,
-            pointerEvents: "none",
-            padding: "8px 10px",
-            borderRadius: 10,
-            backdropFilter: "blur(10px)",
-            background: "rgba(0,0,0,0.55)",
-            color: "rgba(255,255,255,0.95)",
-            fontSize: 12,
-            lineHeight: "16px",
-            maxWidth: 260,
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-          }}
-        >
-          <div style={{ fontWeight: 600 }}>{tooltip.name}</div>
-          <div style={{ opacity: 0.8 }}>@{tooltip.handle}</div>
-        </div>
-      ) : null}
-
-      {nodes.length === 0 ? (
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            display: "grid",
-            placeItems: "center",
-            pointerEvents: "none",
-          }}
-        >
-          <div style={{ opacity: 0.65, fontSize: 14 }}>No communities yet</div>
-        </div>
-      ) : null}
+      {tooltipData && <Tooltip data={tooltipData} />}
     </div>
   );
 }
