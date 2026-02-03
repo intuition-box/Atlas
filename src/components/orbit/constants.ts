@@ -42,8 +42,8 @@ export const LEVEL_COLORS: Record<OrbitLevel, string> = {
 
 /** Node radius range based on reach score */
 export const NODE_RADIUS = {
-  MIN: 3,
-  MAX: 9,
+  MIN: 12,
+  MAX: 18,
 } as const;
 
 /* ────────────────────────────
@@ -73,17 +73,15 @@ export const SIMULATION = {
   /** Padding between nodes */
   COLLISION_PADDING: 2,
   /** Alpha decay rate */
-  ALPHA_DECAY: 0.02,
+  ALPHA_DECAY: 0.015,
   /** Velocity decay rate (higher = more damping, less vibration) */
-  VELOCITY_DECAY: 0.6,
+  VELOCITY_DECAY: 0.22,
   /** Link distance */
   LINK_DISTANCE: 80,
   /** Link strength multiplier */
   LINK_STRENGTH: 0.1,
   /** Perspective ratio for elliptical orbits (Y squash factor) */
   PERSPECTIVE_RATIO: 0.6,
-  /** Rotation speed for orbit animation (radians per second) - not used with physics */
-  ROTATION_SPEED: 0.08,
   /** Alpha target when dragging (lower = less disturbance to other nodes) */
   DRAG_ALPHA: 0.1,
 } as const;
@@ -110,4 +108,34 @@ export const INTERACTION = {
 export const NODE_SPACING = {
   /** Minimum gap between node edges (in pixels) */
   MIN_GAP: 4,
+} as const;
+
+/* ────────────────────────────
+   Orbital Motion (Angular Velocity)
+──────────────────────────── */
+
+/**
+ * Controls tangential (clockwise) orbital motion around the center.
+ * This is used by the custom D3 orbital force, not by CSS animation.
+ */
+export const ORBITAL_MOTION = {
+  /** Base angular velocity (radians per tick) */
+  ANGULAR_VELOCITY: 0.0025,
+
+  /**
+   * Speed multiplier per orbit level.
+   * Inner rings move faster to mimic gravitational dynamics.
+   */
+  RING_SPEED_MULTIPLIER: {
+    ADVOCATE: 1.25,
+    CONTRIBUTOR: 1.0,
+    PARTICIPANT: 0.85,
+    EXPLORER: 0.7,
+  },
+
+  /**
+   * How strongly orbital rotation is enforced.
+   * 0 = disabled, 1 = fully enforced.
+   */
+  ROTATION_STRENGTH: 0.9,
 } as const;

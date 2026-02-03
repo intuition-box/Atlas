@@ -15,6 +15,7 @@ import {
   NODE_RADIUS,
   SIMULATION,
   NODE_SPACING,
+  ORBITAL_MOTION,
 } from "./constants";
 
 /* ────────────────────────────
@@ -83,6 +84,49 @@ function forceElliptical<N extends SimulatedNode>(
 
       node.vx = (node.vx ?? 0) + dx * strength * alpha;
       node.vy = (node.vy ?? 0) + dy * strength * alpha;
+    }
+  }
+
+  force.initialize = (n: N[]) => {
+    nodes = n;
+  };
+
+  return force;
+}
+
+/* ────────────────────────────
+   Custom Orbital (Tangential) Force
+──────────────────────────── */
+
+function forceOrbitalRotation<N extends SimulatedNode>(
+  cx: number,
+  cy: number,
+  strength: number
+) {
+  let nodes: N[] = [];
+
+  function force(alpha: number) {
+    for (const node of nodes) {
+      if (node.fx != null || node.fy != null) continue;
+
+      const x = (node.x ?? cx) - cx;
+      const y = (node.y ?? cy) - cy;
+
+      const r = Math.sqrt(x * x + y * y);
+      if (r === 0) continue;
+
+      // Perpendicular (tangential) unit vector (clockwise)
+      const tx = y / r;
+      const ty = -x / r;
+
+      const ringMultiplier =
+        ORBITAL_MOTION.RING_SPEED_MULTIPLIER[node.orbitLevel] ?? 1;
+
+      const angularVelocity =
+        ORBITAL_MOTION.ANGULAR_VELOCITY * ringMultiplier;
+
+      node.vx = (node.vx ?? 0) + tx * angularVelocity * strength * alpha;
+      node.vy = (node.vy ?? 0) + ty * angularVelocity * strength * alpha;
     }
   }
 
@@ -339,6 +383,14 @@ export function useOrbitSimulation({
             SIMULATION.RADIAL_STRENGTH
           )
         );
+        simulationRef.current.force(
+          "orbit",
+          forceOrbitalRotation<SimulatedNode>(
+            cx,
+            cy,
+            ORBITAL_MOTION.ROTATION_STRENGTH
+          )
+        );
         simulationRef.current.alpha(0.3).restart();
       }
       return;
@@ -370,6 +422,14 @@ export function useOrbitSimulation({
         )
       )
       .force(
+        "orbit",
+        forceOrbitalRotation<SimulatedNode>(
+          cx,
+          cy,
+          ORBITAL_MOTION.ROTATION_STRENGTH
+        )
+      )
+      .force(
         "link",
         forceLink<SimulatedNode, SimulatedLink>(newLinks)
           .id((d) => d.id)
@@ -385,6 +445,7 @@ export function useOrbitSimulation({
       )
       .alphaDecay(SIMULATION.ALPHA_DECAY)
       .velocityDecay(SIMULATION.VELOCITY_DECAY);
+    sim.alphaTarget(0.12);
 
     // Update state on each tick
     sim.on("tick", () => {
@@ -434,19 +495,13 @@ export function useOrbitSimulation({
     node.fx = null;
     node.fy = null;
 
-    // Give the node a small push back toward its ring, then let simulation settle
-    sim.alphaTarget(0.15).restart();
-    setTimeout(() => {
-      sim.alphaTarget(0);
-    }, 300);
+    // Give the node a small push back toward its ring, keep simulation alive for orbiting
+    sim.alphaTarget(0.12).restart();
   }, []);
 
   // Reheat simulation
   const reheat = useCallback(() => {
-    simulationRef.current?.alphaTarget(0.3).restart();
-    setTimeout(() => {
-      simulationRef.current?.alphaTarget(0);
-    }, 500);
+    simulationRef.current?.alphaTarget(0.12).restart();
   }, []);
 
   return {

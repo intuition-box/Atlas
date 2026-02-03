@@ -219,6 +219,9 @@ export function OrbitCanvas({
     const dpr = window.devicePixelRatio || 1;
     canvas.width = width * dpr;
     canvas.height = height * dpr;
+
+    // Reset transform before applying DPR scaling
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.scale(dpr, dpr);
 
     const transform = transformRef.current;
