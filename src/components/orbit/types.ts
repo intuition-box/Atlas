@@ -60,6 +60,9 @@ export type OrbitCanvasProps = {
   centerName?: string;
   onNodeClick?: (node: SimulatedNode) => void;
   onNodeHover?: (node: SimulatedNode | null, position: { x: number; y: number }) => void;
+  onNodeDragStart?: (nodeId: string) => void;
+  onNodeDrag?: (nodeId: string, x: number, y: number) => void;
+  onNodeDragEnd?: (nodeId: string) => void;
   onHoverChange?: (isHovering: boolean) => void;
   className?: string;
 };

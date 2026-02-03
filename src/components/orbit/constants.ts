@@ -6,10 +6,10 @@ import type { OrbitLevel } from "./types";
 
 /** Radii for each orbit level (from center outward) */
 export const RING_RADII: Record<OrbitLevel, number> = {
-  ADVOCATE: 120,
-  CONTRIBUTOR: 200,
-  PARTICIPANT: 280,
-  EXPLORER: 360,
+  ADVOCATE: 240,
+  CONTRIBUTOR: 400,
+  PARTICIPANT: 560,
+  EXPLORER: 720,
 };
 
 /** Ring index for force simulation */
@@ -64,26 +64,28 @@ export const ANIMATION = {
 ──────────────────────────── */
 
 export const SIMULATION = {
-  /** Strength of radial/elliptical force (keeps nodes in their rings) */
-  RADIAL_STRENGTH: 1.2,
-  /** Strength of charge force (node repulsion) */
-  CHARGE_STRENGTH: -20,
+  /** Strength of radial/elliptical force (keeps nodes near their rings) */
+  RADIAL_STRENGTH: 0.3,
+  /** Strength of charge force (node repulsion - lower = closer together) */
+  CHARGE_STRENGTH: -8,
   /** Strength of collision force */
   COLLISION_STRENGTH: 0.8,
   /** Padding between nodes */
-  COLLISION_PADDING: 4,
+  COLLISION_PADDING: 2,
   /** Alpha decay rate */
   ALPHA_DECAY: 0.02,
-  /** Velocity decay rate */
-  VELOCITY_DECAY: 0.3,
+  /** Velocity decay rate (higher = more damping, less vibration) */
+  VELOCITY_DECAY: 0.6,
   /** Link distance */
   LINK_DISTANCE: 80,
   /** Link strength multiplier */
   LINK_STRENGTH: 0.1,
   /** Perspective ratio for elliptical orbits (Y squash factor) */
-  PERSPECTIVE_RATIO: 0.7,
-  /** Rotation speed for orbit animation (radians per second) */
+  PERSPECTIVE_RATIO: 0.6,
+  /** Rotation speed for orbit animation (radians per second) - not used with physics */
   ROTATION_SPEED: 0.08,
+  /** Alpha target when dragging (lower = less disturbance to other nodes) */
+  DRAG_ALPHA: 0.1,
 } as const;
 
 /* ────────────────────────────

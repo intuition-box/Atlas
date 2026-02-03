@@ -417,7 +417,8 @@ export function useOrbitSimulation({
       node.x = x;
       node.y = y;
 
-      sim.alphaTarget(0.3).restart();
+      // Use low alpha to minimize disturbance to other nodes
+      sim.alphaTarget(SIMULATION.DRAG_ALPHA).restart();
     },
     []
   );
@@ -432,7 +433,12 @@ export function useOrbitSimulation({
 
     node.fx = null;
     node.fy = null;
-    sim.alphaTarget(0);
+
+    // Give the node a small push back toward its ring, then let simulation settle
+    sim.alphaTarget(0.15).restart();
+    setTimeout(() => {
+      sim.alphaTarget(0);
+    }, 300);
   }, []);
 
   // Reheat simulation

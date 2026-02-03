@@ -182,12 +182,43 @@ export function OrbitView({
   }, []);
 
   // Initialize simulation
-  const { nodes, links: simulatedLinks } = useOrbitSimulation({
+  const { nodes, links: simulatedLinks, updateNodePosition, unpinNode } = useOrbitSimulation({
     members,
     links,
     width: containerSize.width,
     height: containerSize.height,
   });
+
+  // Track if we're actually dragging (moved more than a few pixels)
+  const isDraggingRef = useRef(false);
+
+  // Handle node drag
+  const handleNodeDragStart = useCallback(
+    (_nodeId: string) => {
+      // Don't do anything on start - wait until actual drag movement
+      isDraggingRef.current = false;
+    },
+    []
+  );
+
+  const handleNodeDrag = useCallback(
+    (nodeId: string, x: number, y: number) => {
+      isDraggingRef.current = true;
+      updateNodePosition(nodeId, x, y, true);
+    },
+    [updateNodePosition]
+  );
+
+  const handleNodeDragEnd = useCallback(
+    (nodeId: string) => {
+      // Only unpin if we actually dragged
+      if (isDraggingRef.current) {
+        unpinNode(nodeId);
+      }
+      isDraggingRef.current = false;
+    },
+    [unpinNode]
+  );
 
   // Handle node hover
   const handleNodeHover = useCallback(
@@ -227,6 +258,9 @@ export function OrbitView({
           centerName={centerName}
           onNodeClick={handleNodeClick}
           onNodeHover={handleNodeHover}
+          onNodeDragStart={handleNodeDragStart}
+          onNodeDrag={handleNodeDrag}
+          onNodeDragEnd={handleNodeDragEnd}
         />
       ) : (
         <Spinner />
