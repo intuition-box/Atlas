@@ -118,11 +118,8 @@ function forceOrbitalRotation<N extends SimulatedNode>(
   strength: number
 ) {
   let nodes: N[] = [];
-  let paused = false;
 
   function force(_alpha: number) {
-    if (paused) return;
-
     for (const node of nodes) {
       if (node.fx != null || node.fy != null) continue;
 
@@ -152,12 +149,6 @@ function forceOrbitalRotation<N extends SimulatedNode>(
 
   force.initialize = (n: N[]) => {
     nodes = n;
-  };
-
-  force.paused = (value?: boolean) => {
-    if (value === undefined) return paused;
-    paused = value;
-    return force;
   };
 
   return force;
@@ -530,14 +521,17 @@ export function useOrbitSimulation({
     simulationRef.current?.alphaTarget(0.12).restart();
   }, []);
 
-  // Pause/resume orbital rotation
+  // Pause/resume orbital rotation (stops entire simulation to prevent jiggle)
   const setRotationPaused = useCallback((paused: boolean) => {
     const sim = simulationRef.current;
     if (!sim) return;
 
-    const orbitForce = sim.force("orbit") as ReturnType<typeof forceOrbitalRotation> | null;
-    if (orbitForce && typeof orbitForce.paused === "function") {
-      orbitForce.paused(paused);
+    if (paused) {
+      // Stop the simulation entirely - this freezes all nodes in place
+      sim.stop();
+    } else {
+      // Resume simulation with orbiting
+      sim.alphaTarget(0.12).restart();
     }
   }, []);
 
