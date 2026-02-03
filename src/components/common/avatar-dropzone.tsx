@@ -2,15 +2,15 @@
 
 import * as React from "react"
 
-import { apiPost } from "@/lib/api-client"
-import { parseApiClientError, parseApiProblem } from "@/lib/api-errors"
+import { apiPost } from "@/lib/api/client"
+import { parseApiError } from "@/lib/api/errors"
 import { cn } from "@/lib/utils"
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { UserIcon } from "@/components/ui/icons"
 
 type SignedUpload = {
-  uploadUrl: string
+  uploadUrl?: string
   publicUrl: string
   headers?: Record<string, string>
 }
@@ -23,10 +23,16 @@ export type AvatarDropzoneProps = {
   className?: string
   accept?: string
   maxSizeBytes?: number
+  /** Upload policy/type understood by the server (keeps this component generic). */
+  uploadType?: string
   /** Called with the final public URL after upload (or null to clear). */
   onChange: (url: string | null) => void
   /** Optional hook for custom signing logic (e.g. different upload types). */
   sign?: (file: File) => Promise<SignedUpload>
+  /** Upload via API route (proxy) or direct PUT to presigned URL. Defaults to proxy. */
+  uploadMode?: "proxy" | "direct"
+  /** Optional hook for custom proxy upload logic. */
+  upload?: (file: File) => Promise<{ publicUrl: string }>
   onError?: (message: string) => void
 }
 
@@ -34,24 +40,87 @@ function defaultAccept() {
   return "image/*"
 }
 
-async function defaultSign(file: File): Promise<SignedUpload> {
+async function defaultSign(file: File, uploadType: string): Promise<SignedUpload> {
   // Best-effort payload: adjust in caller via `sign` prop if your route expects different fields.
   const res = await apiPost<SignedUpload>("/api/upload/sign", {
     filename: file.name,
     contentType: file.type || "application/octet-stream",
     size: file.size,
-    kind: "avatar",
+    type: uploadType,
   })
 
   if (res.ok) return res.value
 
-  if (res.error && typeof res.error === "object" && "status" in res.error) {
-    const parsed = parseApiProblem(res.error)
-    throw new Error(parsed.formError || "Couldn’t prepare upload.")
+  const parsed = parseApiError(res.error)
+  throw new Error(parsed.formError || "Couldn't prepare upload.")
+}
+
+async function defaultUploadViaApi(file: File, uploadType: string): Promise<{ publicUrl: string }> {
+  const fd = new FormData()
+  fd.set("file", file)
+  fd.set("filename", file.name)
+  fd.set("contentType", file.type || "application/octet-stream")
+  fd.set("size", String(file.size))
+  fd.set("type", uploadType)
+
+  const resp = await fetch("/api/upload/sign", {
+    method: "POST",
+    body: fd,
+  })
+
+  let json: unknown = null
+  try {
+    json = await resp.json()
+  } catch {
+    // ignore
   }
 
-  const parsed = parseApiClientError(res.error)
-  throw new Error(parsed.formError || "Couldn’t prepare upload.")
+  // We support multiple response shapes because `/api/upload/sign` can either:
+  // 1) proxy-upload the file server-side and return a publicUrl, OR
+  // 2) return a presigned uploadUrl that the client must PUT to.
+  type ApiResponse = {
+    ok?: boolean
+    data?: Record<string, unknown>
+    error?: unknown
+    publicUrl?: string
+    url?: string
+    public_url?: string
+    uploadUrl?: string
+    headers?: Record<string, string>
+    upload?: {
+      publicUrl?: string
+      url?: string
+      public_url?: string
+      uploadUrl?: string
+      headers?: Record<string, string>
+    }
+  }
+
+  const anyJson = (json && typeof json === "object" ? json : null) as ApiResponse | null
+
+  const payload = unwrapUploadPayload(anyJson)
+  const { publicUrl, uploadUrl, headers } = extractUploadFields(payload)
+
+  // If the route returned a presigned uploadUrl, we complete the PUT here.
+  // If the route already uploaded the file server-side, it should omit uploadUrl.
+  if (resp.ok) {
+    if (uploadUrl) {
+      await putFile(uploadUrl, file, headers)
+    }
+
+    if (publicUrl) {
+      return { publicUrl }
+    }
+
+    throw new Error("Upload completed but public URL is missing.")
+  }
+
+  if (anyJson && anyJson.ok === false && anyJson.error) {
+    const parsed = parseApiError(anyJson.error)
+    throw new Error(parsed.formError || "Couldn't upload.")
+  }
+
+  throw new Error("Couldn't upload.")
 }
 
 async function putFile(uploadUrl: string, file: File, extraHeaders?: Record<string, string>) {
@@ -71,6 +140,40 @@ async function putFile(uploadUrl: string, file: File, extraHeaders?: Record<stri
   }
 }
 
+function firstString(...values: unknown[]) {
+  for (const v of values) {
+    if (typeof v === "string" && v.length > 0) return v
+  }
+  return undefined
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value)
+}
+
+function unwrapUploadPayload(anyJson: { ok?: boolean; data?: Record<string, unknown> } | null) {
+  if (!anyJson) return null
+  if (anyJson.ok === true && isRecord(anyJson.data)) return anyJson.data
+  return anyJson
+}
+
+function extractUploadFields(payload: unknown): {
+  publicUrl?: string
+  uploadUrl?: string
+  headers?: Record<string, string>
+} {
+  const p = isRecord(payload) ? payload : null
+  const u = p && isRecord(p.upload) ? (p.upload as Record<string, unknown>) : null
+
+  const publicUrl = firstString(p?.publicUrl, p?.url, p?.public_url, u?.publicUrl, u?.url, u?.public_url)
+  const uploadUrl = firstString(p?.uploadUrl, u?.uploadUrl)
+
+  const headers = (p && isRecord(p.headers) ? (p.headers as Record<string, string>) : undefined) ??
+    (u && isRecord(u.headers) ? (u.headers as Record<string, string>) : undefined)
+
+  return { publicUrl, uploadUrl, headers }
+}
+
 function pickFirstFile(dt: DataTransfer): File | null {
   if (dt.files && dt.files.length > 0) return dt.files[0] ?? null
   return null
@@ -88,19 +191,40 @@ function AvatarDropzone({
   className,
   accept,
   maxSizeBytes = 10 * 1024 * 1024,
+  uploadType = "avatar",
   onChange,
   sign,
+  uploadMode = "proxy",
+  upload: uploadOverride,
   onError,
 }: AvatarDropzoneProps) {
   const inputRef = React.useRef<HTMLInputElement | null>(null)
+  const dragCounterRef = React.useRef(0)
 
   const [isDragActive, setIsDragActive] = React.useState(false)
+  const [isHovering, setIsHovering] = React.useState(false)
   const [isUploading, setIsUploading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
+
+  const normalizedSrc = React.useMemo(() => {
+    const s = typeof value === "string" ? value.trim() : ""
+    return s.length > 0 ? s : undefined
+  }, [value])
+
+  // Clear error when value changes (successful upload)
+  React.useEffect(() => {
+    if (normalizedSrc) {
+      setError(null)
+    }
+  }, [normalizedSrc])
 
   function reportError(message: string) {
     setError(message)
     onError?.(message)
+  }
+
+  function clearError() {
+    setError(null)
   }
 
   async function upload(file: File) {
@@ -118,8 +242,19 @@ function AvatarDropzone({
 
     setIsUploading(true)
     try {
-      const signer = sign ?? defaultSign
-      const signed = await signer(file)
+      if (uploadMode === "proxy") {
+        const out = uploadOverride
+          ? await uploadOverride(file)
+          : await defaultUploadViaApi(file, uploadType)
+        onChange(out.publicUrl)
+        return
+      }
+
+      // direct (legacy): sign then PUT to the presigned URL
+      const signed = sign ? await sign(file) : await defaultSign(file, uploadType)
+      if (!signed.uploadUrl) {
+        throw new Error("Upload URL missing.")
+      }
       await putFile(signed.uploadUrl, file, signed.headers)
       onChange(signed.publicUrl)
     } catch (e) {
@@ -140,33 +275,46 @@ function AvatarDropzone({
       e.preventDefault()
       openPicker()
     }
+    // Allow Escape to clear errors
+    if (e.key === "Escape" && error) {
+      clearError()
+    }
   }
 
   function onDragEnter(e: React.DragEvent) {
     if (disabled || isUploading) return
     e.preventDefault()
     e.stopPropagation()
-    setIsDragActive(true)
+
+    dragCounterRef.current++
+    if (dragCounterRef.current === 1) {
+      setIsDragActive(true)
+    }
   }
 
   function onDragOver(e: React.DragEvent) {
     if (disabled || isUploading) return
     e.preventDefault()
     e.stopPropagation()
-    setIsDragActive(true)
   }
 
   function onDragLeave(e: React.DragEvent) {
     if (disabled || isUploading) return
     e.preventDefault()
     e.stopPropagation()
-    setIsDragActive(false)
+
+    dragCounterRef.current--
+    if (dragCounterRef.current === 0) {
+      setIsDragActive(false)
+    }
   }
 
   function onDrop(e: React.DragEvent) {
     if (disabled || isUploading) return
     e.preventDefault()
     e.stopPropagation()
+
+    dragCounterRef.current = 0
     setIsDragActive(false)
 
     const file = pickFirstFile(e.dataTransfer)
@@ -180,33 +328,47 @@ function AvatarDropzone({
         data-slot="avatar-dropzone"
         role="button"
         tabIndex={disabled ? -1 : 0}
+        aria-label={`Upload ${alt}`}
         aria-disabled={disabled || isUploading}
+        aria-busy={isUploading}
         onClick={openPicker}
         onKeyDown={onKeyDown}
+        onMouseEnter={() => !disabled && !isUploading && setIsHovering(true)}
+        onMouseLeave={() => setIsHovering(false)}
         onDragEnter={onDragEnter}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
         className={cn(
-          "relative inline-block rounded-2xl outline-none",
-          (disabled || isUploading) && "opacity-70",
+          "relative inline-block rounded-2xl outline-none transition-transform",
+          !disabled && !isUploading && "cursor-pointer hover:scale-105",
+          (disabled || isUploading) && "opacity-70 cursor-not-allowed",
         )}
       >
         <Avatar className="size-16 rounded-2xl">
-          <AvatarImage src={value ?? ""} alt={alt} />
-          <AvatarFallback><UserIcon /></AvatarFallback>
+          <AvatarImage
+            key={normalizedSrc ?? "empty"}
+            src={normalizedSrc}
+            alt={alt}
+            // Some OAuth avatar hosts (e.g. Google) can be finicky with referrers.
+            referrerPolicy="no-referrer"
+            crossOrigin="anonymous"
+          />
+          <AvatarFallback>
+            {fallback ? <span className="text-sm font-medium">{fallback}</span> : <UserIcon />}
+          </AvatarFallback>
         </Avatar>
 
         <div
           data-slot="avatar-dropzone-overlay"
           className={cn(
             "pointer-events-none absolute inset-0 grid place-items-center rounded-2xl",
-            "bg-background/70 text-xs font-medium text-foreground/80",
+            "bg-background/80 text-xs font-medium text-foreground/90",
             "opacity-0 transition-opacity",
-            (isDragActive || isUploading) && "opacity-100",
+            (isDragActive || isUploading || (isHovering && !disabled)) && "opacity-100",
           )}
         >
-          {isUploading ? "Uploading…" : "Drop to replace"}
+          {isUploading ? "Uploading…" : isDragActive ? "Drop to replace" : "Click to change"}
         </div>
 
         <input
@@ -214,6 +376,7 @@ function AvatarDropzone({
           type="file"
           accept={accept ?? defaultAccept()}
           className="sr-only"
+          aria-label={`Choose ${alt} file`}
           onChange={(e) => {
             const file = e.target.files?.[0] ?? null
             // Allow selecting the same file again later.
@@ -229,9 +392,19 @@ function AvatarDropzone({
       </p>
 
       {error ? (
-        <p data-slot="avatar-dropzone-error" className="text-xs text-destructive">
-          {error}
-        </p>
+        <div className="flex items-start justify-between gap-2">
+          <p data-slot="avatar-dropzone-error" className="text-xs text-destructive flex-1">
+            {error}
+          </p>
+          <button
+            type="button"
+            onClick={clearError}
+            className="text-muted-foreground hover:text-foreground text-xs underline"
+            aria-label="Dismiss error"
+          >
+            Dismiss
+          </button>
+        </div>
       ) : null}
     </div>
   )
