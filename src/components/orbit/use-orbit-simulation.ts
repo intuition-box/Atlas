@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import {
   forceSimulation,
   forceLink,
-  forceManyBody,
   forceCollide,
   type Simulation,
 } from "d3-force";
@@ -141,21 +140,38 @@ function forceOrbitalRotation<N extends SimulatedNode>(
       const r = Math.sqrt(x * x + y * y);
       if (r === 0) continue;
 
-      // Perpendicular (tangential) unit vector (clockwise)
-      // For clockwise rotation: tangent = (-y, x) normalized
-      const tx = -y / r;
-      const ty = x / r;
+      // Radial unit vector (outward from center)
+      const rx = x / r;
+      const ry = y / r;
+
+      // Tangential unit vector (clockwise: perpendicular to radial)
+      const tx = -ry;
+      const ty = rx;
+
+      // Current velocity
+      let vx = node.vx ?? 0;
+      let vy = node.vy ?? 0;
+
+      // Dampen radial velocity (prevents bouncing from collisions)
+      // but don't eliminate it completely - allows some organic variation
+      const vr = vx * rx + vy * ry; // radial component
+      const radialDamping = 0.8; // Remove 80% of radial velocity each tick
+      vx -= vr * rx * radialDamping;
+      vy -= vr * ry * radialDamping;
 
       const ringMultiplier =
         ORBITAL_MOTION.RING_SPEED_MULTIPLIER[node.orbitLevel] ?? 1;
 
-      const angularVelocity =
-        ORBITAL_MOTION.ANGULAR_VELOCITY * ringMultiplier * speedMult;
+      const orbitalImpulse =
+        ORBITAL_MOTION.ANGULAR_VELOCITY * ringMultiplier * speedMult * strength;
 
-      // Apply constant tangential velocity (not scaled by alpha)
-      // This ensures continuous rotation regardless of simulation cooling
-      node.vx = (node.vx ?? 0) + tx * angularVelocity * strength;
-      node.vy = (node.vy ?? 0) + ty * angularVelocity * strength;
+      // Add orbital impulse in tangent direction
+      // velocityDecay in simulation will naturally limit accumulation
+      vx += tx * orbitalImpulse;
+      vy += ty * orbitalImpulse;
+
+      node.vx = vx;
+      node.vy = vy;
     }
   };
 
@@ -480,7 +496,6 @@ export function useOrbitSimulation({
           .distance(SIMULATION.LINK_DISTANCE)
           .strength((l) => SIMULATION.LINK_STRENGTH * l.weight)
       )
-      .force("charge", forceManyBody().strength(SIMULATION.CHARGE_STRENGTH))
       .force(
         "collide",
         forceCollide<SimulatedNode>()
