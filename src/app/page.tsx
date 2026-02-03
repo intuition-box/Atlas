@@ -8,6 +8,7 @@ import { OrbitUniverse, type OrbitCommunity, type OrbitLink } from "@/components
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from "@/components/ui/empty";
 import { apiGet } from "@/lib/api/client";
 import { ROUTES, communityPath } from "@/lib/routes";
+import { Spinner } from "@/components/ui/spinner";
 
 type OrbitUniverseResponse = {
   communities: OrbitCommunity[];
@@ -72,7 +73,7 @@ export default function Home() {
 
       {loading ? (
         <div className="pointer-events-none absolute left-6 top-24 z-10 rounded-xl border border-border bg-background/80 p-3 text-sm text-foreground/70 backdrop-blur">
-          Loading communities…
+          <Spinner />
         </div>
       ) : null}
 

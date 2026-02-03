@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
 import { UsersIcon } from "@/components/ui/icons"
+import { Spinner } from "@/components/ui/spinner"
 
 // === TYPES ===
 
@@ -529,7 +530,7 @@ export default function CommunityApplyPage() {
               </Button>
             }
           />
-          <InfoBox>Loading…</InfoBox>
+          <InfoBox><Spinner /></InfoBox>
         </>
       ) : !community ? (
         <>

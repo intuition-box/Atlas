@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/combobox"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { UsersIcon } from "@/components/ui/icons"
+import { Spinner } from "@/components/ui/spinner"
 
 // === TYPES ===
 
@@ -367,7 +368,7 @@ function ApplicationsTable({
           {loading ? (
             <TableRow>
               <TableCell colSpan={5} className="py-10 text-center text-sm text-muted-foreground">
-                Loading…
+                <Spinner />
               </TableCell>
             </TableRow>
           ) : applications.length > 0 ? (
