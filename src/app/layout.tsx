@@ -1,18 +1,24 @@
 import type { Metadata, Viewport } from "next";
-import Link from "next/link";
-import { Google_Sans_Code, Google_Sans_Flex } from "next/font/google";
-import "./globals.css";
-import UserMenu from "@/components/layout/user-menu";
-import Logo from "@/components/brand/logo";
+import localFont from "next/font/local";
+import { IBM_Plex_Mono } from "next/font/google";
 
-const sans = Google_Sans_Flex({
-  variable: '--font-sans',
-  subsets: ["latin"],
+import { Providers } from "@/components/providers";
+import { Navigation } from "@/components/layout/navigation";
+
+import "./globals.css";
+
+const sans = localFont({
+  src: "../fonts/Supreme-Variable.woff2",
+  variable: "--font-sans",
+  style: "normal",
+  weight: "100 800",
+  display: "swap",
 });
 
-const mono = Google_Sans_Code({
+const mono = IBM_Plex_Mono({
   variable: '--font-mono',
   subsets: ["latin"],
+  weight: "500"
 });
 
 export const metadata: Metadata = {
@@ -46,16 +52,13 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body
-        className={`${sans.variable} ${mono.variable} dark h-full min-h-dvh antialiased selection:bg-foreground/30`}
-      >
-        <header className="group fixed z-50 flex flex-col p-6 text-sm text-white/60">
-          <Logo />
-          <UserMenu />
-        </header>
-        <main className="mx-auto max-w-5xl flex-col px-4 flex flex-1 items-center justify-center">
-          {children}
-        </main>
+      <body className={`${sans.variable} ${mono.variable} dark`}>
+        <Providers>
+          <Navigation />
+          <main>
+            {children}
+          </main>
+        </Providers>
       </body>
     </html>
   );
