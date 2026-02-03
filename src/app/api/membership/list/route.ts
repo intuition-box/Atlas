@@ -7,10 +7,9 @@ import {
   Prisma,
 } from "@prisma/client"
 import type { NextRequest } from "next/server"
-import { NextResponse } from "next/server"
 import { z } from "zod"
 
-import { errEnvelope, okEnvelope } from "@/lib/api/shapes"
+import { errJson, okJson } from "@/lib/api/server"
 import { requireAuth } from "@/lib/auth/policy"
 import { db } from "@/lib/db/client"
 
@@ -131,22 +130,19 @@ export async function GET(req: NextRequest) {
 
   const parsed = ListMembershipQuerySchema.safeParse(raw)
   if (!parsed.success) {
-    return NextResponse.json(
-      errEnvelope({
-        code: "INVALID_REQUEST",
-        message: "Invalid request",
-        status: 400,
-        issues: zodIssuesToApiIssues(parsed.error),
-      }),
-      { status: 400 },
-    )
+    return errJson({
+      code: "INVALID_REQUEST",
+      message: "Invalid request",
+      status: 400,
+      issues: zodIssuesToApiIssues(parsed.error),
+    })
   }
 
   const q = parsed.data as unknown as Query
 
   const community = await resolveCommunityByHandle(q.handle)
   if (!community) {
-    return NextResponse.json(errEnvelope({ code: "NOT_FOUND", message: "Not found", status: 404 }), { status: 404 })
+    return errJson({ code: "NOT_FOUND", message: "Not found", status: 404 })
   }
 
   // Privacy gate:
@@ -162,10 +158,8 @@ export async function GET(req: NextRequest) {
     }
 
     if (!userId) {
-      // Don’t leak private communities.
-      return NextResponse.json(errEnvelope({ code: "NOT_FOUND", message: "Not found", status: 404 }), {
-        status: 404,
-      })
+      // Don't leak private communities.
+      return errJson({ code: "NOT_FOUND", message: "Not found", status: 404 })
     }
 
     const viewer = await db.membership.findUnique({
@@ -174,9 +168,7 @@ export async function GET(req: NextRequest) {
     })
 
     if (!viewer || viewer.status !== MembershipStatus.APPROVED) {
-      return NextResponse.json(errEnvelope({ code: "NOT_FOUND", message: "Not found", status: 404 }), {
-        status: 404,
-      })
+      return errJson({ code: "NOT_FOUND", message: "Not found", status: 404 })
     }
   }
 
@@ -335,5 +327,5 @@ export async function GET(req: NextRequest) {
     nextCursor,
   }
 
-  return NextResponse.json(okEnvelope(payload))
+  return okJson<ListMembershipOk>(payload)
 }
