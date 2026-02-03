@@ -1,8 +1,13 @@
 import Link from "next/link";
+import { cn } from "@/lib/utils";
 
-export default async function Logo() {
+type LogoProps = {
+  className?: string;
+};
+
+export default function Logo({ className }: LogoProps) {
   return (
-    <Link href="/" className="tracking-tight hover:text-white/90">
+    <Link href="/" className={cn("tracking-tight hover:text-white/90", className)}>
       <svg
         width="20"
         height="20"
