@@ -98,7 +98,7 @@ export function NavigationController({
 
       {/* Top Right - Global Controls */}
       <div className="absolute top-4 right-4 sm:top-6 sm:right-6 pointer-events-auto">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
           {/* Attestation Queue (cart-like) */}
           {showControls && <AttestationQueueButton />}
 
@@ -144,9 +144,9 @@ export function NavigationController({
       </div>
 
       {/* Bottom Left - Community Controls (horizontal) */}
-      {showControls && (controls.bottomLeft?.length > 0 || controls.bottomRight?.length > 0) && (
+      {showControls && ((controls.bottomLeft?.length ?? 0) > 0 || (controls.bottomRight?.length ?? 0) > 0) && (
         <div className="absolute bottom-4 left-4 sm:bottom-6 sm:left-6 pointer-events-auto">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
             {controls.bottomLeft?.map((item, idx) => (
               <NavigationButton key={`bottomLeft-${idx}`} {...item} />
             ))}
