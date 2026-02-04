@@ -26,12 +26,12 @@ import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { PageHeader } from "@/components/common/page-header"
 import { UsersIcon } from "@/components/ui/icons"
+import { Spinner } from "@/components/ui/spinner"
 
 // === CONSTANTS ===
 
 const PAGE_SIZE = 50
 const DEBOUNCE_DELAY = 300
-const LOADING_SKELETON_COUNT = 9
 
 // === TYPES ===
 
@@ -92,64 +92,95 @@ type FilterState = {
   tools: string[]
   headline: string
   bio: string
-  linkDomain: string
-  loveMin: string
-  loveMax: string
-  reachMin: string
-  reachMax: string
-  gravityMin: string
-  gravityMax: string
 }
 
 type QueryParams = {
-  communityHandle: string
+  handle: string
   q?: string
   role?: string
-  country?: string
+  location?: string
   skills?: string
   tools?: string
   headline?: string
   bio?: string
-  linkDomain?: string
-  loveMin?: number
-  loveMax?: number
-  reachMin?: number
-  reachMax?: number
-  gravityMin?: number
-  gravityMax?: number
   cursor?: string
   limit: number
 }
 
 // === UTILITY FUNCTIONS ===
 
-function normalizeMembersPayload(raw: unknown, fallbackHandle: string): MembersResponse {
-  const r = raw as Record<string, unknown> | null
+type ApiMemberItem = {
+  membership: {
+    id: string
+    role: MemberRole
+    status: string
+    orbitLevel: string | null
+    loveScore: number | null
+    reachScore: number | null
+    gravityScore: number | null
+    approvedAt: string | null
+    lastActiveAt: string | null
+  }
+  user: {
+    id: string
+    handle: string | null
+    name: string | null
+    image: string | null
+    avatarUrl: string | null
+    headline: string | null
+    bio: string | null
+    location: string | null
+    skills: string[]
+    tools: string[]
+    links: string[]
+  }
+}
 
-  const communityRaw = (r && (r["community"] as Record<string, unknown> | null)) || null
+type ApiMembersResponse = {
+  items: ApiMemberItem[]
+  nextCursor: string | null
+}
+
+function normalizeMembersPayload(raw: unknown, fallbackHandle: string): MembersResponse {
+  const r = raw as ApiMembersResponse | null
+
+  // The API doesn't return community info, so we create a placeholder
   const community: CommunityInfo = {
-    id: String((communityRaw && communityRaw["id"]) || ""),
-    handle: String((communityRaw && communityRaw["handle"]) || fallbackHandle),
-    name: String((communityRaw && communityRaw["name"]) || "Community"),
-    avatarUrl: (communityRaw && (communityRaw["avatarUrl"] as string | null | undefined)) || null,
+    id: "",
+    handle: fallbackHandle,
+    name: "Community",
+    avatarUrl: null,
   }
 
-  const pageRaw = (r && (r["page"] as Record<string, unknown> | null)) || null
-  const nextCursorFromPage = pageRaw ? (pageRaw["nextCursor"] as string | null | undefined) : null
-  const nextCursor =
-    (typeof nextCursorFromPage === "string" ? nextCursorFromPage : null) ||
-    (typeof (r && r["nextCursor"]) === "string" ? (r!["nextCursor"] as string) : null) ||
-    null
+  const nextCursor = r?.nextCursor ?? null
+  const items = r?.items ?? []
 
-  const membersRaw =
-    (r && (r["members"] as unknown)) ??
-    (r && (r["items"] as unknown)) ??
-    (r && (r["memberships"] as unknown))
+  // Transform API response to page's expected format
+  const members: CommunityMember[] = items.map((item) => ({
+    membershipId: item.membership.id,
+    role: item.membership.role,
+    status: item.membership.status,
+    approvedAt: item.membership.approvedAt,
+    lastActiveAt: item.membership.lastActiveAt,
+    user: {
+      id: item.user.id,
+      handle: item.user.handle ?? "",
+      name: item.user.name,
+      headline: item.user.headline,
+      bio: item.user.bio,
+      location: item.user.location,
+      image: item.user.avatarUrl ?? item.user.image,
+      links: item.user.links,
+      skills: item.user.skills,
+      tools: item.user.tools,
+      orbitLevel: item.membership.orbitLevel,
+      love: item.membership.loveScore,
+      reach: item.membership.reachScore,
+      gravity: item.membership.gravityScore,
+    },
+  }))
 
-  const members: CommunityMember[] = Array.isArray(membersRaw) ? (membersRaw as CommunityMember[]) : []
-  const facets = (r && (r["facets"] as MembersResponse["facets"])) || undefined
-
-  return { community, page: { nextCursor }, members, facets }
+  return { community, page: { nextCursor }, members, facets: undefined }
 }
 
 function mergeMembersUnique(prev: CommunityMember[], next: CommunityMember[]): CommunityMember[] {
@@ -187,14 +218,6 @@ function uniqStrings(values: string[]): string[] {
   return out
 }
 
-function clampInt(v: string, min: number, max: number): number | null {
-  const n = Number(v)
-  if (!Number.isFinite(n)) return null
-  const i = Math.trunc(n)
-  if (i < min || i > max) return null
-  return i
-}
-
 function optionalString(value: string | undefined | null): string | undefined {
   const v = (value ?? "").trim()
   return v || undefined
@@ -211,29 +234,15 @@ function formatCompact(n: number | null | undefined): string {
 }
 
 function buildQueryParams(communityHandle: string, filters: FilterState, cursor: string | null): QueryParams {
-  const loveMinN = filters.loveMin.trim() ? clampInt(filters.loveMin, 0, 1_000_000) : null
-  const loveMaxN = filters.loveMax.trim() ? clampInt(filters.loveMax, 0, 1_000_000) : null
-  const reachMinN = filters.reachMin.trim() ? clampInt(filters.reachMin, 0, 1_000_000) : null
-  const reachMaxN = filters.reachMax.trim() ? clampInt(filters.reachMax, 0, 1_000_000) : null
-  const gravityMinN = filters.gravityMin.trim() ? clampInt(filters.gravityMin, 0, 1_000_000_000) : null
-  const gravityMaxN = filters.gravityMax.trim() ? clampInt(filters.gravityMax, 0, 1_000_000_000) : null
-
   return {
-    communityHandle,
+    handle: communityHandle,
     q: optionalString(filters.q),
     role: optionalString(filters.role),
-    country: optionalString(filters.country),
+    location: optionalString(filters.country),
     skills: asCsv(filters.skills),
     tools: asCsv(filters.tools),
     headline: optionalString(filters.headline),
     bio: optionalString(filters.bio),
-    linkDomain: optionalString(filters.linkDomain),
-    loveMin: loveMinN ?? undefined,
-    loveMax: loveMaxN ?? undefined,
-    reachMin: reachMinN ?? undefined,
-    reachMax: reachMaxN ?? undefined,
-    gravityMin: gravityMinN ?? undefined,
-    gravityMax: gravityMaxN ?? undefined,
     cursor: cursor ?? undefined,
     limit: PAGE_SIZE,
   }
@@ -247,14 +256,7 @@ function hasActiveFilters(filters: FilterState): boolean {
     filters.skills.length ||
     filters.tools.length ||
     filters.headline ||
-    filters.bio ||
-    filters.linkDomain ||
-    filters.loveMin ||
-    filters.loveMax ||
-    filters.reachMin ||
-    filters.reachMax ||
-    filters.gravityMin ||
-    filters.gravityMax
+    filters.bio
   )
 }
 
@@ -282,7 +284,6 @@ function useMembersData(communityHandle: string, filters: FilterState, cursor: s
   const debouncedQ = useDebouncedValue(filters.q, DEBOUNCE_DELAY)
   const debouncedHeadline = useDebouncedValue(filters.headline, DEBOUNCE_DELAY)
   const debouncedBio = useDebouncedValue(filters.bio, DEBOUNCE_DELAY)
-  const debouncedLinkDomain = useDebouncedValue(filters.linkDomain, DEBOUNCE_DELAY)
 
   const queryObject = React.useMemo(() => {
     return buildQueryParams(
@@ -292,7 +293,6 @@ function useMembersData(communityHandle: string, filters: FilterState, cursor: s
         q: debouncedQ,
         headline: debouncedHeadline,
         bio: debouncedBio,
-        linkDomain: debouncedLinkDomain,
       },
       cursor
     )
@@ -305,13 +305,6 @@ function useMembersData(communityHandle: string, filters: FilterState, cursor: s
     filters.tools,
     debouncedHeadline,
     debouncedBio,
-    debouncedLinkDomain,
-    filters.loveMin,
-    filters.loveMax,
-    filters.reachMin,
-    filters.reachMax,
-    filters.gravityMin,
-    filters.gravityMax,
     cursor,
   ])
 
@@ -560,22 +553,10 @@ function MemberRow({ member }: { member: CommunityMember }) {
   )
 }
 
-function LoadingSkeleton() {
+function LoadingState() {
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true">
-      {Array.from({ length: LOADING_SKELETON_COUNT }).map((_, i) => (
-        <div key={i} className="rounded-2xl border border-border/60 bg-card/30 p-4">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-full bg-muted-foreground/10" />
-            <div className="flex-1">
-              <div className="h-4 w-40 rounded bg-muted-foreground/10" />
-              <div className="mt-2 h-3 w-28 rounded bg-muted-foreground/10" />
-            </div>
-          </div>
-          <div className="mt-4 h-3 w-full rounded bg-muted-foreground/10" />
-          <div className="mt-2 h-3 w-5/6 rounded bg-muted-foreground/10" />
-        </div>
-      ))}
+    <div className="flex items-center justify-center py-20" aria-busy="true">
+      <Spinner className="size-8 text-muted-foreground" />
     </div>
   )
 }
@@ -721,16 +702,6 @@ function FiltersPanel({
           />
         </div>
 
-        <div className="flex flex-col gap-2">
-          <div className="text-xs font-medium text-foreground/70">Link domain</div>
-          <Input
-            placeholder="e.g. github.com"
-            value={filters.linkDomain}
-            onChange={(e) => onFiltersChange({ linkDomain: e.target.value })}
-            aria-label="Filter by link domain"
-          />
-        </div>
-
         <div className="grid gap-4 lg:col-span-3 lg:grid-cols-2">
           <div className="flex flex-col gap-2">
             <div className="text-xs font-medium text-foreground/70">Skills</div>
@@ -789,62 +760,6 @@ function FiltersPanel({
                 ))}
               </div>
             )}
-          </div>
-        </div>
-
-        <div className="grid gap-3 lg:col-span-3 lg:grid-cols-3">
-          <div className="flex flex-col gap-2">
-            <div className="text-xs font-medium text-foreground/70">Love range</div>
-            <div className="grid grid-cols-2 gap-2">
-              <Input
-                placeholder="Min"
-                value={filters.loveMin}
-                onChange={(e) => onFiltersChange({ loveMin: e.target.value })}
-                aria-label="Minimum love score"
-              />
-              <Input
-                placeholder="Max"
-                value={filters.loveMax}
-                onChange={(e) => onFiltersChange({ loveMax: e.target.value })}
-                aria-label="Maximum love score"
-              />
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <div className="text-xs font-medium text-foreground/70">Reach range</div>
-            <div className="grid grid-cols-2 gap-2">
-              <Input
-                placeholder="Min"
-                value={filters.reachMin}
-                onChange={(e) => onFiltersChange({ reachMin: e.target.value })}
-                aria-label="Minimum reach score"
-              />
-              <Input
-                placeholder="Max"
-                value={filters.reachMax}
-                onChange={(e) => onFiltersChange({ reachMax: e.target.value })}
-                aria-label="Maximum reach score"
-              />
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <div className="text-xs font-medium text-foreground/70">Gravity range</div>
-            <div className="grid grid-cols-2 gap-2">
-              <Input
-                placeholder="Min"
-                value={filters.gravityMin}
-                onChange={(e) => onFiltersChange({ gravityMin: e.target.value })}
-                aria-label="Minimum gravity score"
-              />
-              <Input
-                placeholder="Max"
-                value={filters.gravityMax}
-                onChange={(e) => onFiltersChange({ gravityMax: e.target.value })}
-                aria-label="Maximum gravity score"
-              />
-            </div>
           </div>
         </div>
       </div>
@@ -915,13 +830,6 @@ export default function CommunityMembersPage() {
     tools: [],
     headline: "",
     bio: "",
-    linkDomain: "",
-    loveMin: "",
-    loveMax: "",
-    reachMin: "",
-    reachMax: "",
-    gravityMin: "",
-    gravityMax: "",
   })
 
   const { data, items, loading, loadingMore, error } = useMembersData(communityHandle, filters, cursor)
@@ -940,13 +848,6 @@ export default function CommunityMembersPage() {
     filters.tools,
     filters.headline,
     filters.bio,
-    filters.linkDomain,
-    filters.loveMin,
-    filters.loveMax,
-    filters.reachMin,
-    filters.reachMax,
-    filters.gravityMin,
-    filters.gravityMax,
   ])
 
   function handleFiltersChange(updates: Partial<FilterState>) {
@@ -962,13 +863,6 @@ export default function CommunityMembersPage() {
       tools: [],
       headline: "",
       bio: "",
-      linkDomain: "",
-      loveMin: "",
-      loveMax: "",
-      reachMin: "",
-      reachMax: "",
-      gravityMin: "",
-      gravityMax: "",
     })
   }
 
@@ -1062,7 +956,7 @@ export default function CommunityMembersPage() {
       </div>
 
       {loading ? (
-        <LoadingSkeleton />
+        <LoadingState />
       ) : items.length === 0 ? (
         <EmptyState hasFilters={activeFilters} onClearFilters={handleClearAll} />
       ) : (
