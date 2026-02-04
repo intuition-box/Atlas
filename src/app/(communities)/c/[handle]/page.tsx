@@ -27,6 +27,7 @@ type CommunityGetResponse = {
     description: string | null;
     avatarUrl: string | null;
     isMembershipOpen: boolean;
+    isPublicDirectory: boolean;
     membershipConfig: unknown | null;
     orbitConfig: unknown | null;
   };
@@ -68,11 +69,14 @@ function parseMembers(raw: unknown[]): OrbitMember[] {
 
     result.push({
       id: handleOrId,
+      handle: (m?.handle ?? null) as string | null,
       name: name || handleOrId,
       avatarUrl: (m?.avatarUrl ?? m?.image ?? null) as string | null,
       orbitLevel,
+      loveScore: Number(m?.loveScore ?? 0),
       reachScore,
       headline: (m?.headline ?? null) as string | null,
+      location: (m?.location ?? null) as string | null,
       tags: Array.isArray(m?.tags) ? m.tags : [],
       lastActiveAt: (m?.lastActiveAt ?? null) as string | null,
     });
@@ -222,6 +226,7 @@ export default function CommunityPage() {
       isAdmin={state.data.isAdmin}
       mode={state.data.mode}
       isMembershipOpen={community.isMembershipOpen}
+      isPublicDirectory={community.isPublicDirectory}
       router={router}
     />
   );
@@ -241,6 +246,7 @@ type CommunityReadyStateProps = {
   isAdmin: boolean;
   mode: "full" | "splash";
   isMembershipOpen: boolean;
+  isPublicDirectory: boolean;
   router: ReturnType<typeof useRouter>;
 };
 
@@ -253,6 +259,7 @@ function CommunityReadyState({
   isAdmin,
   mode,
   isMembershipOpen,
+  isPublicDirectory,
   router,
 }: CommunityReadyStateProps) {
   // Build navigation controls based on context
@@ -282,6 +289,8 @@ function CommunityReadyState({
         links={links}
         centerLogoUrl={community.avatarUrl}
         centerName={community.name}
+        isMembershipOpen={isMembershipOpen}
+        isPublicDirectory={isPublicDirectory}
       />
     );
   }
