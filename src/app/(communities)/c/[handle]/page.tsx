@@ -7,9 +7,8 @@ import { apiGet } from "@/lib/api/client";
 import { parseApiError } from "@/lib/api/errors";
 import { normalizeHandle, validateHandle } from "@/lib/handle";
 
-import { Scroll, Users, UserPlus, FileText, Settings } from "lucide-react";
-
 import { Button } from "@/components/ui/button";
+import { CogIcon, FileTextIcon, PlusIcon, UsersIcon } from "@/components/ui/icons";
 
 import { OrbitView } from "@/components/orbit/orbit-view";
 import type { OrbitMember, MemberLink } from "@/components/orbit/types";
@@ -259,15 +258,14 @@ function CommunityReadyState({
   // Build navigation controls based on context
   const navigationControls = React.useMemo<NavigationControls>(() => {
     const bottomLeft = [
-      { icon: Scroll, label: "Attestations", href: `/c/${communityHandle}/attestations` },
-      { icon: Users, label: "Members", href: `/c/${communityHandle}/members` },
-      { icon: UserPlus, label: "Apply", href: `/c/${communityHandle}/apply` },
+      { icon: UsersIcon, label: "Members", href: `/c/${communityHandle}/members` },
+      { icon: PlusIcon, label: "Apply", href: `/c/${communityHandle}/apply` },
     ];
 
     const bottomRight = isAdmin
       ? [
-          { icon: FileText, label: "Applications", href: `/c/${communityHandle}/applications` },
-          { icon: Settings, label: "Settings", href: `/c/${communityHandle}/settings` },
+          { icon: FileTextIcon, label: "Applications", href: `/c/${communityHandle}/applications` },
+          { icon: CogIcon, label: "Settings", href: `/c/${communityHandle}/settings` },
         ]
       : [];
 

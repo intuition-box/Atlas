@@ -1,28 +1,23 @@
 import { z } from "zod";
-import { AttestationType, MembershipStatus, ScoringType } from "@prisma/client";
 
 import { db } from "@/lib/db/client";
 import { auth } from "@/lib/auth/session";
 import { errJson, okJson } from "@/lib/api/server";
-import { resolveCommunityIdFromHandle, resolveUserIdFromHandle } from "@/lib/handle-registry";
+import { resolveUserIdFromHandle } from "@/lib/handle-registry";
 import { requireCsrf } from "@/lib/security/csrf";
+import { ATTESTATION_TYPES, type AttestationType } from "@/config/attestations";
 import type { NextRequest } from "next/server";
 
 export const runtime = "nodejs";
 
+const attestationTypeValues = Object.keys(ATTESTATION_TYPES) as [AttestationType, ...AttestationType[]];
+
 const BodySchema = z.object({
-  // Prefer ids when provided; handles are supported for convenience.
-  communityId: z.string().trim().min(1).optional(),
-  communityHandle: z.string().trim().min(1).optional(),
+  // Always use userId; handle is for UI convenience only
+  toUserId: z.string().trim().min(1),
 
-  toUserId: z.string().trim().min(1).optional(),
-  toHandle: z.string().trim().min(1).optional(),
-
-  // Optional note shown to the receiver / community.
-  note: z.string().trim().min(1).max(500).optional(),
-
-  // Attestation type (Prisma enum).
-  type: z.nativeEnum(AttestationType),
+  // Attestation type from config
+  type: z.enum(attestationTypeValues),
 });
 
 type CreateAttestationOk = {
@@ -58,26 +53,9 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const { note, type } = parsed.data;
+    const { toUserId, type } = parsed.data;
 
-    let communityId = parsed.data.communityId ?? null;
-    if (!communityId && parsed.data.communityHandle) {
-      const resolved = await resolveCommunityIdFromHandle(parsed.data.communityHandle);
-      if (!resolved.ok) return errJson(resolved.error);
-      communityId = resolved.value;
-    }
-
-    let toUserId = parsed.data.toUserId ?? null;
-    if (!toUserId && parsed.data.toHandle) {
-      const resolved = await resolveUserIdFromHandle(parsed.data.toHandle);
-      if (!resolved.ok) return errJson(resolved.error);
-      toUserId = resolved.value;
-    }
-
-    if (!communityId || !toUserId) {
-      return errJson({ code: "INVALID_REQUEST", message: "Invalid request", status: 400 });
-    }
-
+    // Can't attest yourself
     if (toUserId === userId) {
       return errJson({
         code: "INVALID_REQUEST",
@@ -86,91 +64,31 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Both author and target must be approved members (prevents abuse / drive-by attestations).
-    const [fromMembership, toMembership] = await Promise.all([
-      db.membership.findUnique({
-        where: { userId_communityId: { userId, communityId } },
-        select: { id: true, status: true },
-      }),
-      db.membership.findUnique({
-        where: { userId_communityId: { userId: toUserId, communityId } },
-        select: { id: true, status: true },
-      }),
-    ]);
+    // Verify target user exists
+    const targetUser = await db.user.findUnique({
+      where: { id: toUserId },
+      select: { id: true },
+    });
 
-    if (!fromMembership || fromMembership.status !== MembershipStatus.APPROVED) {
-      return errJson({ code: "FORBIDDEN", message: "You must be a member to attest", status: 403 });
+    if (!targetUser) {
+      return errJson({
+        code: "NOT_FOUND",
+        message: "User not found",
+        status: 404,
+      });
     }
 
-    if (!toMembership || toMembership.status !== MembershipStatus.APPROVED) {
-      return errJson({ code: "FORBIDDEN", message: "Target user is not a member", status: 403 });
-    }
-
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-
-    const recent = await db.attestation.findFirst({
-      where: {
-        communityId,
+    // Create attestation (no constraints - user can attest multiple times)
+    const attestation = await db.attestation.create({
+      data: {
         fromUserId: userId,
         toUserId,
         type,
-        createdAt: { gte: since },
       },
       select: { id: true },
     });
 
-    if (recent) {
-      return errJson({
-        code: "CONFLICT",
-        message: "You already attested this user recently",
-        status: 409,
-      });
-    }
-
-    const now = new Date();
-
-    const created = await db.$transaction(async (tx) => {
-      const attestation = await tx.attestation.create({
-        data: {
-          communityId,
-          fromUserId: userId,
-          toUserId,
-          note: note ?? null,
-          type,
-        },
-        select: { id: true },
-      });
-
-      // Track scoring/engagement.
-      await tx.scoringEvent.create({
-        data: {
-          communityId,
-          actorId: userId,
-          type: ScoringType.ATTESTED,
-          metadata: {
-            toUserId,
-            attestationId: attestation.id,
-            attestationType: type,
-          },
-        },
-        select: { id: true },
-      });
-
-      // Keep memberships warm.
-      await tx.membership.updateMany({
-        where: { id: fromMembership.id },
-        data: { lastActiveAt: now },
-      });
-
-      await tx.membership.updateMany({
-        where: { id: toMembership.id },
-        data: { lastActiveAt: now },
-      });
-
-      return attestation;
-    });
-
-    return okJson<CreateAttestationOk>({ attestation: { id: created.id } });
+    return okJson<CreateAttestationOk>({ attestation: { id: attestation.id } });
   } catch {
     return errJson({
       code: "INTERNAL_ERROR",

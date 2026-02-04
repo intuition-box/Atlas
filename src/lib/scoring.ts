@@ -128,10 +128,10 @@ export async function recomputeMemberScoresBatch(params: {
     }),
 
     // attestations given per user (active only)
+    // Note: Attestations are global (user-to-user), so we count all attestations from these users.
     db.attestation.groupBy({
       by: ["fromUserId"],
       where: {
-        communityId,
         fromUserId: { in: userIds },
         revokedAt: null,
         supersededById: null,
@@ -143,7 +143,6 @@ export async function recomputeMemberScoresBatch(params: {
     db.attestation.groupBy({
       by: ["toUserId"],
       where: {
-        communityId,
         toUserId: { in: userIds },
         revokedAt: null,
         supersededById: null,
@@ -157,7 +156,6 @@ export async function recomputeMemberScoresBatch(params: {
     db.attestation.groupBy({
       by: ["fromUserId", "toUserId"],
       where: {
-        communityId,
         fromUserId: { in: userIds },
         revokedAt: null,
         supersededById: null,
@@ -168,7 +166,6 @@ export async function recomputeMemberScoresBatch(params: {
     db.attestation.groupBy({
       by: ["toUserId", "fromUserId"],
       where: {
-        communityId,
         toUserId: { in: userIds },
         revokedAt: null,
         supersededById: null,

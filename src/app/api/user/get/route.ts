@@ -6,6 +6,7 @@ import { auth } from "@/lib/auth/session";
 import { errJson, okJson } from "@/lib/api/server";
 import { db } from "@/lib/db/client";
 import { resolveHandleNameForOwner, resolveUserIdFromHandle } from "@/lib/handle-registry";
+import type { AttestationType } from "@/config/attestations";
 
 export const runtime = "nodejs";
 
@@ -27,9 +28,8 @@ type GetUserOk = {
   isSelf: boolean;
   attestations: Array<{
     id: string;
-    communityId: string;
-    type: string;
-    note: string | null;
+    type: AttestationType;
+    confidence: number | null;
     createdAt: Date;
     fromUser: {
       id: string;
@@ -37,11 +37,6 @@ type GetUserOk = {
       handle: string | null;
       image: string | null;
       avatarUrl: string | null;
-    };
-    community: {
-      id: string;
-      name: string;
-      handle: string | null;
     };
   }>;
 };
@@ -124,14 +119,16 @@ export async function GET(req: NextRequest) {
     const handleName = await resolveHandleNameForOwner({ ownerType: HandleOwnerType.USER, ownerId: user.id });
 
     const rawAttestations = await db.attestation.findMany({
-      where: { toUserId: user.id },
+      where: {
+        toUserId: user.id,
+        revokedAt: null, // Only active attestations
+      },
       take: 50,
       orderBy: { createdAt: "desc" },
       select: {
         id: true,
-        communityId: true,
         type: true,
-        note: true,
+        confidence: true,
         createdAt: true,
         fromUser: {
           select: {
@@ -141,17 +138,10 @@ export async function GET(req: NextRequest) {
             avatarUrl: true,
           },
         },
-        community: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
       },
     });
 
     const fromUserIds = Array.from(new Set(rawAttestations.map((a) => a.fromUser.id)));
-    const communityIds = Array.from(new Set(rawAttestations.map((a) => a.community.id)));
 
     const fromUserHandlePairs = await Promise.all(
       fromUserIds.map(async (id) => {
@@ -160,21 +150,12 @@ export async function GET(req: NextRequest) {
       }),
     );
 
-    const communityHandlePairs = await Promise.all(
-      communityIds.map(async (id) => {
-        const h = await resolveHandleNameForOwner({ ownerType: HandleOwnerType.COMMUNITY, ownerId: id });
-        return [id, h] as const;
-      }),
-    );
-
     const fromUserHandles = new Map(fromUserHandlePairs);
-    const communityHandles = new Map(communityHandlePairs);
 
     const attestations: GetUserOk["attestations"] = rawAttestations.map((a) => ({
       id: a.id,
-      communityId: a.communityId,
-      type: a.type,
-      note: a.note,
+      type: a.type as AttestationType,
+      confidence: a.confidence,
       createdAt: a.createdAt,
       fromUser: {
         id: a.fromUser.id,
@@ -182,11 +163,6 @@ export async function GET(req: NextRequest) {
         handle: fromUserHandles.get(a.fromUser.id) ?? null,
         image: a.fromUser.image,
         avatarUrl: a.fromUser.avatarUrl,
-      },
-      community: {
-        id: a.community.id,
-        name: a.community.name,
-        handle: communityHandles.get(a.community.id) ?? null,
       },
     }));
 

@@ -1,8 +1,6 @@
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 
-import { MembershipRole, MembershipStatus, ScoringType } from "@prisma/client";
-
 import { auth } from "@/lib/auth/session";
 import { errJson, okJson } from "@/lib/api/server";
 import { db } from "@/lib/db/client";
@@ -19,12 +17,6 @@ type RetractOk = {
   attestation: { id: string };
   alreadyRevoked: boolean;
 };
-
-const MOD_ROLES: MembershipRole[] = [
-  MembershipRole.OWNER,
-  MembershipRole.ADMIN,
-  MembershipRole.MODERATOR,
-];
 
 export async function POST(req: NextRequest) {
   try {
@@ -59,7 +51,6 @@ export async function POST(req: NextRequest) {
       where: { id: attestationId },
       select: {
         id: true,
-        communityId: true,
         fromUserId: true,
         revokedAt: true,
         supersededById: true,
@@ -77,59 +68,24 @@ export async function POST(req: NextRequest) {
     if (row.supersededById) {
       return errJson({
         code: "CONFLICT",
-        message: "Attestation can’t be retracted (superseded)",
+        message: "Attestation can't be retracted (superseded)",
         status: 409,
       });
     }
 
-    // Author can retract; moderators+ can retract for moderation.
-    const isAuthor = row.fromUserId === userId;
-
-    const actorMembership = await db.membership.findUnique({
-      where: { userId_communityId: { userId, communityId: row.communityId } },
-      select: { id: true, role: true, status: true },
-    });
-
-    if (!actorMembership || actorMembership.status !== MembershipStatus.APPROVED) {
+    // Only the author can retract their own attestation.
+    if (row.fromUserId !== userId) {
       return errJson({ code: "FORBIDDEN", message: "Not allowed", status: 403 });
     }
 
-    const canModerate = MOD_ROLES.includes(actorMembership.role);
-    if (!isAuthor && !canModerate) {
-      return errJson({ code: "FORBIDDEN", message: "Not allowed", status: 403 });
-    }
-
-    const now = new Date();
-
-    await db.$transaction(async (tx) => {
-      await tx.attestation.update({
-        where: { id: row.id },
-        data: {
-          revokedAt: now,
-          revokedByUserId: userId,
-          revokedReason: reason ?? null,
-        },
-        select: { id: true },
-      });
-
-      await tx.membership.updateMany({
-        where: { id: actorMembership.id },
-        data: { lastActiveAt: now },
-      });
-
-      // Audit / preferences feed.
-      await tx.scoringEvent.create({
-        data: {
-          communityId: row.communityId,
-          actorId: userId,
-          type: ScoringType.ATTESTATION_RETRACTED,
-          metadata: {
-            attestationId: row.id,
-            reason: reason ?? null,
-          },
-        },
-        select: { id: true },
-      });
+    await db.attestation.update({
+      where: { id: row.id },
+      data: {
+        revokedAt: new Date(),
+        revokedByUserId: userId,
+        revokedReason: reason ?? null,
+      },
+      select: { id: true },
     });
 
     return okJson<RetractOk>({ attestation: { id: row.id }, alreadyRevoked: false });

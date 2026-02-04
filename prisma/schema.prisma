@@ -41,14 +41,8 @@ enum OrbitLevel {
   ADVOCATE
 }
 
-enum AttestationType {
-  WORKED_TOGETHER
-  KNOWS_IRL
-  ROLE_DEV
-  ROLE_ARTIST
-  ROLE_DESIGN
-  OTHER
-}
+// AttestationType is now defined in src/config/attestations.ts
+// Stored as String in the database for flexibility
 
 enum ScoringType {
   COMMUNITY_CREATED
@@ -364,7 +358,6 @@ model Community {
   configRevisions CommunityConfigRevision[]
   memberships Membership[]
   applications Application[]
-  attestations Attestation[]
   scoringEvents ScoringEvent[]
 
   @@index([ownerId])
@@ -467,10 +460,8 @@ model Attestation {
   id          String   @id @default(cuid())
   fromUserId  String
   toUserId    String
-  communityId String
 
-  type        AttestationType
-  note        String?
+  type        String   // AttestationType from src/config/attestations.ts
   confidence  Float?   // optional 0..1
 
   /// Soft-delete (retract) support.
@@ -486,21 +477,20 @@ model Attestation {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  fromUser  User       @relation("attestationsGiven", fields: [fromUserId], references: [id], onDelete: Cascade)
-  toUser    User       @relation("attestationsReceived", fields: [toUserId], references: [id], onDelete: Cascade)
-  community Community  @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  fromUser  User @relation("attestationsGiven", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUser    User @relation("attestationsReceived", fields: [toUserId], references: [id], onDelete: Cascade)
 
-  /// Who revoked it (optional; can be the author or a community admin/mod).
+  /// Who revoked it (optional; can be the author).
   revokedBy User? @relation("attestationsRevokedBy", fields: [revokedByUserId], references: [id], onDelete: SetNull)
 
   /// Self relation for supersede chain.
   supersededBy Attestation? @relation("AttestationSupersede", fields: [supersededById], references: [id], onDelete: SetNull)
   supersedes   Attestation[] @relation("AttestationSupersede")
 
-  @@index([communityId, createdAt])
-  @@index([communityId, toUserId, createdAt])
-  @@index([communityId, fromUserId, createdAt])
-  @@index([communityId, revokedAt, createdAt])
+  @@index([fromUserId, createdAt])
+  @@index([toUserId, createdAt])
+  @@index([fromUserId, toUserId, type])
+  @@index([revokedAt, createdAt])
   @@index([supersededById])
 }
 

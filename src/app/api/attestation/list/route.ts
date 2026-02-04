@@ -1,31 +1,28 @@
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 
-import { AttestationType, HandleOwnerType, MembershipStatus } from "@prisma/client";
+import { HandleOwnerType } from "@prisma/client";
 
 import {
-  resolveCommunityIdFromHandle,
   resolveHandleNamesForOwners,
   resolveUserIdFromHandle,
 } from "@/lib/handle-registry";
-import { auth } from "@/lib/auth/session";
 import { errJson, okJson } from "@/lib/api/server";
 import { db } from "@/lib/db/client";
+import { ATTESTATION_TYPES, type AttestationType } from "@/config/attestations";
 
 export const runtime = "nodejs";
 
-const QuerySchema = z.object({
-  // Prefer ids when provided; handles are supported for convenience.
-  communityId: z.string().trim().min(1).optional(),
-  communityHandle: z.string().trim().min(1).optional(),
+const attestationTypeValues = Object.keys(ATTESTATION_TYPES) as [AttestationType, ...AttestationType[]];
 
+const QuerySchema = z.object({
   // Filter by receiver / author.
   toUserId: z.string().trim().min(1).optional(),
   fromUserId: z.string().trim().min(1).optional(),
   toHandle: z.string().trim().min(1).optional(),
   fromHandle: z.string().trim().min(1).optional(),
 
-  type: z.nativeEnum(AttestationType).optional(),
+  type: z.enum(attestationTypeValues).optional(),
 
   take: z.coerce.number().int().min(1).max(100).optional(),
   cursor: z.string().trim().min(1).optional(),
@@ -33,9 +30,7 @@ const QuerySchema = z.object({
 
 type AttestationListItem = {
   id: string;
-  communityId: string;
   type: AttestationType;
-  note: string | null;
   confidence: number | null;
   createdAt: string;
   fromUser: {
@@ -63,9 +58,6 @@ export async function GET(req: NextRequest) {
   try {
     const sp = req.nextUrl.searchParams;
     const parsed = QuerySchema.safeParse({
-      communityId: sp.get("communityId") ?? undefined,
-      communityHandle: sp.get("communityHandle") ?? undefined,
-
       toUserId: sp.get("toUserId") ?? undefined,
       fromUserId: sp.get("fromUserId") ?? undefined,
       toHandle: sp.get("toHandle") ?? undefined,
@@ -91,13 +83,6 @@ export async function GET(req: NextRequest) {
     const { type, cursor } = parsed.data;
     const take = parsed.data.take ?? 50;
 
-    let communityId = parsed.data.communityId ?? null;
-    if (!communityId && parsed.data.communityHandle) {
-      const resolved = await resolveCommunityIdFromHandle(parsed.data.communityHandle);
-      if (!resolved.ok) return errJson(resolved.error);
-      communityId = resolved.value;
-    }
-
     let toUserId = parsed.data.toUserId ?? null;
     if (!toUserId && parsed.data.toHandle) {
       const resolved = await resolveUserIdFromHandle(parsed.data.toHandle);
@@ -112,44 +97,21 @@ export async function GET(req: NextRequest) {
       fromUserId = resolved.value;
     }
 
-    if (!communityId) {
-      return errJson({ code: "INVALID_REQUEST", message: "Invalid request", status: 400 });
-    }
-
-    // Community visibility gate: if not public, require membership.
-    const community = await db.community.findUnique({
-      where: { id: communityId },
-      select: { id: true, isPublicDirectory: true },
-    });
-
-    if (!community) {
-      return errJson({ code: "NOT_FOUND", message: "Community not found", status: 404 });
-    }
-
-    if (!community.isPublicDirectory) {
-      const session = await auth();
-      const userId = session?.user?.id;
-
-      if (!userId) {
-        return errJson({ code: "UNAUTHORIZED", message: "Sign in required", status: 401 });
-      }
-
-      const member = await db.membership.findUnique({
-        where: { userId_communityId: { userId, communityId } },
-        select: { id: true, status: true },
+    // Require at least one filter to avoid fetching all attestations.
+    if (!toUserId && !fromUserId) {
+      return errJson({
+        code: "INVALID_REQUEST",
+        message: "At least one of toUserId, fromUserId, toHandle, or fromHandle is required",
+        status: 400,
       });
-
-      if (!member || member.status !== MembershipStatus.APPROVED) {
-        return errJson({ code: "FORBIDDEN", message: "Not allowed", status: 403 });
-      }
     }
 
     const rows = await db.attestation.findMany({
       where: {
-        communityId,
         ...(toUserId ? { toUserId } : {}),
         ...(fromUserId ? { fromUserId } : {}),
         ...(type ? { type } : {}),
+        revokedAt: null, // Only active attestations
       },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: take + 1,
@@ -161,11 +123,9 @@ export async function GET(req: NextRequest) {
         : {}),
       select: {
         id: true,
-        communityId: true,
         fromUserId: true,
         toUserId: true,
         type: true,
-        note: true,
         confidence: true,
         createdAt: true,
         fromUser: {
@@ -210,9 +170,7 @@ export async function GET(req: NextRequest) {
 
       return {
         id: a.id,
-        communityId: a.communityId,
-        type: a.type,
-        note: a.note,
+        type: a.type as AttestationType,
         confidence: a.confidence,
         createdAt: a.createdAt.toISOString(),
         fromUser: {

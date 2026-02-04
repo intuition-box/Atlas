@@ -7,6 +7,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ROUTES, isPublicRoute, isOnboardingRoute } from "@/lib/routes";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { NavigationProvider } from "@/components/navigation/navigation-provider";
+import { AttestationQueueProvider } from "@/components/attestation/attestation-queue-provider";
 
 /**
  * Client-side guard for onboarding flow:
@@ -81,7 +82,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <SessionProvider refetchOnWindowFocus={true} refetchInterval={0}>
       <TooltipProvider delay={300}>
         <NavigationProvider>
-          <OnboardingGuard>{children}</OnboardingGuard>
+          <AttestationQueueProvider>
+            <OnboardingGuard>{children}</OnboardingGuard>
+          </AttestationQueueProvider>
         </NavigationProvider>
       </TooltipProvider>
     </SessionProvider>

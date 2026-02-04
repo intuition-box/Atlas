@@ -19,6 +19,8 @@ import {
   useNavigationVisibility,
   type NavigationItem,
 } from "./navigation-provider";
+import { AttestationQueueButton } from "@/components/attestation/attestation-queue-button";
+import { AttestationQueuePanel } from "@/components/attestation/attestation-queue-panel";
 
 /* ────────────────────────────
    Types
@@ -96,6 +98,17 @@ export function NavigationController({
       {/* Top Right - Global Controls */}
       <div className="absolute top-4 right-4 sm:top-6 sm:right-6 pointer-events-auto">
         <div className="flex items-center gap-2">
+          {/* Attestation Queue (cart-like) */}
+          {showControls && <AttestationQueueButton />}
+
+          {/* User Settings */}
+          {showControls && (
+            <NavigationButton
+              icon={Settings}
+              label="Settings"
+              href={userSettingsPath}
+            />
+          )}
           {/* Visibility Toggle - Always visible */}
           <Tooltip>
             <TooltipTrigger
@@ -121,15 +134,6 @@ export function NavigationController({
               <p className="text-xs">{isVisible ? "Hide UI" : "Show UI"}</p>
             </TooltipContent>
           </Tooltip>
-
-          {/* User Settings */}
-          {showControls && (
-            <NavigationButton
-              icon={Settings}
-              label="Settings"
-              href={userSettingsPath}
-            />
-          )}
 
           {/* Contextual top-right controls */}
           {showControls && controls.topRight?.map((item, idx) => (
@@ -159,6 +163,9 @@ export function NavigationController({
           </div>
         </div>
       )}
+
+      {/* Attestation Queue Panel (global sheet) */}
+      <AttestationQueuePanel />
     </div>
   );
 }
