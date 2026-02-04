@@ -18,6 +18,17 @@ import { useAttestationQueue, type QueuedAttestation } from "./attestation-queue
 import { ATTESTATION_TYPES } from "@/config/attestations";
 
 /* ────────────────────────────
+   Helpers
+──────────────────────────── */
+
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
+  return (parts[0]!.slice(0, 1) + parts[parts.length - 1]!.slice(0, 1)).toUpperCase();
+}
+
+/* ────────────────────────────
    Queue Item Component
 ──────────────────────────── */
 
@@ -28,25 +39,27 @@ function QueueItem({
   item: QueuedAttestation;
   onRemove: (id: string) => void;
 }) {
+  const attestationType = ATTESTATION_TYPES[item.type];
+
   return (
-    <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/30 border border-border/30">
-      <Avatar className="size-10 shrink-0">
+    <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/30 border border-border/30">
+      <Avatar className="size-9 shrink-0">
         <AvatarImage src={item.toAvatarUrl ?? ""} alt={item.toName} />
         <AvatarFallback className="text-xs font-medium">
-          {item.toName.slice(0, 2).toUpperCase()}
+          {initials(item.toName)}
         </AvatarFallback>
       </Avatar>
 
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="font-medium text-sm truncate">{item.toName}</span>
-          <span className="text-xs text-muted-foreground">@{item.toHandle}</span>
+          {item.toHandle && (
+            <span className="text-xs text-muted-foreground">@{item.toHandle}</span>
+          )}
         </div>
-        <div className="mt-0.5">
-          <span className="text-xs text-muted-foreground">
-            {ATTESTATION_TYPES[item.type].label}
-          </span>
-        </div>
+        <span className="text-xs text-muted-foreground">
+          {attestationType.label}
+        </span>
       </div>
 
       <button
