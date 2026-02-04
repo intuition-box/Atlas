@@ -20,6 +20,7 @@ import { err, apiErr, ok, apiOk } from "@/lib/api/shapes";
  */
 
 export const CSRF_HEADER_NAME = "X-CSRF-Token";
+export const CSRF_REFRESH_HEADER_NAME = "X-CSRF-Token-Refresh";
 
 const CSRF_COOKIE_NAME_PROD = "__Host-orbyt-csrf";
 const CSRF_COOKIE_NAME_DEV = "orbyt-csrf";
@@ -176,4 +177,20 @@ export function csrfErrorResponse(problem: CsrfProblem): NextResponse<ApiEnvelop
   const res = NextResponse.json(apiErr(problem), { status: problem.status });
   applyCsrfRouteHeaders(res);
   return res;
+}
+
+/**
+ * Rotate the CSRF token on a successful mutation response.
+ *
+ * This issues a new token, sets it in the cookie, and adds it to the
+ * response headers so the client can update its cached token.
+ *
+ * @param res - The NextResponse to modify
+ * @returns The new CSRF token (for logging/debugging)
+ */
+export function rotateCsrfToken(res: NextResponse): string {
+  const newToken = issueCsrfToken();
+  setCsrfCookie(res, newToken);
+  res.headers.set(CSRF_REFRESH_HEADER_NAME, newToken);
+  return newToken;
 }

@@ -122,6 +122,46 @@ export function resetCsrf(): void {
   csrfPromise = null;
 }
 
+/**
+ * Updates the cached CSRF token directly (used for token rotation).
+ * @internal
+ */
+function setCsrfToken(token: string): void {
+  csrfPromise = Promise.resolve(token);
+}
+
+// ============================================================================
+// Visibility-Based CSRF Refresh
+// ============================================================================
+
+let visibilityListenerInitialized = false;
+
+/**
+ * Initializes the visibility change listener for proactive CSRF token refresh.
+ * Call this once in your app's root provider.
+ *
+ * When the page becomes visible again (e.g., user switches back to tab),
+ * the CSRF token is reset to ensure freshness.
+ */
+export function initCsrfVisibilityRefresh(): () => void {
+  if (typeof document === "undefined") return () => {};
+  if (visibilityListenerInitialized) return () => {};
+
+  const handleVisibilityChange = () => {
+    if (document.visibilityState === "visible") {
+      resetCsrf();
+    }
+  };
+
+  document.addEventListener("visibilitychange", handleVisibilityChange);
+  visibilityListenerInitialized = true;
+
+  return () => {
+    document.removeEventListener("visibilitychange", handleVisibilityChange);
+    visibilityListenerInitialized = false;
+  };
+}
+
 // ============================================================================
 // Testing Utilities (not part of public API contract)
 // ============================================================================
@@ -233,6 +273,12 @@ function buildQuery(q?: Record<string, QueryValue> | URLSearchParams): string {
 // ============================================================================
 
 async function parseResponse<T>(r: Response, requestId: string): Promise<Result<T, ApiError>> {
+  // Token rotation: if server sends a new CSRF token, update the cache
+  const newCsrfToken = r.headers.get("X-CSRF-Token-Refresh");
+  if (newCsrfToken) {
+    setCsrfToken(newCsrfToken);
+  }
+
   const ct = r.headers.get("content-type");
   if (!ct || !ct.toLowerCase().includes("application/json")) {
     await r.text().catch(() => {});

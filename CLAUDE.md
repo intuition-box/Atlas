@@ -570,17 +570,20 @@ revalidateTag(`space:${id}`);
 
 ## CSRF Protection
 
-**Architecture:** Double-submit cookie scheme
+**Architecture:** Double-submit cookie scheme with token rotation
 - Server sets an httpOnly CSRF cookie
 - Client fetches token via `GET /api/security/csrf` and echoes it in request header
 - Server validates header matches cookie (timing-safe comparison)
+- Token rotates on every successful mutation (defense in depth)
 
 **Files:**
 - `@/lib/security/csrf.ts` — Server-side CSRF helpers
 - `@/lib/api/client.ts` — Client auto-attaches CSRF token to POST requests
+- `@/components/providers.tsx` — `CsrfManager` handles lifecycle
 
 **Constants:**
 - Header name: `X-CSRF-Token`
+- Rotation header: `X-CSRF-Token-Refresh`
 - Cookie name: `__Host-orbyt-csrf` (prod) / `orbyt-csrf` (dev)
 - Token endpoint response: `{ csrfToken: string }`
 
@@ -611,6 +614,10 @@ const result = await apiPost('/api/resource/create', { data });
 - `apiPost` automatically fetches and caches CSRF token
 - On 419 (CSRF failure), client resets token and retries once
 - Use `csrf: false` option to skip CSRF (for webhooks/machine-to-machine)
+- **Token rotation**: Server sends new token via `X-CSRF-Token-Refresh` header on successful POST; client auto-updates cache
+- **Session binding**: Token resets on login/logout/user switch via `CsrfManager`
+- **Visibility refresh**: Token resets when tab becomes visible (handles stale tabs)
+- Use `rotateCsrf: false` option to disable rotation for specific endpoints
 
 ## Neon + Prisma (Vercel)
 

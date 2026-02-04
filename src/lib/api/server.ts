@@ -16,7 +16,7 @@ import { z } from "zod";
 import type { ApiEnvelope, ApiError, ApiIssue, Result } from "@/lib/api/shapes";
 import { apiErr, apiOk, err, ok } from "@/lib/api/shapes";
 import { AuthErrorSchema, requireAuth, requireOnboarded } from "@/lib/auth/policy";
-import { requireCsrf } from "@/lib/security/csrf";
+import { requireCsrf, rotateCsrfToken } from "@/lib/security/csrf";
 import { buildRateLimitHeaders, getRateLimitKey, rateLimit } from "@/lib/security/rate-limit";
 import { requireIdempotencyKey } from "@/lib/idempotency";
 
@@ -41,6 +41,8 @@ export type ApiOptions = {
   auth?: ApiAuthMode;
   /** Require CSRF token for POST (default: true) */
   csrf?: boolean;
+  /** Rotate CSRF token on successful POST (default: true) */
+  rotateCsrf?: boolean;
   /** Enforce same-origin POSTs (default: true) */
   checkOrigin?: boolean;
   /** Explicit origin allowlist (default: [req.nextUrl.origin]) */
@@ -311,7 +313,7 @@ export function api<S extends z.ZodTypeAny>(
       const ifMatch = req.headers.get("if-match");
 
       // Execute handler
-      return await handler({
+      const response = await handler({
         req,
         session,
         viewerId,
@@ -322,6 +324,13 @@ export function api<S extends z.ZodTypeAny>(
         requestId,
         authMode,
       });
+
+      // 11. CSRF token rotation on successful POST mutations
+      if (isPost && opts.rotateCsrf !== false && response.status >= 200 && response.status < 300) {
+        rotateCsrfToken(response);
+      }
+
+      return response;
     } catch (e) {
       // Unexpected error — log and return clean 500
       console.error("[api] Unexpected error:", e);
