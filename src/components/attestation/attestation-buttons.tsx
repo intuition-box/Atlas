@@ -4,6 +4,7 @@ import * as React from "react";
 import { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Check } from "lucide-react";
+import { useSession } from "next-auth/react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,12 @@ import { ATTESTATION_TYPES, type AttestationType } from "@/config/attestations";
 type AttestationButtonsProps = {
   /** Target user ID to attest */
   toUserId: string;
+  /** Target user display name */
+  toName: string;
+  /** Target user handle (optional) */
+  toHandle?: string;
+  /** Target user avatar URL (optional) */
+  toAvatarUrl?: string | null;
   /** Optional className for the container */
   className?: string;
   /** Size variant */
@@ -35,12 +42,22 @@ type FlyingDot = {
 
 export function AttestationButtons({
   toUserId,
+  toName,
+  toHandle,
+  toAvatarUrl,
   className,
   size = "xs",
 }: AttestationButtonsProps) {
+  const { data: session } = useSession();
   const [animatingTypes, setAnimatingTypes] = useState<Set<AttestationType>>(new Set());
   const [flyingDots, setFlyingDots] = useState<FlyingDot[]>([]);
   const { addToQueue, isInQueue, buttonRef } = useAttestationQueue();
+
+  // Don't show attestation buttons for yourself
+  const currentUserId = session?.user?.id;
+  if (currentUserId === toUserId) {
+    return null;
+  }
 
   const handleAttestClick = (
     e: React.MouseEvent,
@@ -57,7 +74,7 @@ export function AttestationButtons({
     // After button "shine", spawn flying dot and add to queue
     setTimeout(() => {
       setFlyingDots((prev) => [...prev, { id, type, rect }]);
-      addToQueue({ toUserId, type });
+      addToQueue({ toUserId, toName, toHandle, toAvatarUrl, type });
     }, 250);
 
     // Clean up animation state
