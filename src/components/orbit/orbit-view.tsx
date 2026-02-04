@@ -117,7 +117,13 @@ function UserProfileCard({ node, onViewProfile }: UserProfileCardProps) {
       )}
 
       {/* Attestation Buttons */}
-      <AttestationButtons toUserId={node.id} className="justify-center" />
+      <AttestationButtons
+        toUserId={node.id}
+        toName={node.name}
+        toHandle={node.handle}
+        toAvatarUrl={node.avatarUrl}
+        className="justify-center"
+      />
 
       {/* Profile Button */}
       <Button size="sm" variant="outline" className="w-full" onClick={onViewProfile}>
