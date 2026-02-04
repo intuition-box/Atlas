@@ -568,6 +568,10 @@ export function OrbitCanvas({
       canvas.style.cursor = hoveredNodeRef.current ? "pointer" : "grab";
 
       if (drag.type === "node") {
+        // If we didn't actually drag (no movement), treat as click if
+        if (onNodeClick) {
+          onNodeClick(drag.node, { x: e.clientX, y: e.clientY });
+        }
         if (onNodeDragEnd) {
           onNodeDragEnd(drag.node.id);
         }
@@ -582,7 +586,7 @@ export function OrbitCanvas({
           const node = findNodeAtPoint(nodes, world.x, world.y, centerX, centerY);
 
           if (node && onNodeClick) {
-            onNodeClick(node);
+            onNodeClick(node, { x: e.clientX, y: e.clientY });
           }
         }
         dragRef.current = { type: "none" };
@@ -592,7 +596,7 @@ export function OrbitCanvas({
         const node = findNodeAtPoint(nodes, world.x, world.y, centerX, centerY);
 
         if (node && onNodeClick) {
-          onNodeClick(node);
+          onNodeClick(node, { x: e.clientX, y: e.clientY });
         }
       }
     },

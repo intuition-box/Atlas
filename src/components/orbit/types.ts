@@ -8,11 +8,14 @@ export type OrbitLevel = "ADVOCATE" | "CONTRIBUTOR" | "PARTICIPANT" | "EXPLORER"
 
 export type OrbitMember = {
   id: string;
+  handle?: string | null;
   name: string;
   avatarUrl?: string | null;
   headline?: string | null;
+  location?: string | null;
   tags?: string[];
   orbitLevel: OrbitLevel;
+  loveScore: number;
   reachScore: number;
   lastActiveAt?: string | null;
 };
@@ -29,11 +32,14 @@ export type MemberLink = {
 
 export interface SimulatedNode extends SimulationNodeDatum {
   id: string;
+  handle: string | null;
   name: string;
   avatarUrl: string | null;
   headline: string | null;
+  location: string | null;
   tags: string[];
   orbitLevel: OrbitLevel;
+  loveScore: number;
   reachScore: number;
   lastActiveAt: string | null;
   ring: number;
@@ -58,7 +64,11 @@ export type OrbitCanvasProps = {
   height: number;
   centerLogoUrl?: string | null;
   centerName?: string;
-  onNodeClick?: (node: SimulatedNode) => void;
+  /** Whether membership is open (accepting applications) */
+  isMembershipOpen?: boolean;
+  /** Whether the directory is publicly visible */
+  isPublicDirectory?: boolean;
+  onNodeClick?: (node: SimulatedNode, position: { x: number; y: number }) => void;
   onNodeHover?: (node: SimulatedNode | null, position: { x: number; y: number }) => void;
   onNodeDragStart?: (nodeId: string) => void;
   onNodeDrag?: (nodeId: string, x: number, y: number) => void;
@@ -72,7 +82,12 @@ export type OrbitViewProps = {
   links?: MemberLink[];
   centerLogoUrl?: string | null;
   centerName?: string;
+  /** Whether membership is open (accepting applications) */
+  isMembershipOpen?: boolean;
+  /** Whether the directory is publicly visible */
+  isPublicDirectory?: boolean;
   onMemberClick?: (memberId: string) => void;
+  onMemberAttest?: (memberId: string) => void;
   className?: string;
 };
 

@@ -42,7 +42,7 @@ export const LEVEL_COLORS: Record<OrbitLevel, string> = {
 
 /** Node radius range based on reach score */
 export const NODE_RADIUS = {
-  MIN: 12,
+  MIN: 9,
   MAX: 18,
 } as const;
 
@@ -133,5 +133,5 @@ export const ORBITAL_MOTION = {
    * How strongly orbital rotation is enforced.
    * 0 = disabled, 1 = fully enforced.
    */
-  ROTATION_STRENGTH: 0.4,
+  ROTATION_STRENGTH: 0.05,
 } as const;

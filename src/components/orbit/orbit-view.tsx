@@ -1,31 +1,21 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import { motion, AnimatePresence } from "motion/react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
 
 import { OrbitCanvas } from "./orbit-canvas";
 import { useOrbitSimulation } from "./use-orbit-simulation";
 import type { OrbitViewProps, SimulatedNode, TooltipState } from "./types";
 import { Spinner } from "../ui/spinner";
 import { INTERACTION } from "./constants";
+import { useAttestationQueue } from "@/components/attestation/attestation-queue-provider";
+import { ATTESTATION_TYPES, type AttestationType } from "@/config/attestations";
 
 /* ────────────────────────────
-   Tooltip Component
+   Helpers
 ──────────────────────────── */
-
-const LEVEL_LABELS = {
-  ADVOCATE: "Advocate",
-  CONTRIBUTOR: "Contributor",
-  PARTICIPANT: "Participant",
-  EXPLORER: "Explorer",
-} as const;
-
-const LEVEL_BADGE_COLORS = {
-  ADVOCATE: "bg-blue-500",
-  CONTRIBUTOR: "bg-sky-400",
-  PARTICIPANT: "bg-slate-300",
-  EXPLORER: "bg-slate-500",
-} as const;
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -50,6 +40,10 @@ function formatRelativeTime(iso: string | null | undefined): string | null {
   return `Active ${Math.floor(days / 365)} years ago`;
 }
 
+/* ────────────────────────────
+   Tooltip Component (simplified)
+──────────────────────────── */
+
 type MemberTooltipProps = {
   node: SimulatedNode;
   x: number;
@@ -58,72 +52,172 @@ type MemberTooltipProps = {
 };
 
 function MemberTooltip({ node, x, y, containerRect }: MemberTooltipProps) {
-  const tooltipWidth = 260;
-  const tooltipHeight = 140;
   const padding = 12;
 
-  // Calculate position relative to container
   let left = x - containerRect.left + 16;
   let top = y - containerRect.top + 16;
 
-  // Avoid overflow
-  if (left + tooltipWidth > containerRect.width - padding) {
-    left = x - containerRect.left - tooltipWidth - 16;
+  if (left + 120 > containerRect.width - padding) {
+    left = x - containerRect.left - 120 - 16;
   }
-  if (top + tooltipHeight > containerRect.height - padding) {
-    top = y - containerRect.top - tooltipHeight - 16;
+  if (top + 60 > containerRect.height - padding) {
+    top = y - containerRect.top - 60 - 16;
   }
   if (left < padding) left = padding;
   if (top < padding) top = padding;
 
-  const lastActive = formatRelativeTime(node.lastActiveAt);
-
   return (
     <div
-      className="pointer-events-none absolute z-50 w-[260px] rounded-xl border border-border bg-background/95 p-3 shadow-lg backdrop-blur-md"
+      className="pointer-events-none absolute z-50 rounded-lg border border-border bg-background/95 px-3 py-2 shadow-lg backdrop-blur-md"
       style={{ left, top }}
     >
-      <div className="flex items-start gap-3">
-        <Avatar className="size-10 rounded-lg">
+      <div className="text-sm font-medium text-foreground">{node.name}</div>
+      <div className="mt-1 flex items-center gap-3 text-xs text-muted-foreground">
+        <span>Love: {node.loveScore}</span>
+        <span>Reach: {node.reachScore}</span>
+      </div>
+    </div>
+  );
+}
+
+/* ────────────────────────────
+   User Profile Card (for Popover)
+──────────────────────────── */
+
+type UserProfileCardProps = {
+  node: SimulatedNode;
+  onViewProfile: () => void;
+  onAddAttestation: (type: AttestationType, rect: DOMRect) => void;
+  isInQueue: (type: AttestationType) => boolean;
+};
+
+function UserProfileCard({ node, onViewProfile, onAddAttestation, isInQueue }: UserProfileCardProps) {
+  const lastActive = formatRelativeTime(node.lastActiveAt);
+  const [flyingButtons, setFlyingButtons] = useState<{ id: string; type: AttestationType; rect: DOMRect }[]>([]);
+  const { buttonRef } = useAttestationQueue();
+
+  const handleAttestClick = (e: React.MouseEvent, type: AttestationType) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const id = `${type}-${Date.now()}`;
+
+    // Start the flying animation
+    setFlyingButtons((prev) => [...prev, { id, type, rect }]);
+
+    // Trigger the queue add after a small delay so the animation starts from the button
+    setTimeout(() => {
+      onAddAttestation(type, rect);
+    }, 50);
+
+    // Remove the flying button after animation completes
+    setTimeout(() => {
+      setFlyingButtons((prev) => prev.filter((b) => b.id !== id));
+    }, 600);
+  };
+
+  return (
+    <>
+      {/* Avatar */}
+      <div className="flex justify-center">
+        <Avatar className="size-16">
           <AvatarImage src={node.avatarUrl ?? ""} alt={node.name} />
-          <AvatarFallback className="rounded-lg text-xs">{initials(node.name)}</AvatarFallback>
+          <AvatarFallback className="text-lg">{initials(node.name)}</AvatarFallback>
         </Avatar>
-
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium text-foreground">{node.name}</div>
-          {node.headline && (
-            <div className="mt-0.5 truncate text-xs text-muted-foreground">{node.headline}</div>
-          )}
-        </div>
       </div>
 
-      <div className="mt-3 flex items-center gap-2">
-        <span
-          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium text-white ${LEVEL_BADGE_COLORS[node.orbitLevel]}`}
-        >
-          {LEVEL_LABELS[node.orbitLevel]}
-        </span>
-        <span className="text-xs text-muted-foreground">Reach: {node.reachScore}</span>
+      {/* Name & Handle */}
+      <div className="text-center">
+        <div className="text-base font-semibold text-foreground">{node.name}</div>
+        {node.handle && (
+          <div className="text-sm text-muted-foreground">@{node.handle}</div>
+        )}
       </div>
 
-      {node.tags && node.tags.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1">
-          {node.tags.slice(0, 4).map((tag) => (
-            <span
-              key={tag}
-              className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
-            >
-              {tag}
-            </span>
-          ))}
-          {node.tags.length > 4 && (
-            <span className="text-[10px] text-muted-foreground">+{node.tags.length - 4}</span>
-          )}
+      {/* Details */}
+      {(lastActive || node.location) && (
+        <div className="space-y-1 text-sm text-muted-foreground text-center">
+          {lastActive && <div>{lastActive}</div>}
+          {node.location && <div>{node.location}</div>}
         </div>
       )}
 
-      {lastActive && <div className="mt-2 text-[10px] text-muted-foreground">{lastActive}</div>}
-    </div>
+      {/* Attestation Types */}
+      <div className="flex flex-wrap gap-1.5 justify-center">
+        {Object.values(ATTESTATION_TYPES).map((attestType) => {
+          const inQueue = isInQueue(attestType.id as AttestationType);
+          const isFlying = flyingButtons.some((b) => b.type === attestType.id);
+          return (
+            <button
+              key={attestType.id}
+              onClick={(e) => handleAttestClick(e, attestType.id as AttestationType)}
+              disabled={inQueue || isFlying}
+              className={`px-2 py-1 text-xs rounded-full border transition-all duration-200 ${
+                inQueue
+                  ? "bg-primary/10 border-primary/30 text-primary cursor-default"
+                  : isFlying
+                    ? "opacity-0 scale-75"
+                    : "border-border hover:bg-muted hover:border-muted-foreground/30"
+              }`}
+            >
+              {attestType.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Flying button animations */}
+      <AnimatePresence>
+        {flyingButtons.map((flying) => {
+          const targetRect = buttonRef?.current?.getBoundingClientRect();
+          if (!targetRect) return null;
+
+          const startX = flying.rect.left + flying.rect.width / 2;
+          const startY = flying.rect.top + flying.rect.height / 2;
+          const endX = targetRect.left + targetRect.width / 2;
+          const endY = targetRect.top + targetRect.height / 2;
+
+          return (
+            <motion.div
+              key={flying.id}
+              className="fixed z-[100] pointer-events-none"
+              initial={{
+                left: flying.rect.left,
+                top: flying.rect.top,
+                width: flying.rect.width,
+                height: flying.rect.height,
+                borderRadius: 9999,
+                opacity: 1,
+              }}
+              animate={{
+                left: endX - 4,
+                top: endY - 4,
+                width: 8,
+                height: 8,
+                opacity: 1,
+              }}
+              exit={{
+                opacity: 0,
+                scale: 0,
+              }}
+              transition={{
+                duration: 0.5,
+                ease: [0.32, 0, 0.15, 1],
+                left: { duration: 0.5, ease: [0.32, 0, 0.15, 1] },
+                top: { duration: 0.5, ease: [0.0, 0.55, 0.35, 1] },
+                width: { duration: 0.3, ease: "easeOut" },
+                height: { duration: 0.3, ease: "easeOut" },
+              }}
+            >
+              <div className="w-full h-full rounded-full bg-primary shadow-lg shadow-primary/50" />
+            </motion.div>
+          );
+        })}
+      </AnimatePresence>
+
+      {/* Profile Button */}
+      <Button size="sm" variant="outline" className="w-full" onClick={onViewProfile}>
+        View Profile
+      </Button>
+    </>
   );
 }
 
@@ -136,13 +230,20 @@ export function OrbitView({
   links = [],
   centerLogoUrl,
   centerName,
+  isMembershipOpen,
+  isPublicDirectory,
   onMemberClick,
+  onMemberAttest,
   className = "",
 }: OrbitViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
   const [tooltip, setTooltip] = useState<TooltipState>(null);
+  const [popover, setPopover] = useState<{ node: SimulatedNode; x: number; y: number } | null>(null);
   const [containerRect, setContainerRect] = useState<DOMRect | null>(null);
+
+  // Attestation queue
+  const { addToQueue, isInQueue, setIsOpen: setQueueOpen } = useAttestationQueue();
 
   // Track container size with debouncing to prevent resize animation
   useEffect(() => {
@@ -267,15 +368,49 @@ export function OrbitView({
     []
   );
 
-  // Handle node click
+  // Handle node click - open popover
   const handleNodeClick = useCallback(
-    (node: SimulatedNode) => {
-      if (onMemberClick) {
-        onMemberClick(node.id);
+    (node: SimulatedNode, position: { x: number; y: number }) => {
+      if (!isDraggingRef.current) {
+        setPopover({ node, x: position.x, y: position.y });
+        setTooltip(null);
       }
     },
-    [onMemberClick]
+    []
   );
+
+  // Handle popover actions
+  const handleClosePopover = useCallback(() => {
+    setPopover(null);
+  }, []);
+
+  const handleAddAttestation = useCallback(
+    (type: AttestationType, _rect: DOMRect) => {
+      if (popover) {
+        addToQueue({
+          toUserId: popover.node.id,
+          type,
+        });
+        // Animation is handled in UserProfileCard
+      }
+    },
+    [popover, addToQueue]
+  );
+
+  const handleIsInQueue = useCallback(
+    (type: AttestationType) => {
+      if (!popover) return false;
+      return isInQueue(popover.node.id, type);
+    },
+    [popover, isInQueue]
+  );
+
+  const handleViewProfile = useCallback(() => {
+    if (popover) {
+      onMemberClick?.(popover.node.id);
+      setPopover(null);
+    }
+  }, [popover, onMemberClick]);
 
   return (
     <div
@@ -291,6 +426,8 @@ export function OrbitView({
           height={containerSize.height}
           centerLogoUrl={centerLogoUrl}
           centerName={centerName}
+          isMembershipOpen={isMembershipOpen}
+          isPublicDirectory={isPublicDirectory}
           onNodeClick={handleNodeClick}
           onNodeHover={handleNodeHover}
           onNodeDragStart={handleNodeDragStart}
@@ -303,13 +440,34 @@ export function OrbitView({
       )}
 
       {/* Tooltip */}
-      {tooltip && containerRect && (
+      {tooltip && containerRect && !popover && (
         <MemberTooltip
           node={tooltip.node}
           x={tooltip.x}
           y={tooltip.y}
           containerRect={containerRect}
         />
+      )}
+
+      {/* User Profile Popover */}
+      {popover && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={handleClosePopover} />
+          <div
+            className="fixed z-50 w-72 rounded-2xl border border-border bg-popover p-4 shadow-2xl flex flex-col gap-4"
+            style={{
+              left: Math.min(popover.x, window.innerWidth - 300),
+              top: Math.min(popover.y + 10, window.innerHeight - 280),
+            }}
+          >
+            <UserProfileCard
+              node={popover.node}
+              onViewProfile={handleViewProfile}
+              onAddAttestation={handleAddAttestation}
+              isInQueue={handleIsInQueue}
+            />
+          </div>
+        </>
       )}
     </div>
   );
