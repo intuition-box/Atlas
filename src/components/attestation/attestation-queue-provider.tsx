@@ -10,6 +10,9 @@ import type { AttestationType } from "@/config/attestations";
 export type QueuedAttestation = {
   id: string; // Client-side unique ID for the queue item
   toUserId: string;
+  toName: string;
+  toHandle?: string;
+  toAvatarUrl?: string | null;
   type: AttestationType;
 };
 
