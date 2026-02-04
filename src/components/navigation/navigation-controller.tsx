@@ -2,10 +2,11 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useSession } from "next-auth/react";
 import { Eye, EyeOff, Settings } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { ROUTES } from "@/lib/routes";
+import { ROUTES, userSettingsPath } from "@/lib/routes";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Tooltip,
@@ -17,7 +18,6 @@ import { NavigationButton } from "./navigation-button";
 import {
   useNavigationContext,
   useNavigationVisibility,
-  type NavigationItem,
 } from "./navigation-provider";
 import { AttestationQueueButton } from "@/components/attestation/attestation-queue-button";
 import { AttestationQueuePanel } from "@/components/attestation/attestation-queue-panel";
@@ -31,8 +31,6 @@ type NavigationControllerProps = {
   logoUrl?: string | null;
   /** App/site name for logo fallback */
   siteName?: string;
-  /** User settings path */
-  userSettingsPath?: string;
   className?: string;
 };
 
@@ -43,11 +41,14 @@ type NavigationControllerProps = {
 export function NavigationController({
   logoUrl,
   siteName = "Orbyt",
-  userSettingsPath = "/settings",
   className,
 }: NavigationControllerProps) {
+  const { data: session } = useSession();
   const { controls, isVisible } = useNavigationContext();
   const { toggle } = useNavigationVisibility();
+
+  const userHandle = session?.user?.handle;
+  const settingsHref = userHandle ? userSettingsPath(userHandle) : null;
 
   // Don't render anything if visibility is off (except the eye toggle)
   const showControls = isVisible;
@@ -102,11 +103,11 @@ export function NavigationController({
           {showControls && <AttestationQueueButton />}
 
           {/* User Settings */}
-          {showControls && (
+          {showControls && settingsHref && (
             <NavigationButton
               icon={Settings}
               label="Settings"
-              href={userSettingsPath}
+              href={settingsHref}
             />
           )}
           {/* Visibility Toggle - Always visible */}
@@ -142,29 +143,21 @@ export function NavigationController({
         </div>
       </div>
 
-      {/* Bottom Left - Contextual Controls */}
-      {showControls && controls.bottomLeft && controls.bottomLeft.length > 0 && (
+      {/* Bottom Left - Community Controls (horizontal) */}
+      {showControls && (controls.bottomLeft?.length > 0 || controls.bottomRight?.length > 0) && (
         <div className="absolute bottom-4 left-4 sm:bottom-6 sm:left-6 pointer-events-auto">
-          <div className="flex flex-col gap-2">
-            {controls.bottomLeft.map((item, idx) => (
+          <div className="flex items-center gap-2">
+            {controls.bottomLeft?.map((item, idx) => (
               <NavigationButton key={`bottomLeft-${idx}`} {...item} />
             ))}
-          </div>
-        </div>
-      )}
-
-      {/* Bottom Right - Contextual Controls (usually admin) */}
-      {showControls && controls.bottomRight && controls.bottomRight.length > 0 && (
-        <div className="absolute bottom-4 right-4 sm:bottom-6 sm:right-6 pointer-events-auto">
-          <div className="flex flex-col gap-2">
-            {controls.bottomRight.map((item, idx) => (
+            {controls.bottomRight?.map((item, idx) => (
               <NavigationButton key={`bottomRight-${idx}`} {...item} />
             ))}
           </div>
         </div>
       )}
 
-      {/* Attestation Queue Panel (global sheet) */}
+      {/* Attestation Queue Panel (global dialog) */}
       <AttestationQueuePanel />
     </div>
   );

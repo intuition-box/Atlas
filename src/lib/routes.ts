@@ -58,6 +58,11 @@ export function userPath(handle: string): string {
   return `/u/${encodeURIComponent(handle)}`;
 }
 
+/** `/u/:handle/settings` */
+export function userSettingsPath(handle: string): string {
+  return `/u/${encodeURIComponent(handle)}/settings`;
+}
+
 /** `/c` */
 export function communitiesPath(): string {
   return ROUTES.communitiesIndex;
