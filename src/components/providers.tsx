@@ -1,13 +1,47 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { SessionProvider, useSession } from "next-auth/react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { ROUTES, isPublicRoute, isOnboardingRoute } from "@/lib/routes";
+import { resetCsrf, initCsrfVisibilityRefresh } from "@/lib/api/client";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { NavigationProvider } from "@/components/navigation/navigation-provider";
 import { AttestationQueueProvider } from "@/components/attestation/attestation-queue-provider";
+
+/**
+ * Manages CSRF token lifecycle:
+ * - Initializes visibility-based refresh (reset token when tab becomes visible)
+ * - Resets token on session changes (login/logout)
+ */
+function CsrfManager({ children }: { children: React.ReactNode }) {
+  const { data: session, status } = useSession();
+  const prevSessionIdRef = useRef<string | null | undefined>(undefined);
+
+  // Initialize visibility-based CSRF refresh
+  useEffect(() => {
+    const cleanup = initCsrfVisibilityRefresh();
+    return cleanup;
+  }, []);
+
+  // Reset CSRF token when session changes (login/logout/switch user)
+  useEffect(() => {
+    if (status === "loading") return;
+
+    const currentSessionId = session?.user?.id ?? null;
+    const prevSessionId = prevSessionIdRef.current;
+
+    // Skip initial mount (when prevSessionId is undefined)
+    if (prevSessionId !== undefined && prevSessionId !== currentSessionId) {
+      resetCsrf();
+    }
+
+    prevSessionIdRef.current = currentSessionId;
+  }, [session?.user?.id, status]);
+
+  return <>{children}</>;
+}
 
 /**
  * Client-side guard for onboarding flow:
@@ -80,13 +114,15 @@ function OnboardingGuard({ children }: { children: React.ReactNode }) {
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <SessionProvider refetchOnWindowFocus={true} refetchInterval={0}>
-      <TooltipProvider delay={300}>
-        <NavigationProvider>
-          <AttestationQueueProvider>
-            <OnboardingGuard>{children}</OnboardingGuard>
-          </AttestationQueueProvider>
-        </NavigationProvider>
-      </TooltipProvider>
+      <CsrfManager>
+        <TooltipProvider delay={300}>
+          <NavigationProvider>
+            <AttestationQueueProvider>
+              <OnboardingGuard>{children}</OnboardingGuard>
+            </AttestationQueueProvider>
+          </NavigationProvider>
+        </TooltipProvider>
+      </CsrfManager>
     </SessionProvider>
   );
 }
