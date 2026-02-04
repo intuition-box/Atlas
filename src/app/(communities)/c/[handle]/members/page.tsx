@@ -22,6 +22,7 @@ import {
   ComboboxItem,
   ComboboxList,
 } from "@/components/ui/combobox"
+import { InfiniteScroll } from "@/components/ui/infinite-scroll"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { PageHeader } from "@/components/common/page-header"
@@ -960,21 +961,13 @@ export default function CommunityMembersPage() {
       ) : items.length === 0 ? (
         <EmptyState hasFilters={activeFilters} onClearFilters={handleClearAll} />
       ) : (
-        <MembersGrid items={items} view={view} />
-      )}
-
-      {!loading && data?.page?.nextCursor && (
-        <div className="flex justify-center">
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={loadingMore}
-            onClick={() => setCursor(data.page.nextCursor)}
-            aria-busy={loadingMore}
-          >
-            {loadingMore ? "Loading…" : "Load more"}
-          </Button>
-        </div>
+        <InfiniteScroll
+          onLoadMore={() => setCursor(data?.page?.nextCursor ?? null)}
+          hasMore={!!data?.page?.nextCursor}
+          isLoading={loadingMore}
+        >
+          <MembersGrid items={items} view={view} />
+        </InfiniteScroll>
       )}
     </main>
   )
