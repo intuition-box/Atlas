@@ -251,13 +251,9 @@ export function api<S extends z.ZodTypeAny>(
 
       // 4. CSRF (POST only)
       if (isPost && opts.csrf !== false) {
-        try {
-          await requireCsrf(req);
-        } catch (e) {
-          const parsed = ErrorWithStatusSchema.safeParse(e);
-          const message = parsed.success ? parsed.data.message : "Security check failed";
-          const status = parsed.success ? parsed.data.status : 419;
-          return errJson(withMeta({ code: "CSRF_FAILED", message, status }));
+        const csrfResult = requireCsrf(req);
+        if (!csrfResult.ok) {
+          return errJson(withMeta({ code: "CSRF_FAILED", message: csrfResult.error.message, status: csrfResult.error.status }));
         }
       }
 

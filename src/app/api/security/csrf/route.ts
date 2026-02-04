@@ -20,11 +20,13 @@ function forbiddenOrigin(): ReturnType<typeof errJson> {
 // Sets the CSRF cookie and returns { csrfToken }.
 export function GET(req: NextRequest) {
   const res = isSameOrigin(req) ? jsonWithCsrfToken() : forbiddenOrigin();
-  return applyCsrfRouteHeaders(res);
+  applyCsrfRouteHeaders(res);
+  return res;
 }
 
-// Allow POST too (some clients prefer POST for “init” calls).
+// Allow POST too (some clients prefer POST for "init" calls).
 export function POST(req: NextRequest) {
   const res = isSameOrigin(req) ? jsonWithCsrfToken() : forbiddenOrigin();
-  return applyCsrfRouteHeaders(res);
+  applyCsrfRouteHeaders(res);
+  return res;
 }

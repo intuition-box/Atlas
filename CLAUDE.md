@@ -133,7 +133,7 @@ Use `api()` from `@/lib/api/server` which handles:
 1. Method validation
 2. Authentication (`auth: 'public' | 'auth' | 'onboarded'`)
 3. Origin check (same-origin)
-4. CSRF validation (POST)
+4. CSRF validation (POST) — uses `requireCsrf()` which returns `Result<null, CsrfProblem>`
 5. Content-Type validation (POST)
 6. Rate limiting (IETF headers)
 7. Payload parsing + size limits
@@ -567,6 +567,50 @@ revalidateTag(`space:${id}`);
 - Sanitize any HTML; never trust user content
 - No long-lived secrets in CI; prefer short-lived tokens
 - Rotate credentials quarterly or upon offboarding
+
+## CSRF Protection
+
+**Architecture:** Double-submit cookie scheme
+- Server sets an httpOnly CSRF cookie
+- Client fetches token via `GET /api/security/csrf` and echoes it in request header
+- Server validates header matches cookie (timing-safe comparison)
+
+**Files:**
+- `@/lib/security/csrf.ts` — Server-side CSRF helpers
+- `@/lib/api/client.ts` — Client auto-attaches CSRF token to POST requests
+
+**Constants:**
+- Header name: `X-CSRF-Token`
+- Cookie name: `__Host-orbyt-csrf` (prod) / `orbyt-csrf` (dev)
+- Token endpoint response: `{ csrfToken: string }`
+
+**Server usage:**
+
+```ts
+import { requireCsrf } from '@/lib/security/csrf';
+
+// Returns Result<null, CsrfProblem> — never throws
+const csrfResult = requireCsrf(req);
+if (!csrfResult.ok) {
+  return errJson({ code: 'CSRF_FAILED', message: csrfResult.error.message, status: csrfResult.error.status });
+}
+```
+
+> **Note:** The `api()` middleware handles CSRF automatically for POST requests. Use `requireCsrf` directly only for custom route handlers outside the `api()` pattern.
+
+**Client usage:**
+
+```ts
+import { apiPost } from '@/lib/api/client';
+
+// CSRF token auto-attached (fetched on first POST, cached, retried on 419)
+const result = await apiPost('/api/resource/create', { data });
+```
+
+**Key behaviors:**
+- `apiPost` automatically fetches and caches CSRF token
+- On 419 (CSRF failure), client resets token and retries once
+- Use `csrf: false` option to skip CSRF (for webhooks/machine-to-machine)
 
 ## Neon + Prisma (Vercel)
 

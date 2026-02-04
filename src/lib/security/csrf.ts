@@ -19,7 +19,7 @@ import { err, apiErr, ok, apiOk } from "@/lib/api/shapes";
  *   - header token matches cookie token (timing-safe)
  */
 
-export const CSRF_HEADER_NAME = "x-orbyt-csrf";
+export const CSRF_HEADER_NAME = "X-CSRF-Token";
 
 const CSRF_COOKIE_NAME_PROD = "__Host-orbyt-csrf";
 const CSRF_COOKIE_NAME_DEV = "orbyt-csrf";

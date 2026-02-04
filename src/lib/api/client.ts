@@ -102,7 +102,7 @@ async function defaultCsrfFetcher(): Promise<string> {
     if (!r.ok) return "";
     const json: unknown = await r.json().catch(() => null);
     if (isApiEnvelope(json) && json.ok) {
-      return (json.data as { token?: string })?.token ?? "";
+      return (json.data as { csrfToken?: string })?.csrfToken ?? "";
     }
     return "";
   } catch {
