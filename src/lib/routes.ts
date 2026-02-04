@@ -63,6 +63,11 @@ export function userSettingsPath(handle: string): string {
   return `/u/${encodeURIComponent(handle)}/settings`;
 }
 
+/** `/u/:handle/attestations` */
+export function userAttestationsPath(handle: string): string {
+  return `/u/${encodeURIComponent(handle)}/attestations`;
+}
+
 /** `/c` */
 export function communitiesPath(): string {
   return ROUTES.communitiesIndex;
