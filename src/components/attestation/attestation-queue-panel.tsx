@@ -7,13 +7,13 @@ import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-  SheetFooter,
-} from "@/components/ui/sheet";
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { useAttestationQueue, type QueuedAttestation } from "./attestation-queue-provider";
 import { ATTESTATION_TYPES } from "@/config/attestations";
 
@@ -116,7 +116,7 @@ export function AttestationQueuePanel() {
       if (failures.length > 0) {
         setError(`${failures.length} attestation(s) failed to submit`);
       } else {
-        // All successful - close panel
+        // All successful - close dialog
         setIsOpen(false);
       }
     } catch {
@@ -127,23 +127,24 @@ export function AttestationQueuePanel() {
   };
 
   return (
-    <Sheet open={isOpen} onOpenChange={setIsOpen}>
-      <SheetContent side="right" className="w-full sm:max-w-md">
-        <SheetHeader>
-          <SheetTitle>Attestation Queue</SheetTitle>
-          <SheetDescription>
-            Review and submit your queued attestations
-          </SheetDescription>
-        </SheetHeader>
+    <Dialog open={isOpen} onOpenChange={setIsOpen}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Attestation Queue</DialogTitle>
+          <DialogDescription>
+            Review and mint your queued attestations.
+          </DialogDescription>
+        </DialogHeader>
 
-        <div className="flex-1 overflow-y-auto px-6 py-4">
+        <div className="max-h-80 overflow-y-auto">
           {queue.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 text-center">
               <p className="text-muted-foreground text-sm">
-                No attestations queued
+                No attestations queued.
               </p>
-              <p className="text-muted-foreground/60 text-xs mt-1">
-                Add attestations from member profiles
+              <p className="mt-1">
+                Attestations strengthen relationships between users. When you and
+                the recipient share a community, your attestations increase their <span className="text-foreground font-medium">Reach</span> (visibility) and your <span className="text-foreground font-medium">Love</span> (participation).
               </p>
             </div>
           ) : (
@@ -165,38 +166,34 @@ export function AttestationQueuePanel() {
           )}
         </div>
 
-        <SheetFooter>
-          {queue.length > 0 && (
-            <>
-              <Button
-                variant="ghost"
-                onClick={clearQueue}
-                disabled={isSubmitting}
-                className="flex-1"
-              >
-                Clear All
-              </Button>
-              <Button
-                onClick={handleSubmitAll}
-                disabled={isSubmitting}
-                className="flex-1"
-              >
-                {isSubmitting ? (
-                  <>
-                    <Loader2 className="size-4 animate-spin mr-2" />
-                    Submitting...
-                  </>
-                ) : (
-                  <>
-                    <Send className="size-4 mr-2" />
-                    Submit {queue.length} Attestation{queue.length !== 1 ? "s" : ""}
-                  </>
-                )}
-              </Button>
-            </>
-          )}
-        </SheetFooter>
-      </SheetContent>
-    </Sheet>
+        {queue.length > 0 && (
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={clearQueue}
+              disabled={isSubmitting}
+            >
+              Clear All
+            </Button>
+            <Button
+              onClick={handleSubmitAll}
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="size-4 animate-spin mr-2" />
+                  Submitting...
+                </>
+              ) : (
+                <>
+                  <Send className="size-4 mr-2" />
+                  Submit {queue.length}
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
