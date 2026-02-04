@@ -474,6 +474,11 @@ model Attestation {
   /// When supersededById is set, this attestation has been replaced by a newer one.
   supersededById  String?
 
+  /// Blockchain minting support.
+  /// When mintedAt is set, this attestation has been committed onchain.
+  mintedAt    DateTime?
+  mintTxHash  String?    // blockchain transaction hash
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -492,6 +497,7 @@ model Attestation {
   @@index([fromUserId, toUserId, type])
   @@index([revokedAt, createdAt])
   @@index([supersededById])
+  @@index([fromUserId, mintedAt])  // for querying unminted attestations
 }
 
 /// -----------------------------
