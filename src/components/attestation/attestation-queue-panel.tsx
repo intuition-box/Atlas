@@ -4,6 +4,7 @@ import * as React from "react";
 import { X, Send, Loader2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { apiPost } from "@/lib/api/client";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,7 +16,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { useAttestationQueue, type QueuedAttestation } from "./attestation-queue-provider";
-import { ATTESTATION_TYPES } from "@/config/attestations";
+import { ATTESTATION_TYPES, type AttestationType } from "@/config/attestations";
 
 /* ────────────────────────────
    Helpers
@@ -97,18 +98,16 @@ export function AttestationQueuePanel() {
       // Submit all attestations in parallel
       const results = await Promise.allSettled(
         queue.map(async (item) => {
-          const response = await fetch("/api/attestation/create", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
+          const result = await apiPost<{ attestation: { id: string } }>(
+            "/api/attestation/create",
+            {
               toUserId: item.toUserId,
               type: item.type,
-            }),
-          });
+            }
+          );
 
-          if (!response.ok) {
-            const data = await response.json().catch(() => ({}));
-            throw new Error(data.message || "Failed to create attestation");
+          if (!result.ok) {
+            throw new Error(result.error.message || "Failed to create attestation");
           }
 
           return item.id;

@@ -1,10 +1,7 @@
-import type { NextRequest } from "next/server";
 import { z } from "zod";
 
-import { auth } from "@/lib/auth/session";
-import { errJson, okJson } from "@/lib/api/server";
+import { api, okJson, errJson } from "@/lib/api/server";
 import { db } from "@/lib/db/client";
-import { requireCsrf } from "@/lib/security/csrf";
 
 export const runtime = "nodejs";
 
@@ -18,82 +15,50 @@ type RetractOk = {
   alreadyRevoked: boolean;
 };
 
-export async function POST(req: NextRequest) {
-  try {
-    const session = await auth();
-    const userId = session?.user?.id;
+export const POST = api(BodySchema, async (ctx) => {
+  const { viewerId, json } = ctx;
+  const { attestationId, reason } = json;
 
-    if (!userId) {
-      return errJson({ code: "UNAUTHORIZED", message: "Sign in required", status: 401 });
-    }
+  const row = await db.attestation.findUnique({
+    where: { id: attestationId },
+    select: {
+      id: true,
+      fromUserId: true,
+      revokedAt: true,
+      supersededById: true,
+    },
+  });
 
-    const csrf = await requireCsrf(req);
-    if (csrf instanceof Response) return csrf;
+  if (!row) {
+    return errJson({ code: "NOT_FOUND", message: "Attestation not found", status: 404 });
+  }
 
-    const body = await req.json().catch(() => null);
-    const parsed = await BodySchema.safeParseAsync(body);
+  if (row.revokedAt) {
+    return okJson<RetractOk>({ attestation: { id: row.id }, alreadyRevoked: true });
+  }
 
-    if (!parsed.success) {
-      return errJson({
-        code: "INVALID_REQUEST",
-        message: "Invalid request",
-        status: 400,
-        issues: parsed.error.issues.map((iss) => ({
-          path: iss.path.map((seg) => (typeof seg === "number" ? seg : String(seg))),
-          message: iss.message,
-        })),
-      });
-    }
-
-    const { attestationId, reason } = parsed.data;
-
-    const row = await db.attestation.findUnique({
-      where: { id: attestationId },
-      select: {
-        id: true,
-        fromUserId: true,
-        revokedAt: true,
-        supersededById: true,
-      },
-    });
-
-    if (!row) {
-      return errJson({ code: "NOT_FOUND", message: "Attestation not found", status: 404 });
-    }
-
-    if (row.revokedAt) {
-      return okJson<RetractOk>({ attestation: { id: row.id }, alreadyRevoked: true });
-    }
-
-    if (row.supersededById) {
-      return errJson({
-        code: "CONFLICT",
-        message: "Attestation can't be retracted (superseded)",
-        status: 409,
-      });
-    }
-
-    // Only the author can retract their own attestation.
-    if (row.fromUserId !== userId) {
-      return errJson({ code: "FORBIDDEN", message: "Not allowed", status: 403 });
-    }
-
-    await db.attestation.update({
-      where: { id: row.id },
-      data: {
-        revokedAt: new Date(),
-        revokedByUserId: userId,
-        revokedReason: reason ?? null,
-      },
-      select: { id: true },
-    });
-
-    return okJson<RetractOk>({ attestation: { id: row.id }, alreadyRevoked: false });
-  } catch {
+  if (row.supersededById) {
     return errJson({
-      code: "INTERNAL_ERROR",
-      message: "Something went wrong",
-      status: 500,
+      code: "CONFLICT",
+      message: "Attestation can't be retracted (superseded)",
+      status: 409,
     });
   }
-}
+
+  // Only the author can retract their own attestation.
+  if (row.fromUserId !== viewerId) {
+    return errJson({ code: "FORBIDDEN", message: "Not allowed", status: 403 });
+  }
+
+  await db.attestation.update({
+    where: { id: row.id },
+    data: {
+      revokedAt: new Date(),
+      revokedByUserId: viewerId,
+      revokedReason: reason ?? null,
+    },
+    select: { id: true },
+  });
+
+  return okJson<RetractOk>({ attestation: { id: row.id }, alreadyRevoked: false });
+}, { auth: "auth" });
