@@ -13,6 +13,7 @@ import { CogIcon, FileTextIcon, PlusIcon, UsersIcon } from "@/components/ui/icon
 import { OrbitView } from "@/components/orbit/orbit-view";
 import type { OrbitMember, MemberLink } from "@/components/orbit/types";
 import { useNavigation, type NavigationControls } from "@/components/navigation/navigation-provider";
+import { Spinner } from "@/components/ui/spinner";
 
 /* ────────────────────────────
    Types
@@ -162,16 +163,7 @@ export default function CommunityPage() {
 
   if (state.status === "loading" || state.status === "idle") {
     return (
-      <main className="mx-auto w-full max-w-5xl px-4 py-10">
-        <div className="flex items-start gap-4">
-          <div className="size-14 animate-pulse rounded-2xl bg-muted" />
-          <div className="flex-1">
-            <div className="h-6 w-64 animate-pulse rounded bg-muted" />
-            <div className="mt-2 h-4 w-96 animate-pulse rounded bg-muted" />
-          </div>
-        </div>
-        <div className="mt-8 h-[560px] w-full animate-pulse rounded-2xl bg-muted" />
-      </main>
+      <Spinner />
     );
   }
 
