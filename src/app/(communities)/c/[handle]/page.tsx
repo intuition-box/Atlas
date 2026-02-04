@@ -59,19 +59,19 @@ function parseMembers(raw: unknown[]): OrbitMember[] {
   for (const m of raw as any[]) {
     const id = String(m?.id ?? "");
     const name = String(m?.name ?? "");
-    const handleOrId = String(m?.handle ?? id);
+    const handle = (m?.handle ?? null) as string | null;
     const orbitLevel = m?.orbitLevel as OrbitMember["orbitLevel"];
     const reachScore = Number(m?.reachScore ?? 0);
 
     // Validate orbit level
     const validLevels = ["ADVOCATE", "CONTRIBUTOR", "PARTICIPANT", "EXPLORER"];
     if (!validLevels.includes(orbitLevel)) continue;
-    if (!handleOrId || !name) continue;
+    if (!id || !name) continue;
 
     result.push({
-      id: handleOrId,
-      handle: (m?.handle ?? null) as string | null,
-      name: name || handleOrId,
+      id,
+      handle,
+      name,
       avatarUrl: (m?.avatarUrl ?? m?.image ?? null) as string | null,
       orbitLevel,
       loveScore: Number(m?.loveScore ?? 0),
