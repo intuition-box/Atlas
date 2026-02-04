@@ -16,12 +16,13 @@ import { useAttestationQueue } from "./attestation-queue-provider";
 ──────────────────────────── */
 
 export function AttestationQueueButton({ className }: { className?: string }) {
-  const { queue, toggleOpen, isOpen } = useAttestationQueue();
+  const { queue, toggleOpen, isOpen, buttonRef } = useAttestationQueue();
   const count = queue.length;
 
   return (
     <Tooltip>
       <TooltipTrigger
+        ref={buttonRef}
         onClick={toggleOpen}
         className={cn(
           "relative flex items-center justify-center",

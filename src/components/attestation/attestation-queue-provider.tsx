@@ -10,9 +10,6 @@ import type { AttestationType } from "@/config/attestations";
 export type QueuedAttestation = {
   id: string; // Client-side unique ID for the queue item
   toUserId: string;
-  toHandle: string;
-  toName: string;
-  toAvatarUrl: string | null;
   type: AttestationType;
 };
 
@@ -25,6 +22,8 @@ type AttestationQueueContextValue = {
   isOpen: boolean;
   setIsOpen: (open: boolean) => void;
   toggleOpen: () => void;
+  /** Ref to the queue button for flying animation target */
+  buttonRef: React.RefObject<HTMLButtonElement | null>;
 };
 
 /* ────────────────────────────
@@ -40,6 +39,7 @@ const AttestationQueueContext = React.createContext<AttestationQueueContextValue
 export function AttestationQueueProvider({ children }: { children: React.ReactNode }) {
   const [queue, setQueue] = React.useState<QueuedAttestation[]>([]);
   const [isOpen, setIsOpen] = React.useState(false);
+  const buttonRef = React.useRef<HTMLButtonElement | null>(null);
 
   const addToQueue = React.useCallback((attestation: Omit<QueuedAttestation, "id">) => {
     setQueue((prev) => {
@@ -92,6 +92,7 @@ export function AttestationQueueProvider({ children }: { children: React.ReactNo
       isOpen,
       setIsOpen,
       toggleOpen,
+      buttonRef,
     }),
     [queue, addToQueue, removeFromQueue, clearQueue, isInQueue, isOpen, toggleOpen]
   );

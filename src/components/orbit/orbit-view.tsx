@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { motion, AnimatePresence } from "motion/react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 
@@ -10,8 +9,7 @@ import { useOrbitSimulation } from "./use-orbit-simulation";
 import type { OrbitViewProps, SimulatedNode, TooltipState } from "./types";
 import { Spinner } from "../ui/spinner";
 import { INTERACTION } from "./constants";
-import { useAttestationQueue } from "@/components/attestation/attestation-queue-provider";
-import { ATTESTATION_TYPES, type AttestationType } from "@/config/attestations";
+import { AttestationButtons } from "@/components/attestation/attestation-buttons";
 
 /* ────────────────────────────
    Helpers
@@ -87,32 +85,10 @@ function MemberTooltip({ node, x, y, containerRect }: MemberTooltipProps) {
 type UserProfileCardProps = {
   node: SimulatedNode;
   onViewProfile: () => void;
-  onAddAttestation: (type: AttestationType, rect: DOMRect) => void;
-  isInQueue: (type: AttestationType) => boolean;
 };
 
-function UserProfileCard({ node, onViewProfile, onAddAttestation, isInQueue }: UserProfileCardProps) {
+function UserProfileCard({ node, onViewProfile }: UserProfileCardProps) {
   const lastActive = formatRelativeTime(node.lastActiveAt);
-  const [flyingButtons, setFlyingButtons] = useState<{ id: string; type: AttestationType; rect: DOMRect }[]>([]);
-  const { buttonRef } = useAttestationQueue();
-
-  const handleAttestClick = (e: React.MouseEvent, type: AttestationType) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const id = `${type}-${Date.now()}`;
-
-    // Start the flying animation
-    setFlyingButtons((prev) => [...prev, { id, type, rect }]);
-
-    // Trigger the queue add after a small delay so the animation starts from the button
-    setTimeout(() => {
-      onAddAttestation(type, rect);
-    }, 50);
-
-    // Remove the flying button after animation completes
-    setTimeout(() => {
-      setFlyingButtons((prev) => prev.filter((b) => b.id !== id));
-    }, 600);
-  };
 
   return (
     <>
@@ -140,78 +116,8 @@ function UserProfileCard({ node, onViewProfile, onAddAttestation, isInQueue }: U
         </div>
       )}
 
-      {/* Attestation Types */}
-      <div className="flex flex-wrap gap-1.5 justify-center">
-        {Object.values(ATTESTATION_TYPES).map((attestType) => {
-          const inQueue = isInQueue(attestType.id as AttestationType);
-          const isFlying = flyingButtons.some((b) => b.type === attestType.id);
-          return (
-            <button
-              key={attestType.id}
-              onClick={(e) => handleAttestClick(e, attestType.id as AttestationType)}
-              disabled={inQueue || isFlying}
-              className={`px-2 py-1 text-xs rounded-full border transition-all duration-200 ${
-                inQueue
-                  ? "bg-primary/10 border-primary/30 text-primary cursor-default"
-                  : isFlying
-                    ? "opacity-0 scale-75"
-                    : "border-border hover:bg-muted hover:border-muted-foreground/30"
-              }`}
-            >
-              {attestType.label}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Flying button animations */}
-      <AnimatePresence>
-        {flyingButtons.map((flying) => {
-          const targetRect = buttonRef?.current?.getBoundingClientRect();
-          if (!targetRect) return null;
-
-          const startX = flying.rect.left + flying.rect.width / 2;
-          const startY = flying.rect.top + flying.rect.height / 2;
-          const endX = targetRect.left + targetRect.width / 2;
-          const endY = targetRect.top + targetRect.height / 2;
-
-          return (
-            <motion.div
-              key={flying.id}
-              className="fixed z-[100] pointer-events-none"
-              initial={{
-                left: flying.rect.left,
-                top: flying.rect.top,
-                width: flying.rect.width,
-                height: flying.rect.height,
-                borderRadius: 9999,
-                opacity: 1,
-              }}
-              animate={{
-                left: endX - 4,
-                top: endY - 4,
-                width: 8,
-                height: 8,
-                opacity: 1,
-              }}
-              exit={{
-                opacity: 0,
-                scale: 0,
-              }}
-              transition={{
-                duration: 0.5,
-                ease: [0.32, 0, 0.15, 1],
-                left: { duration: 0.5, ease: [0.32, 0, 0.15, 1] },
-                top: { duration: 0.5, ease: [0.0, 0.55, 0.35, 1] },
-                width: { duration: 0.3, ease: "easeOut" },
-                height: { duration: 0.3, ease: "easeOut" },
-              }}
-            >
-              <div className="w-full h-full rounded-full bg-primary shadow-lg shadow-primary/50" />
-            </motion.div>
-          );
-        })}
-      </AnimatePresence>
+      {/* Attestation Buttons */}
+      <AttestationButtons toUserId={node.id} className="justify-center" />
 
       {/* Profile Button */}
       <Button size="sm" variant="outline" className="w-full" onClick={onViewProfile}>
@@ -242,8 +148,6 @@ export function OrbitView({
   const [popover, setPopover] = useState<{ node: SimulatedNode; x: number; y: number } | null>(null);
   const [containerRect, setContainerRect] = useState<DOMRect | null>(null);
 
-  // Attestation queue
-  const { addToQueue, isInQueue, setIsOpen: setQueueOpen } = useAttestationQueue();
 
   // Track container size with debouncing to prevent resize animation
   useEffect(() => {
@@ -384,27 +288,6 @@ export function OrbitView({
     setPopover(null);
   }, []);
 
-  const handleAddAttestation = useCallback(
-    (type: AttestationType, _rect: DOMRect) => {
-      if (popover) {
-        addToQueue({
-          toUserId: popover.node.id,
-          type,
-        });
-        // Animation is handled in UserProfileCard
-      }
-    },
-    [popover, addToQueue]
-  );
-
-  const handleIsInQueue = useCallback(
-    (type: AttestationType) => {
-      if (!popover) return false;
-      return isInQueue(popover.node.id, type);
-    },
-    [popover, isInQueue]
-  );
-
   const handleViewProfile = useCallback(() => {
     if (popover) {
       onMemberClick?.(popover.node.id);
@@ -463,8 +346,6 @@ export function OrbitView({
             <UserProfileCard
               node={popover.node}
               onViewProfile={handleViewProfile}
-              onAddAttestation={handleAddAttestation}
-              isInQueue={handleIsInQueue}
             />
           </div>
         </>
