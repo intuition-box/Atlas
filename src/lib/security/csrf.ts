@@ -12,6 +12,7 @@ import {
   setCookie,
   clearCookie,
   hostCookieName,
+  timingSafeEqual,
 } from "@/lib/security/cookies";
 
 /**
@@ -55,13 +56,6 @@ export type CsrfResponse = {
 function isUnsafeMethod(method: string): boolean {
   const m = method.toUpperCase();
   return m !== "GET" && m !== "HEAD" && m !== "OPTIONS";
-}
-
-function timingSafeEqual(a: string, b: string): boolean {
-  const aBuf = Buffer.from(a, "utf8");
-  const bBuf = Buffer.from(b, "utf8");
-  if (aBuf.length !== bBuf.length) return false;
-  return crypto.timingSafeEqual(aBuf, bBuf);
 }
 
 function requestOrigin(req: NextRequest): string {

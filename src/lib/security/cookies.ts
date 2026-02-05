@@ -40,28 +40,78 @@ export function isProd(): boolean {
 }
 
 // ============================================================================
+// Cryptographic Helpers
+// ============================================================================
+
+/**
+ * Timing-safe string comparison to prevent timing attacks.
+ * Returns false if lengths differ (but still constant-time for equal lengths).
+ */
+export function timingSafeEqual(a: string, b: string): boolean {
+  const aBuf = Buffer.from(a, "utf8");
+  const bBuf = Buffer.from(b, "utf8");
+  if (aBuf.length !== bBuf.length) return false;
+  return crypto.timingSafeEqual(aBuf, bBuf);
+}
+
+// ============================================================================
 // Encryption Helpers
 // ============================================================================
 
 const ENCRYPTION_ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 12; // 96 bits for GCM
 const AUTH_TAG_LENGTH = 16; // 128 bits
+const KEY_LENGTH = 32; // 256 bits
 
-function getEncryptionKey(): Buffer {
+/**
+ * Current encryption version. Increment when changing encryption scheme.
+ * Stored as first byte of encrypted payload for future key rotation support.
+ */
+const ENCRYPTION_VERSION = 0x01;
+
+/**
+ * Context strings for HKDF key derivation.
+ * Using different contexts ensures derived keys are domain-separated.
+ */
+const HKDF_SALT = "orbyt-cookie-encryption-v1";
+const HKDF_INFO = "cookie-aes-256-gcm";
+
+function getAuthSecret(): string {
   const secret = process.env.AUTH_SECRET;
   if (!secret) {
     throw new Error("AUTH_SECRET is required for encrypted cookies");
   }
-  // Derive a 256-bit key from AUTH_SECRET using SHA-256
-  return crypto.createHash("sha256").update(secret).digest();
+  return secret;
+}
+
+/**
+ * Derive encryption key using HKDF (HMAC-based Key Derivation Function).
+ * This is cryptographically stronger than raw SHA-256 hashing.
+ */
+function deriveEncryptionKey(): Buffer {
+  return Buffer.from(
+    crypto.hkdfSync(
+      "sha256",
+      getAuthSecret(),
+      HKDF_SALT,
+      HKDF_INFO,
+      KEY_LENGTH,
+    ),
+  );
 }
 
 /**
  * Encrypt a value using AES-256-GCM.
- * Returns: base64url(iv || ciphertext || authTag)
+ * Returns: base64url(version || iv || ciphertext || authTag)
+ *
+ * Format (versioned for future key rotation):
+ * - Byte 0: Version (0x01)
+ * - Bytes 1-12: IV (96 bits)
+ * - Bytes 13-N: Ciphertext
+ * - Last 16 bytes: Auth tag (128 bits)
  */
 function encrypt(plaintext: string): string {
-  const key = getEncryptionKey();
+  const key = deriveEncryptionKey();
   const iv = crypto.randomBytes(IV_LENGTH);
   const cipher = crypto.createCipheriv(ENCRYPTION_ALGORITHM, key, iv, {
     authTagLength: AUTH_TAG_LENGTH,
@@ -73,27 +123,39 @@ function encrypt(plaintext: string): string {
   ]);
   const authTag = cipher.getAuthTag();
 
-  // Concatenate: iv || ciphertext || authTag
-  const combined = Buffer.concat([iv, encrypted, authTag]);
+  // Concatenate: version || iv || ciphertext || authTag
+  const combined = Buffer.concat([
+    Buffer.from([ENCRYPTION_VERSION]),
+    iv,
+    encrypted,
+    authTag,
+  ]);
   return combined.toString("base64url");
 }
 
 /**
  * Decrypt a value encrypted with encrypt().
- * Returns null if decryption fails (tampered, wrong key, etc.).
+ * Returns null if decryption fails (tampered, wrong key, unsupported version, etc.).
  */
 function decrypt(ciphertext: string): string | null {
   try {
-    const key = getEncryptionKey();
     const combined = Buffer.from(ciphertext, "base64url");
 
-    if (combined.length < IV_LENGTH + AUTH_TAG_LENGTH + 1) {
-      return null; // Too short to be valid
+    // Minimum length: version (1) + iv (12) + at least 1 byte ciphertext + auth tag (16)
+    if (combined.length < 1 + IV_LENGTH + 1 + AUTH_TAG_LENGTH) {
+      return null;
     }
 
-    const iv = combined.subarray(0, IV_LENGTH);
+    const version = combined[0];
+    if (version !== ENCRYPTION_VERSION) {
+      // Unsupported version — could add migration logic here for key rotation
+      return null;
+    }
+
+    const key = deriveEncryptionKey();
+    const iv = combined.subarray(1, 1 + IV_LENGTH);
     const authTag = combined.subarray(-AUTH_TAG_LENGTH);
-    const encrypted = combined.subarray(IV_LENGTH, -AUTH_TAG_LENGTH);
+    const encrypted = combined.subarray(1 + IV_LENGTH, -AUTH_TAG_LENGTH);
 
     const decipher = crypto.createDecipheriv(ENCRYPTION_ALGORITHM, key, iv, {
       authTagLength: AUTH_TAG_LENGTH,

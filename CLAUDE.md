@@ -584,7 +584,7 @@ revalidateTag(`space:${id}`);
 **Core API:**
 
 ```ts
-import { getCookie, setCookie, clearCookie, hostCookieName } from '@/lib/security/cookies';
+import { getCookie, setCookie, clearCookie, hostCookieName, timingSafeEqual } from '@/lib/security/cookies';
 
 // Auto-prefixed with __Host- in production
 const COOKIE_NAME = hostCookieName('my-cookie');
@@ -597,6 +597,9 @@ setCookie(res, COOKIE_NAME, value, { maxAge: 86400 });
 
 // Clear
 clearCookie(res, COOKIE_NAME);
+
+// Timing-safe comparison (for tokens, signatures, etc.)
+if (timingSafeEqual(providedToken, expectedToken)) { /* valid */ }
 ```
 
 **Encrypted cookies** (for sensitive data needing confidentiality):
@@ -604,7 +607,8 @@ clearCookie(res, COOKIE_NAME);
 ```ts
 import { setEncryptedCookie, getEncryptedCookie } from '@/lib/security/cookies';
 
-// Encrypted with AES-256-GCM using AUTH_SECRET
+// Encrypted with AES-256-GCM using HKDF-derived key from AUTH_SECRET
+// Versioned format (v1) for future key rotation support
 setEncryptedCookie(res, 'sensitive', JSON.stringify({ userId: '123' }));
 
 const data = getEncryptedCookie(req, 'sensitive');
@@ -618,6 +622,11 @@ if (data) {
 ```ts
 setCookie(res, name, value, { partitioned: true });
 ```
+
+**Cryptographic details:**
+- Encryption: AES-256-GCM with 96-bit IV, 128-bit auth tag
+- Key derivation: HKDF (RFC 5869) with domain-separated salt/info
+- Versioned payload format (byte 0) for future key rotation
 
 ## CSRF Protection
 

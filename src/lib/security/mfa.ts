@@ -5,7 +5,13 @@ import crypto from "node:crypto";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
-import { clearCookie, getCookie, hostCookieName, setCookie } from "@/lib/security/cookies";
+import {
+  clearCookie,
+  getCookie,
+  hostCookieName,
+  setCookie,
+  timingSafeEqual,
+} from "@/lib/security/cookies";
 
 /**
  * MFA “remember device” cookie
@@ -61,13 +67,6 @@ function base64urlDecode(s: string): Buffer {
 
 function sign(data: string): string {
   return crypto.createHmac("sha256", authSecret()).update(data).digest("base64url");
-}
-
-function timingSafeEqual(a: string, b: string): boolean {
-  const aBuf = Buffer.from(a, "utf8");
-  const bBuf = Buffer.from(b, "utf8");
-  if (aBuf.length !== bBuf.length) return false;
-  return crypto.timingSafeEqual(aBuf, bBuf);
 }
 
 function encodeClaims(claims: RememberClaims): string {
