@@ -15,6 +15,7 @@ type SoundConfig = {
   pitchShift: number;
   volume: number;
   duration?: number;
+  pan?: number; // -1 (left) to 1 (right)
 };
 
 /* ────────────────────────────
@@ -160,11 +161,13 @@ class SoundEffects {
       // Create nodes
       const source = ctx.createBufferSource();
       const gainNode = ctx.createGain();
+      const pannerNode = ctx.createStereoPanner();
 
       // Configure
       source.buffer = this.audioBuffer;
       source.playbackRate.value = config.pitchShift;
       gainNode.gain.setValueAtTime(config.volume, now);
+      pannerNode.pan.value = config.pan ?? 0;
 
       // Fade out to avoid click artifacts
       if (config.duration) {
@@ -173,9 +176,10 @@ class SoundEffects {
         gainNode.gain.linearRampToValueAtTime(0, now + config.duration);
       }
 
-      // Connect: source -> gain -> destination
+      // Connect: source -> gain -> panner -> destination
       source.connect(gainNode);
-      gainNode.connect(ctx.destination);
+      gainNode.connect(pannerNode);
+      pannerNode.connect(ctx.destination);
 
       // Play
       source.start(now);
@@ -243,6 +247,51 @@ class SoundEffects {
    */
   error(): void {
     this.play("error");
+  }
+
+  /**
+   * Play a sound with spatial positioning based on screen location.
+   * Automatically calculates pan and pitch from element position.
+   *
+   * @param type - Sound preset type
+   * @param x - X coordinate (e.g., from click event or element center)
+   */
+  playSpatial(type: SoundType, x: number): void {
+    if (typeof window === "undefined") {
+      this.play(type);
+      return;
+    }
+
+    const preset = SOUND_PRESETS[type];
+    const screenCenter = window.innerWidth / 2;
+
+    // Calculate pan: -1 (left edge) to 1 (right edge)
+    const pan = Math.max(-1, Math.min(1, (x - screenCenter) / screenCenter));
+
+    // Subtle pitch variation tied to pan: left = slightly lower, right = slightly higher
+    const pitchOffset = pan * 0.1; // ±10% pitch shift
+
+    this.playSound({
+      ...preset,
+      pitchShift: preset.pitchShift + pitchOffset,
+      pan,
+    });
+  }
+
+  /**
+   * Play a sound with spatial positioning from a MouseEvent.
+   */
+  playFromEvent(type: SoundType, event: { clientX: number }): void {
+    this.playSpatial(type, event.clientX);
+  }
+
+  /**
+   * Play a sound with spatial positioning from an element's center.
+   */
+  playFromElement(type: SoundType, element: Element): void {
+    const rect = element.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    this.playSpatial(type, centerX);
   }
 
   /* ──────────────────────────
