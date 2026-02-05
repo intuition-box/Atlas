@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { X, Send, Loader2 } from "lucide-react";
+import { X, Save, Loader2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { apiPost } from "@/lib/api/client";
@@ -85,17 +85,17 @@ function QueueItem({
 
 export function AttestationQueuePanel() {
   const { queue, removeFromQueue, clearQueue, isOpen, setIsOpen } = useAttestationQueue();
-  const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [isSaving, setIsSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  const handleSubmitAll = async () => {
+  const handleSaveAll = async () => {
     if (queue.length === 0) return;
 
-    setIsSubmitting(true);
+    setIsSaving(true);
     setError(null);
 
     try {
-      // Submit all attestations in parallel
+      // Save all attestations in parallel
       const results = await Promise.allSettled(
         queue.map(async (item) => {
           const result = await apiPost<{ attestation: { id: string } }>(
@@ -107,14 +107,14 @@ export function AttestationQueuePanel() {
           );
 
           if (!result.ok) {
-            throw new Error(result.error.message || "Failed to create attestation");
+            throw new Error(result.error.message || "Failed to save attestation");
           }
 
           return item.id;
         })
       );
 
-      // Remove successfully submitted attestations
+      // Remove successfully saved attestations
       const successfulIds = results
         .filter((r): r is PromiseFulfilledResult<string> => r.status === "fulfilled")
         .map((r) => r.value);
@@ -126,7 +126,7 @@ export function AttestationQueuePanel() {
       // Check for failures
       const failures = results.filter((r) => r.status === "rejected");
       if (failures.length > 0) {
-        setError(`${failures.length} attestation(s) failed to submit`);
+        setError(`${failures.length} attestation(s) failed to save`);
       } else {
         // All successful - close dialog
         setIsOpen(false);
@@ -134,7 +134,7 @@ export function AttestationQueuePanel() {
     } catch {
       setError("Something went wrong");
     } finally {
-      setIsSubmitting(false);
+      setIsSaving(false);
     }
   };
 
@@ -144,7 +144,7 @@ export function AttestationQueuePanel() {
         <DialogHeader>
           <DialogTitle>Attestation Queue</DialogTitle>
           <DialogDescription>
-            Review and mint your queued attestations.
+            Review and save your queued attestations.
           </DialogDescription>
         </DialogHeader>
 
@@ -183,23 +183,23 @@ export function AttestationQueuePanel() {
             <Button
               variant="ghost"
               onClick={clearQueue}
-              disabled={isSubmitting}
+              disabled={isSaving}
             >
               Clear All
             </Button>
             <Button
-              onClick={handleSubmitAll}
-              disabled={isSubmitting}
+              onClick={handleSaveAll}
+              disabled={isSaving}
             >
-              {isSubmitting ? (
+              {isSaving ? (
                 <>
                   <Loader2 className="size-4 animate-spin mr-2" />
-                  Submitting...
+                  Saving...
                 </>
               ) : (
                 <>
-                  <Send className="size-4 mr-2" />
-                  Submit {queue.length}
+                  <Save className="size-4 mr-2" />
+                  Save {queue.length}
                 </>
               )}
             </Button>

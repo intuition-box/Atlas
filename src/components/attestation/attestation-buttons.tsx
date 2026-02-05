@@ -1,13 +1,19 @@
 "use client";
 
 import * as React from "react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Check } from "lucide-react";
+import { Check, Link2 } from "lucide-react";
 import { useSession } from "next-auth/react";
 
 import { cn } from "@/lib/utils";
+import { apiGet, apiPost } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useAttestationQueue } from "./attestation-queue-provider";
 import { ATTESTATION_TYPES, type AttestationType } from "@/config/attestations";
 
@@ -28,12 +34,24 @@ type AttestationButtonsProps = {
   className?: string;
   /** Size variant */
   size?: "xs" | "sm";
+  /** Show retract button for active attestations */
+  allowRetract?: boolean;
 };
 
 type FlyingDot = {
   id: string;
   type: AttestationType;
   rect: DOMRect;
+};
+
+type ActiveAttestation = {
+  type: string;
+  mintedAt: string | null;
+};
+
+type CheckResponse = {
+  activeTypes: string[];
+  activeAttestations: ActiveAttestation[];
 };
 
 /* ────────────────────────────
@@ -47,14 +65,46 @@ export function AttestationButtons({
   toAvatarUrl,
   className,
   size = "xs",
+  allowRetract = false,
 }: AttestationButtonsProps) {
   const { data: session } = useSession();
   const [animatingTypes, setAnimatingTypes] = useState<Set<AttestationType>>(new Set());
   const [flyingDots, setFlyingDots] = useState<FlyingDot[]>([]);
+  const [activeTypes, setActiveTypes] = useState<Set<AttestationType>>(new Set());
+  const [mintedTypes, setMintedTypes] = useState<Set<AttestationType>>(new Set());
+  const [retractingTypes, setRetractingTypes] = useState<Set<AttestationType>>(new Set());
   const { addToQueue, isInQueue, buttonRef } = useAttestationQueue();
 
-  // Don't show attestation buttons for yourself
   const currentUserId = session?.user?.id;
+
+  // Fetch existing attestations on mount
+  useEffect(() => {
+    if (!currentUserId || currentUserId === toUserId) return;
+
+    const controller = new AbortController();
+
+    apiGet<CheckResponse>("/api/attestation/check", { toUserId }, { signal: controller.signal })
+      .then((result) => {
+        if (result.ok) {
+          setActiveTypes(new Set(result.value.activeTypes as AttestationType[]));
+          // Track which attestations are minted onchain
+          const minted = new Set<AttestationType>();
+          for (const att of result.value.activeAttestations) {
+            if (att.mintedAt) {
+              minted.add(att.type as AttestationType);
+            }
+          }
+          setMintedTypes(minted);
+        }
+      })
+      .catch(() => {
+        // Ignore errors (e.g., aborted)
+      });
+
+    return () => controller.abort();
+  }, [currentUserId, toUserId]);
+
+  // Don't show attestation buttons for yourself
   if (currentUserId === toUserId) {
     return null;
   }
@@ -92,6 +142,50 @@ export function AttestationButtons({
     }, 800);
   };
 
+  const handleRetractClick = async (type: AttestationType) => {
+    if (retractingTypes.has(type)) return;
+
+    setRetractingTypes((prev) => new Set(prev).add(type));
+
+    try {
+      // First, we need to find the attestation ID
+      // For now, we'll use the list endpoint to get it
+      const listResult = await apiGet<{
+        attestations: Array<{ id: string; type: string }>;
+      }>("/api/attestation/list", {
+        fromUserId: currentUserId,
+        toUserId,
+        type,
+        take: "1",
+      });
+
+      if (!listResult.ok || listResult.value.attestations.length === 0) {
+        return;
+      }
+
+      const attestationId = listResult.value.attestations[0]!.id;
+
+      const result = await apiPost<{ alreadyRevoked: boolean }>(
+        "/api/attestation/retract",
+        { attestationId }
+      );
+
+      if (result.ok) {
+        setActiveTypes((prev) => {
+          const next = new Set(prev);
+          next.delete(type);
+          return next;
+        });
+      }
+    } finally {
+      setRetractingTypes((prev) => {
+        const next = new Set(prev);
+        next.delete(type);
+        return next;
+      });
+    }
+  };
+
   return (
     <>
       {/* Attestation Type Buttons */}
@@ -100,7 +194,80 @@ export function AttestationButtons({
           const type = attestType.id as AttestationType;
           const inQueue = isInQueue(toUserId, type);
           const isAnimating = animatingTypes.has(type);
+          const isActive = activeTypes.has(type);
+          const isMinted = mintedTypes.has(type);
+          const isRetracting = retractingTypes.has(type);
 
+          // If already attested and we allow retract, show retract button
+          if (isActive && allowRetract) {
+            return (
+              <Tooltip key={attestType.id}>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size={size}
+                    onClick={() => handleRetractClick(type)}
+                    disabled={isRetracting}
+                    className={cn(
+                      "transition-colors duration-200",
+                      "bg-primary/10 text-primary border-primary/30",
+                      "hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30"
+                    )}
+                  >
+                    {isMinted ? (
+                      <Link2 className="size-3 mr-1" />
+                    ) : (
+                      <Check className="size-3 mr-1" />
+                    )}
+                    {attestType.label}
+                    {isRetracting && (
+                      <span className="ml-1 animate-pulse">...</span>
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p className="text-xs">
+                    {isMinted ? "Onchain - Click to retract" : "Click to retract"}
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            );
+          }
+
+          // If already attested (no retract), show as active/disabled
+          if (isActive) {
+            return (
+              <Tooltip key={attestType.id}>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size={size}
+                    disabled
+                    className={cn(
+                      "cursor-default",
+                      isMinted
+                        ? "bg-primary/15 text-primary border-primary/40"
+                        : "bg-primary/10 text-primary border-primary/30"
+                    )}
+                  >
+                    {isMinted ? (
+                      <Link2 className="size-3 mr-1" />
+                    ) : (
+                      <Check className="size-3 mr-1" />
+                    )}
+                    {attestType.label}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p className="text-xs">
+                    {isMinted ? "Attested onchain" : "Already attested"}
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            );
+          }
+
+          // Normal button (not attested yet)
           return (
             <Button
               key={attestType.id}

@@ -14,17 +14,22 @@ const BodySchema = z.object({
 
   // Attestation type from config
   type: z.enum(attestationTypeValues),
+
+  // Optional confidence value (0-1)
+  confidence: z.number().min(0).max(1).optional(),
 });
 
 type CreateAttestationOk = {
   attestation: {
     id: string;
   };
+  /** True if an existing attestation was found and returned (no new one created) */
+  alreadyExists: boolean;
 };
 
 export const POST = api(BodySchema, async (ctx) => {
   const { viewerId, json } = ctx;
-  const { toUserId, type } = json;
+  const { toUserId, type, confidence } = json;
 
   // Can't attest yourself
   if (toUserId === viewerId) {
@@ -49,15 +54,67 @@ export const POST = api(BodySchema, async (ctx) => {
     });
   }
 
-  // Create attestation (no constraints - user can attest multiple times)
+  // Check for existing active attestation of the same type
+  const existing = await db.attestation.findFirst({
+    where: {
+      fromUserId: viewerId!,
+      toUserId,
+      type,
+      revokedAt: null,
+      supersededById: null,
+    },
+    select: { id: true, confidence: true },
+  });
+
+  // If already exists with same confidence, return idempotently
+  if (existing) {
+    const existingConfidence = existing.confidence ?? undefined;
+    if (existingConfidence === confidence) {
+      return okJson<CreateAttestationOk>({
+        attestation: { id: existing.id },
+        alreadyExists: true,
+      });
+    }
+
+    // If confidence differs, supersede the existing attestation
+    const created = await db.$transaction(async (tx) => {
+      const replacement = await tx.attestation.create({
+        data: {
+          fromUserId: viewerId!,
+          toUserId,
+          type,
+          confidence: confidence ?? null,
+        },
+        select: { id: true },
+      });
+
+      await tx.attestation.update({
+        where: { id: existing.id },
+        data: { supersededById: replacement.id },
+      });
+
+      return replacement;
+    });
+
+    return okJson<CreateAttestationOk>({
+      attestation: { id: created.id },
+      alreadyExists: false,
+    });
+  }
+
+  // Create new attestation
   const attestation = await db.attestation.create({
     data: {
       fromUserId: viewerId!,
       toUserId,
       type,
+      confidence: confidence ?? null,
     },
     select: { id: true },
   });
 
-  return okJson<CreateAttestationOk>({ attestation: { id: attestation.id } });
+  return okJson<CreateAttestationOk>({
+    attestation: { id: attestation.id },
+    alreadyExists: false,
+  });
 }, { auth: "auth" });

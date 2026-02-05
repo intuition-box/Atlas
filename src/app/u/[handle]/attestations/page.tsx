@@ -4,9 +4,10 @@ import * as React from "react"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 import { useSession } from "next-auth/react"
-import { ArrowDownLeft, ArrowUpRight, Filter } from "lucide-react"
+import { ArrowDownLeft, ArrowUpRight, Filter, Undo2, Link2, Check, Loader2, SquareCheck, Square } from "lucide-react"
 
-import { apiGet } from "@/lib/api/client"
+import { cn } from "@/lib/utils"
+import { apiGet, apiPost } from "@/lib/api/client"
 import { ROUTES, userPath } from "@/lib/routes"
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -17,6 +18,9 @@ import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { PageHeader } from "@/components/common/page-header"
 import { Spinner } from "@/components/ui/spinner"
+import { Checkbox } from "@/components/ui/checkbox"
+import { OnchainBanner } from "@/components/attestation/onchain-banner"
+import { SelectionActionBar } from "@/components/attestation/selection-action-bar"
 import { ATTESTATION_TYPES, ATTESTATION_TYPE_LIST, type AttestationType } from "@/config/attestations"
 
 // === CONSTANTS ===
@@ -38,6 +42,7 @@ type Attestation = {
   type: AttestationType
   confidence: number | null
   createdAt: string
+  mintedAt: string | null
   fromUser: AttestationUser
   toUser: AttestationUser
 }
@@ -289,19 +294,72 @@ function Chip({ children, onRemove }: { children: React.ReactNode; onRemove?: ()
 function AttestationCard({
   attestation,
   currentHandle,
+  viewerId,
+  isSelected,
+  isMinting,
+  onRetract,
+  onSelect,
+  onMint,
 }: {
   attestation: Attestation
   currentHandle: string
+  viewerId: string | null
+  isSelected: boolean
+  isMinting: boolean
+  onRetract?: (id: string) => void
+  onSelect?: (id: string, selected: boolean) => void
+  onMint?: (id: string) => void
 }) {
+  const [isRetracting, setIsRetracting] = React.useState(false)
   const isReceived = attestation.toUser.handle === currentHandle
   const otherUser = isReceived ? attestation.fromUser : attestation.toUser
   const displayName = otherUser.name?.trim() || `@${otherUser.handle}`
   const href = userPath(otherUser.handle ?? otherUser.id)
   const typeInfo = ATTESTATION_TYPES[attestation.type]
+  const isMinted = !!attestation.mintedAt
+
+  // Can only retract attestations you gave
+  const canRetract = !isReceived && viewerId === attestation.fromUser.id
+  // Can only mint attestations you gave that aren't minted
+  const canMint = !isReceived && viewerId === attestation.fromUser.id && !isMinted
+
+  const handleRetract = async () => {
+    if (isRetracting || !canRetract) return
+
+    setIsRetracting(true)
+    try {
+      const result = await apiPost<{ alreadyRevoked: boolean }>(
+        "/api/attestation/retract",
+        { attestationId: attestation.id }
+      )
+
+      if (result.ok) {
+        onRetract?.(attestation.id)
+      }
+    } finally {
+      setIsRetracting(false)
+    }
+  }
 
   return (
-    <div className="rounded-2xl border border-border/60 bg-card/30 p-4 transition-colors hover:bg-card/50">
-      <div className="flex items-start gap-3">
+    <div
+      className={cn(
+        "relative rounded-2xl border bg-card/30 p-4 transition-colors hover:bg-card/50",
+        isSelected ? "border-primary/50 bg-primary/5" : "border-border/60"
+      )}
+    >
+      {/* Selection checkbox (only for mintable attestations) */}
+      {canMint && (
+        <div className="absolute left-3 top-3">
+          <Checkbox
+            checked={isSelected}
+            onCheckedChange={(checked) => onSelect?.(attestation.id, !!checked)}
+            className="size-4"
+          />
+        </div>
+      )}
+
+      <div className={cn("flex items-start gap-3", canMint && "ml-6")}>
         <Link href={href}>
           <Avatar className="h-10 w-10">
             <AvatarImage src={otherUser.avatarUrl ?? undefined} alt={displayName} />
@@ -321,6 +379,12 @@ function AttestationCard({
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
+              {isMinted && (
+                <Badge variant="secondary" className="gap-1 bg-primary/10 text-primary border-primary/20">
+                  <Link2 className="size-3" />
+                  Onchain
+                </Badge>
+              )}
               {isReceived ? (
                 <Badge variant="secondary" className="gap-1">
                   <ArrowDownLeft className="size-3" />
@@ -339,13 +403,48 @@ function AttestationCard({
             <div className="text-xs text-foreground/80 line-clamp-1">{otherUser.headline}</div>
           )}
 
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <Badge variant="default" className="bg-primary/10 text-primary hover:bg-primary/10">
-              {typeInfo.label}
-            </Badge>
-            <span className="text-xs text-muted-foreground">
-              {formatRelativeTime(attestation.createdAt)}
-            </span>
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="default" className="bg-primary/10 text-primary hover:bg-primary/10">
+                {typeInfo.label}
+              </Badge>
+              <span className="text-xs text-muted-foreground">
+                {formatRelativeTime(attestation.createdAt)}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1">
+              {canMint && (
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => onMint?.(attestation.id)}
+                  disabled={isMinting}
+                  className="text-primary hover:text-primary hover:bg-primary/10"
+                >
+                  {isMinting ? (
+                    <Loader2 className="size-3 animate-spin" />
+                  ) : (
+                    <>
+                      <Link2 className="size-3 mr-1" />
+                      Mint
+                    </>
+                  )}
+                </Button>
+              )}
+              {canRetract && (
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  onClick={handleRetract}
+                  disabled={isRetracting}
+                  className="text-muted-foreground hover:text-destructive"
+                >
+                  <Undo2 className="size-3 mr-1" />
+                  {isRetracting ? "..." : "Retract"}
+                </Button>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -356,34 +455,84 @@ function AttestationCard({
 function AttestationRow({
   attestation,
   currentHandle,
+  viewerId,
+  isSelected,
+  isMinting,
+  onRetract,
+  onSelect,
+  onMint,
 }: {
   attestation: Attestation
   currentHandle: string
+  viewerId: string | null
+  isSelected: boolean
+  isMinting: boolean
+  onRetract?: (id: string) => void
+  onSelect?: (id: string, selected: boolean) => void
+  onMint?: (id: string) => void
 }) {
+  const [isRetracting, setIsRetracting] = React.useState(false)
   const isReceived = attestation.toUser.handle === currentHandle
   const otherUser = isReceived ? attestation.fromUser : attestation.toUser
+  const canRetract = !isReceived && viewerId === attestation.fromUser.id
+  const isMinted = !!attestation.mintedAt
+  const canMint = !isReceived && viewerId === attestation.fromUser.id && !isMinted
+
+  const handleRetract = async (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (isRetracting || !canRetract) return
+
+    setIsRetracting(true)
+    try {
+      const result = await apiPost<{ alreadyRevoked: boolean }>(
+        "/api/attestation/retract",
+        { attestationId: attestation.id }
+      )
+
+      if (result.ok) {
+        onRetract?.(attestation.id)
+      }
+    } finally {
+      setIsRetracting(false)
+    }
+  }
   const displayName = otherUser.name?.trim() || `@${otherUser.handle}`
   const href = userPath(otherUser.handle ?? otherUser.id)
   const typeInfo = ATTESTATION_TYPES[attestation.type]
 
   return (
-    <Link
-      href={href}
-      className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3 px-4 py-3 text-sm transition-colors hover:bg-card/50"
-      aria-label={`View ${displayName}'s profile`}
+    <div
+      className={cn(
+        "grid grid-cols-[auto_minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.5fr)] gap-3 px-4 py-3 text-sm transition-colors hover:bg-card/50",
+        isSelected && "bg-primary/5"
+      )}
     >
-      <div className="flex min-w-0 items-center gap-3">
+      {/* Selection checkbox */}
+      <div className="flex items-center">
+        {canMint ? (
+          <Checkbox
+            checked={isSelected}
+            onCheckedChange={(checked) => onSelect?.(attestation.id, !!checked)}
+            className="size-4"
+          />
+        ) : (
+          <div className="size-4" />
+        )}
+      </div>
+
+      <Link href={href} className="flex min-w-0 items-center gap-3">
         <Avatar className="h-8 w-8">
           <AvatarImage src={otherUser.avatarUrl ?? undefined} alt={displayName} />
           <AvatarFallback>{initials(otherUser.name)}</AvatarFallback>
         </Avatar>
         <div className="min-w-0">
-          <div className="truncate font-medium">{displayName}</div>
+          <div className="truncate font-medium hover:underline">{displayName}</div>
           {otherUser.handle && (
             <div className="truncate text-xs text-muted-foreground">@{otherUser.handle}</div>
           )}
         </div>
-      </div>
+      </Link>
 
       <div className="flex items-center">
         <Badge variant="default" className="bg-primary/10 text-primary hover:bg-primary/10">
@@ -405,10 +554,50 @@ function AttestationRow({
         )}
       </div>
 
-      <div className="flex items-center justify-end text-xs text-muted-foreground">
+      <div className="flex items-center">
+        {isMinted ? (
+          <Badge variant="secondary" className="gap-1 bg-primary/10 text-primary border-primary/20">
+            <Link2 className="size-3" />
+            Onchain
+          </Badge>
+        ) : (
+          <span className="text-xs text-muted-foreground">Off-chain</span>
+        )}
+      </div>
+
+      <div className="flex items-center text-xs text-muted-foreground">
         {formatRelativeTime(attestation.createdAt)}
       </div>
-    </Link>
+
+      <div className="flex items-center justify-end gap-1">
+        {canMint && (
+          <Button
+            variant="ghost"
+            size="xs"
+            onClick={() => onMint?.(attestation.id)}
+            disabled={isMinting}
+            className="text-primary hover:text-primary hover:bg-primary/10"
+          >
+            {isMinting ? (
+              <Loader2 className="size-3 animate-spin" />
+            ) : (
+              <Link2 className="size-3" />
+            )}
+          </Button>
+        )}
+        {canRetract && (
+          <Button
+            variant="ghost"
+            size="xs"
+            onClick={handleRetract}
+            disabled={isRetracting}
+            className="text-muted-foreground hover:text-destructive"
+          >
+            <Undo2 className="size-3" />
+          </Button>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -503,16 +692,38 @@ function AttestationsGrid({
   items,
   view,
   currentHandle,
+  viewerId,
+  selectedIds,
+  mintingIds,
+  onRetract,
+  onSelect,
+  onMint,
 }: {
   items: Attestation[]
   view: "cards" | "list"
   currentHandle: string
+  viewerId: string | null
+  selectedIds: Set<string>
+  mintingIds: Set<string>
+  onRetract?: (id: string) => void
+  onSelect?: (id: string, selected: boolean) => void
+  onMint?: (id: string) => void
 }) {
   if (view === "cards") {
     return (
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {items.map((a) => (
-          <AttestationCard key={a.id} attestation={a} currentHandle={currentHandle} />
+          <AttestationCard
+            key={a.id}
+            attestation={a}
+            currentHandle={currentHandle}
+            viewerId={viewerId}
+            isSelected={selectedIds.has(a.id)}
+            isMinting={mintingIds.has(a.id)}
+            onRetract={onRetract}
+            onSelect={onSelect}
+            onMint={onMint}
+          />
         ))}
       </div>
     )
@@ -520,15 +731,28 @@ function AttestationsGrid({
 
   return (
     <div className="rounded-2xl border border-border/60 bg-card/30 overflow-hidden">
-      <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3 border-b border-border/60 px-4 py-3 text-xs font-medium text-foreground/70">
+      <div className="grid grid-cols-[auto_minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.5fr)] gap-3 border-b border-border/60 px-4 py-3 text-xs font-medium text-foreground/70">
+        <div className="w-4"></div>
         <div>User</div>
         <div>Type</div>
         <div>Direction</div>
-        <div className="text-right">Date</div>
+        <div>Status</div>
+        <div>Date</div>
+        <div></div>
       </div>
 
       {items.map((a) => (
-        <AttestationRow key={a.id} attestation={a} currentHandle={currentHandle} />
+        <AttestationRow
+          key={a.id}
+          attestation={a}
+          currentHandle={currentHandle}
+          viewerId={viewerId}
+          isSelected={selectedIds.has(a.id)}
+          isMinting={mintingIds.has(a.id)}
+          onRetract={onRetract}
+          onSelect={onSelect}
+          onMint={onMint}
+        />
       ))}
     </div>
   )
@@ -556,11 +780,19 @@ function EmptyState({ hasFilters, onClearFilters }: { hasFilters: boolean; onCle
 export default function AttestationsPage() {
   const router = useRouter()
   const params = useParams<{ handle: string }>()
+  const { data: session } = useSession()
   const handle = params.handle?.trim() || ""
+
+  const viewerId = session?.user?.id ?? null
 
   const [view, setView] = React.useState<"cards" | "list">("cards")
   const [cursor, setCursor] = React.useState<string | null>(null)
   const [isFiltersOpen, setIsFiltersOpen] = React.useState(false)
+  const [localItems, setLocalItems] = React.useState<Attestation[]>([])
+
+  // Selection and minting state
+  const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set())
+  const [mintingIds, setMintingIds] = React.useState<Set<string>>(new Set())
 
   const [filters, setFilters] = React.useState<FilterState>({
     q: "",
@@ -568,13 +800,112 @@ export default function AttestationsPage() {
     direction: "all",
   })
 
-  const { items, nextCursor, loading, loadingMore, error } = useAttestationsData(
+  const { items: fetchedItems, nextCursor, loading, loadingMore, error } = useAttestationsData(
     handle,
     filters,
     cursor
   )
 
+  // Sync fetched items to local state (allows optimistic removal on retract)
+  React.useEffect(() => {
+    setLocalItems(fetchedItems)
+  }, [fetchedItems])
+
+  const handleRetract = React.useCallback((attestationId: string) => {
+    setLocalItems((prev) => prev.filter((a) => a.id !== attestationId))
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      next.delete(attestationId)
+      return next
+    })
+  }, [])
+
+  const handleSelect = React.useCallback((id: string, selected: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (selected) {
+        next.add(id)
+      } else {
+        next.delete(id)
+      }
+      return next
+    })
+  }, [])
+
+  const handleClearSelection = React.useCallback(() => {
+    setSelectedIds(new Set())
+  }, [])
+
+  // Mint function - calls API to persist state, will be extended with Intuition SDK later
+  const handleMint = React.useCallback(async (id: string) => {
+    setMintingIds((prev) => new Set(prev).add(id))
+
+    try {
+      // TODO: When Intuition integration is ready:
+      // 1. Call Intuition SDK to mint onchain
+      // 2. Get txHash and onchainId from the response
+      // 3. Pass them to the API below
+
+      // For now, simulate the blockchain call delay
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+
+      // Persist mint state to database
+      const result = await apiPost<{
+        attestation: { id: string; mintedAt: string };
+        alreadyMinted: boolean;
+      }>("/api/attestation/mint", {
+        attestationId: id,
+        // txHash: "0x...", // Will come from Intuition SDK
+        // onchainId: "...", // Will come from Intuition SDK
+      })
+
+      if (result.ok) {
+        // Update local state to mark as minted
+        setLocalItems((prev) =>
+          prev.map((a) =>
+            a.id === id ? { ...a, mintedAt: result.value.attestation.mintedAt } : a
+          )
+        )
+      }
+    } finally {
+      setMintingIds((prev) => {
+        const next = new Set(prev)
+        next.delete(id)
+        return next
+      })
+      setSelectedIds((prev) => {
+        const next = new Set(prev)
+        next.delete(id)
+        return next
+      })
+    }
+  }, [])
+
+  const handleMintSelected = React.useCallback(async () => {
+    const ids = Array.from(selectedIds)
+    for (const id of ids) {
+      await handleMint(id)
+    }
+  }, [selectedIds, handleMint])
+
+  const handleMintAll = React.useCallback(async () => {
+    // Get all unminted attestations that the viewer gave
+    const unmintedIds = localItems
+      .filter((a) => !a.mintedAt && a.fromUser.id === viewerId)
+      .map((a) => a.id)
+
+    for (const id of unmintedIds) {
+      await handleMint(id)
+    }
+  }, [localItems, viewerId, handleMint])
+
   const activeFilters = hasActiveFilters(filters)
+  const items = localItems
+
+  // Calculate minting stats
+  const totalCount = items.filter((a) => a.fromUser.id === viewerId).length
+  const mintedCount = items.filter((a) => a.fromUser.id === viewerId && a.mintedAt).length
+  const isMinting = mintingIds.size > 0
 
   // Reset paging when filters change
   React.useEffect(() => {
@@ -629,6 +960,18 @@ export default function AttestationsPage() {
         }
       />
 
+      {/* Onchain Banner - only show if viewer is viewing their own attestations */}
+      {viewerId && totalCount > 0 && (
+        <OnchainBanner
+          totalCount={totalCount}
+          mintedCount={mintedCount}
+          selectedIds={selectedIds}
+          isMinting={isMinting}
+          onMintAll={handleMintAll}
+          onMintSelected={handleMintSelected}
+        />
+      )}
+
       <ActiveFiltersBar
         filters={filters}
         count={items.length}
@@ -666,9 +1009,27 @@ export default function AttestationsPage() {
           hasMore={!!nextCursor}
           isLoading={loadingMore}
         >
-          <AttestationsGrid items={items} view={view} currentHandle={handle} />
+          <AttestationsGrid
+            items={items}
+            view={view}
+            currentHandle={handle}
+            viewerId={viewerId}
+            selectedIds={selectedIds}
+            mintingIds={mintingIds}
+            onRetract={handleRetract}
+            onSelect={handleSelect}
+            onMint={handleMint}
+          />
         </InfiniteScroll>
       )}
+
+      {/* Floating selection action bar */}
+      <SelectionActionBar
+        selectedCount={selectedIds.size}
+        isMinting={isMinting}
+        onMintSelected={handleMintSelected}
+        onClearSelection={handleClearSelection}
+      />
     </main>
   )
 }
