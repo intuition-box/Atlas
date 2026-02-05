@@ -33,8 +33,19 @@ function Tooltip(props: TooltipProps) {
   return <TooltipPrimitive.Root data-slot="tooltip" {...props} />
 }
 
-function TooltipTrigger(props: TooltipTriggerProps) {
-  return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />
+function TooltipTrigger({ children, ...props }: TooltipTriggerProps) {
+  // If children is a valid React element, use it as the render target
+  // This avoids nested button issues when wrapping Button components
+  if (React.isValidElement(children)) {
+    return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" render={children} {...props} />
+  }
+
+  // Raw text/primitives not supported - warn in development
+  if (process.env.NODE_ENV === "development" && children != null) {
+    console.warn("[TooltipTrigger] Children must be a valid React element, not raw text. Wrap text in a <span> or <button>.")
+  }
+
+  return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props}>{children}</TooltipPrimitive.Trigger>
 }
 
 function TooltipContent({
