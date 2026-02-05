@@ -84,7 +84,7 @@ function QueueItem({
 ──────────────────────────── */
 
 export function AttestationQueuePanel() {
-  const { queue, removeFromQueue, clearQueue, isOpen, setIsOpen } = useAttestationQueue();
+  const { queue, removeFromQueue, clearQueue, isOpen, setIsOpen, markSaved } = useAttestationQueue();
   const [isSaving, setIsSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -127,8 +127,15 @@ export function AttestationQueuePanel() {
       const failures = results.filter((r) => r.status === "rejected");
       if (failures.length > 0) {
         setError(`${failures.length} attestation(s) failed to save`);
-      } else {
-        // All successful - close dialog
+      }
+
+      // If any succeeded, mark as saved so buttons refetch their state
+      if (successfulIds.length > 0) {
+        markSaved();
+      }
+
+      // All successful - close dialog
+      if (failures.length === 0) {
         setIsOpen(false);
       }
     } catch {

@@ -478,6 +478,7 @@ model Attestation {
   /// When mintedAt is set, this attestation has been committed onchain.
   mintedAt    DateTime?
   mintTxHash  String?    // blockchain transaction hash
+  onchainId   String?    // ID assigned by Intuition protocol
 
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

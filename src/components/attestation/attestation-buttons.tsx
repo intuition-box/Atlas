@@ -73,11 +73,11 @@ export function AttestationButtons({
   const [activeTypes, setActiveTypes] = useState<Set<AttestationType>>(new Set());
   const [mintedTypes, setMintedTypes] = useState<Set<AttestationType>>(new Set());
   const [retractingTypes, setRetractingTypes] = useState<Set<AttestationType>>(new Set());
-  const { addToQueue, isInQueue, buttonRef } = useAttestationQueue();
+  const { addToQueue, isInQueue, buttonRef, lastSavedAt } = useAttestationQueue();
 
   const currentUserId = session?.user?.id;
 
-  // Fetch existing attestations on mount
+  // Fetch existing attestations on mount and when attestations are saved
   useEffect(() => {
     if (!currentUserId || currentUserId === toUserId) return;
 
@@ -102,7 +102,7 @@ export function AttestationButtons({
       });
 
     return () => controller.abort();
-  }, [currentUserId, toUserId]);
+  }, [currentUserId, toUserId, lastSavedAt]);
 
   // Don't show attestation buttons for yourself
   if (currentUserId === toUserId) {
