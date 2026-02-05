@@ -49,7 +49,7 @@ type ActiveAttestation = {
   mintedAt: string | null;
 };
 
-type CheckResponse = {
+type StatusResponse = {
   activeTypes: string[];
   activeAttestations: ActiveAttestation[];
 };
@@ -83,7 +83,7 @@ export function AttestationButtons({
 
     const controller = new AbortController();
 
-    apiGet<CheckResponse>("/api/attestation/check", { toUserId }, { signal: controller.signal })
+    apiGet<StatusResponse>("/api/attestation/status", { toUserId }, { signal: controller.signal })
       .then((result) => {
         if (result.ok) {
           setActiveTypes(new Set(result.value.activeTypes as AttestationType[]));

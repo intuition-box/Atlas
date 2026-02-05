@@ -14,7 +14,7 @@ type ActiveAttestation = {
   mintedAt: string | null;
 };
 
-type CheckAttestationsOk = {
+type AttestationStatusOk = {
   /** Array of attestation types the viewer has active for this user */
   activeTypes: string[];
   /** Detailed info about active attestations (including mint status) */
@@ -22,20 +22,22 @@ type CheckAttestationsOk = {
 };
 
 /**
- * Check which attestation types the viewer already has for a target user.
- * Used by UI to show "already attested" state on buttons.
- * Also returns mintedAt to show onchain status.
+ * GET /api/attestation/status
+ *
+ * Lightweight endpoint to check attestation status between viewer and target user.
+ * Returns which attestation types exist and their onchain status.
+ * Used by AttestationButtons to show "already attested" / "onchain" state.
  */
 export const GET = api(QuerySchema, async (ctx) => {
   const { viewerId, json } = ctx;
   const { toUserId } = json;
 
   if (!viewerId) {
-    return okJson<CheckAttestationsOk>({ activeTypes: [], activeAttestations: [] });
+    return okJson<AttestationStatusOk>({ activeTypes: [], activeAttestations: [] });
   }
 
   if (viewerId === toUserId) {
-    return okJson<CheckAttestationsOk>({ activeTypes: [], activeAttestations: [] });
+    return okJson<AttestationStatusOk>({ activeTypes: [], activeAttestations: [] });
   }
 
   const rows = await db.attestation.findMany({
@@ -57,5 +59,5 @@ export const GET = api(QuerySchema, async (ctx) => {
     mintedAt: r.mintedAt?.toISOString() ?? null,
   }));
 
-  return okJson<CheckAttestationsOk>({ activeTypes, activeAttestations });
+  return okJson<AttestationStatusOk>({ activeTypes, activeAttestations });
 }, { methods: ["GET"], auth: "public" });
