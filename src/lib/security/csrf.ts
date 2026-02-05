@@ -7,6 +7,12 @@ import { NextResponse } from "next/server";
 
 import type { ApiEnvelope, ApiError, Result } from "@/lib/api/shapes";
 import { err, apiErr, ok, apiOk } from "@/lib/api/shapes";
+import {
+  getCookie,
+  setCookie,
+  clearCookie,
+  hostCookieName,
+} from "@/lib/security/cookies";
 
 /**
  * CSRF protection (server-only)
@@ -19,19 +25,19 @@ import { err, apiErr, ok, apiOk } from "@/lib/api/shapes";
  *   - header token matches cookie token (timing-safe)
  */
 
+// ============================================================================
+// Constants
+// ============================================================================
+
 export const CSRF_HEADER_NAME = "X-CSRF-Token";
 export const CSRF_REFRESH_HEADER_NAME = "X-CSRF-Token-Refresh";
 
-const CSRF_COOKIE_NAME_PROD = "__Host-orbyt-csrf";
-const CSRF_COOKIE_NAME_DEV = "orbyt-csrf";
+/** CSRF cookie name (uses __Host- prefix in production for stronger scoping) */
+export const CSRF_COOKIE_NAME = hostCookieName("orbyt-csrf");
 
-function isProd(): boolean {
-  return process.env.NODE_ENV === "production";
-}
-
-export function csrfCookieName(): string {
-  return isProd() ? CSRF_COOKIE_NAME_PROD : CSRF_COOKIE_NAME_DEV;
-}
+// ============================================================================
+// Types
+// ============================================================================
 
 export type CsrfErrorCode = "CSRF_INVALID" | "CSRF_ORIGIN";
 
@@ -42,19 +48,9 @@ export type CsrfResponse = {
   csrfToken: string;
 };
 
-function cookieOptions(): {
-  httpOnly: true;
-  secure: boolean;
-  sameSite: "lax";
-  path: "/";
-} {
-  return {
-    httpOnly: true,
-    secure: isProd(),
-    sameSite: "lax",
-    path: "/",
-  };
-}
+// ============================================================================
+// Internal Helpers
+// ============================================================================
 
 function isUnsafeMethod(method: string): boolean {
   const m = method.toUpperCase();
@@ -72,6 +68,10 @@ function requestOrigin(req: NextRequest): string {
   return req.nextUrl.origin;
 }
 
+// ============================================================================
+// Public API
+// ============================================================================
+
 /**
  * Same-origin check.
  *
@@ -84,25 +84,29 @@ export function isSameOrigin(req: NextRequest): boolean {
   return origin === requestOrigin(req);
 }
 
+/** Issue a new CSRF token (32 bytes entropy, base64url encoded). */
 export function issueCsrfToken(): string {
-  // 32 bytes entropy; base64url is header-safe.
   return crypto.randomBytes(32).toString("base64url");
 }
 
+/** Read the CSRF token from the request cookie. */
 export function getCsrfCookie(req: NextRequest): string | null {
-  return req.cookies.get(csrfCookieName())?.value ?? null;
+  return getCookie(req, CSRF_COOKIE_NAME);
 }
 
+/** Read the CSRF token from the request header. */
 export function getCsrfHeader(req: NextRequest): string | null {
   return req.headers.get(CSRF_HEADER_NAME);
 }
 
+/** Set the CSRF token cookie on a response. */
 export function setCsrfCookie(res: NextResponse, token: string): void {
-  res.cookies.set(csrfCookieName(), token, cookieOptions());
+  setCookie(res, CSRF_COOKIE_NAME, token);
 }
 
+/** Clear the CSRF token cookie. */
 export function clearCsrfCookie(res: NextResponse): void {
-  res.cookies.set(csrfCookieName(), "", { ...cookieOptions(), maxAge: 0 });
+  clearCookie(res, CSRF_COOKIE_NAME);
 }
 
 /**

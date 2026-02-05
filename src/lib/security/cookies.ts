@@ -1,5 +1,7 @@
 import "server-only";
 
+import crypto from "node:crypto";
+
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
@@ -10,6 +12,8 @@ import { NextResponse } from "next/server";
  * - One small, consistent place to read/set/clear cookies in route handlers.
  * - Safe defaults: httpOnly + SameSite=Lax + Path=/ + Secure in production.
  * - Avoid env toggles and magic behavior.
+ * - Encrypted cookie support for sensitive data.
+ * - CHIPS (Partitioned) support for third-party contexts.
  */
 
 export type SameSite = "lax" | "strict" | "none";
@@ -22,10 +26,89 @@ export type CookieOptions = {
   domain?: string;
   maxAge?: number;
   expires?: Date;
+  /**
+   * CHIPS (Cookies Having Independent Partitioned State) support.
+   * When true, the cookie is partitioned by top-level site.
+   * Required for cookies in third-party/embedded contexts (Chrome 114+).
+   * @see https://developer.chrome.com/docs/privacy-sandbox/chips/
+   */
+  partitioned?: boolean;
 };
 
-function isProd(): boolean {
+export function isProd(): boolean {
   return process.env.NODE_ENV === "production";
+}
+
+// ============================================================================
+// Encryption Helpers
+// ============================================================================
+
+const ENCRYPTION_ALGORITHM = "aes-256-gcm";
+const IV_LENGTH = 12; // 96 bits for GCM
+const AUTH_TAG_LENGTH = 16; // 128 bits
+
+function getEncryptionKey(): Buffer {
+  const secret = process.env.AUTH_SECRET;
+  if (!secret) {
+    throw new Error("AUTH_SECRET is required for encrypted cookies");
+  }
+  // Derive a 256-bit key from AUTH_SECRET using SHA-256
+  return crypto.createHash("sha256").update(secret).digest();
+}
+
+/**
+ * Encrypt a value using AES-256-GCM.
+ * Returns: base64url(iv || ciphertext || authTag)
+ */
+function encrypt(plaintext: string): string {
+  const key = getEncryptionKey();
+  const iv = crypto.randomBytes(IV_LENGTH);
+  const cipher = crypto.createCipheriv(ENCRYPTION_ALGORITHM, key, iv, {
+    authTagLength: AUTH_TAG_LENGTH,
+  });
+
+  const encrypted = Buffer.concat([
+    cipher.update(plaintext, "utf8"),
+    cipher.final(),
+  ]);
+  const authTag = cipher.getAuthTag();
+
+  // Concatenate: iv || ciphertext || authTag
+  const combined = Buffer.concat([iv, encrypted, authTag]);
+  return combined.toString("base64url");
+}
+
+/**
+ * Decrypt a value encrypted with encrypt().
+ * Returns null if decryption fails (tampered, wrong key, etc.).
+ */
+function decrypt(ciphertext: string): string | null {
+  try {
+    const key = getEncryptionKey();
+    const combined = Buffer.from(ciphertext, "base64url");
+
+    if (combined.length < IV_LENGTH + AUTH_TAG_LENGTH + 1) {
+      return null; // Too short to be valid
+    }
+
+    const iv = combined.subarray(0, IV_LENGTH);
+    const authTag = combined.subarray(-AUTH_TAG_LENGTH);
+    const encrypted = combined.subarray(IV_LENGTH, -AUTH_TAG_LENGTH);
+
+    const decipher = crypto.createDecipheriv(ENCRYPTION_ALGORITHM, key, iv, {
+      authTagLength: AUTH_TAG_LENGTH,
+    });
+    decipher.setAuthTag(authTag);
+
+    const decrypted = Buffer.concat([
+      decipher.update(encrypted),
+      decipher.final(),
+    ]);
+
+    return decrypted.toString("utf8");
+  } catch {
+    return null; // Decryption failed (tampered, wrong key, etc.)
+  }
 }
 
 /**
@@ -82,6 +165,7 @@ export function setCookie(
     domain: opts?.domain,
     maxAge: opts?.maxAge,
     expires: opts?.expires,
+    partitioned: opts?.partitioned,
   });
 }
 
@@ -110,4 +194,55 @@ export function setTokenCookie(
   opts?: Omit<CookieOptions, "httpOnly">,
 ): void {
   setCookie(res, name, token, { ...opts, httpOnly: true });
+}
+
+// ============================================================================
+// Encrypted Cookie Helpers
+// ============================================================================
+
+/**
+ * Set an encrypted cookie.
+ *
+ * Use this for sensitive data that needs confidentiality beyond httpOnly.
+ * The value is encrypted with AES-256-GCM using AUTH_SECRET.
+ *
+ * @example
+ * setEncryptedCookie(res, "sensitive-data", JSON.stringify({ userId: "123" }));
+ */
+export function setEncryptedCookie(
+  res: NextResponse,
+  name: string,
+  value: string,
+  opts?: CookieOptions,
+): void {
+  const encrypted = encrypt(value);
+  setCookie(res, name, encrypted, { ...opts, httpOnly: true });
+}
+
+/**
+ * Read and decrypt an encrypted cookie.
+ *
+ * Returns null if the cookie is missing, tampered, or decryption fails.
+ *
+ * @example
+ * const data = getEncryptedCookie(req, "sensitive-data");
+ * if (data) {
+ *   const parsed = JSON.parse(data);
+ * }
+ */
+export function getEncryptedCookie(req: NextRequest, name: string): string | null {
+  const raw = getCookie(req, name);
+  if (!raw) return null;
+  return decrypt(raw);
+}
+
+/**
+ * Clear an encrypted cookie (same as clearCookie, but named for symmetry).
+ */
+export function clearEncryptedCookie(
+  res: NextResponse,
+  name: string,
+  opts?: CookieOptions,
+): void {
+  clearCookie(res, name, opts);
 }

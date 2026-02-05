@@ -67,7 +67,9 @@ src/
 │   │   ├── client.ts   # typed client env (NEXT_PUBLIC_*)
 │   │   └── server.ts   # typed server env
 │   ├── security/       # security utilities
-│   │   ├── csrf.ts     # CSRF helpers
+│   │   ├── cookies.ts  # centralized cookie helpers
+│   │   ├── csrf.ts     # CSRF helpers (uses cookies.ts)
+│   │   ├── mfa.ts      # MFA remember-device (uses cookies.ts)
 │   │   └── rate-limit.ts
 │   └── logger.ts       # structured logging
 └── test/               # unit & e2e tests
@@ -568,16 +570,66 @@ revalidateTag(`space:${id}`);
 - No long-lived secrets in CI; prefer short-lived tokens
 - Rotate credentials quarterly or upon offboarding
 
+## Cookie Management
+
+**File:** `@/lib/security/cookies.ts` — Centralized cookie helpers (server-only)
+
+**Safe defaults:**
+- `httpOnly: true` — prevents XSS token theft
+- `secure: true` (prod only) — prevents MitM attacks
+- `sameSite: 'lax'` — CSRF protection
+- `path: '/'` — full site scope
+- `__Host-` prefix (prod) — prevents cookie injection
+
+**Core API:**
+
+```ts
+import { getCookie, setCookie, clearCookie, hostCookieName } from '@/lib/security/cookies';
+
+// Auto-prefixed with __Host- in production
+const COOKIE_NAME = hostCookieName('my-cookie');
+
+// Read (from NextRequest)
+const value = getCookie(req, COOKIE_NAME);
+
+// Write (to NextResponse)
+setCookie(res, COOKIE_NAME, value, { maxAge: 86400 });
+
+// Clear
+clearCookie(res, COOKIE_NAME);
+```
+
+**Encrypted cookies** (for sensitive data needing confidentiality):
+
+```ts
+import { setEncryptedCookie, getEncryptedCookie } from '@/lib/security/cookies';
+
+// Encrypted with AES-256-GCM using AUTH_SECRET
+setEncryptedCookie(res, 'sensitive', JSON.stringify({ userId: '123' }));
+
+const data = getEncryptedCookie(req, 'sensitive');
+if (data) {
+  const parsed = JSON.parse(data);
+}
+```
+
+**CHIPS support** (for third-party/embedded contexts):
+
+```ts
+setCookie(res, name, value, { partitioned: true });
+```
+
 ## CSRF Protection
 
 **Architecture:** Double-submit cookie scheme with token rotation
-- Server sets an httpOnly CSRF cookie
+- Server sets an httpOnly CSRF cookie (uses `@/lib/security/cookies`)
 - Client fetches token via `GET /api/security/csrf` and echoes it in request header
 - Server validates header matches cookie (timing-safe comparison)
 - Token rotates on every successful mutation (defense in depth)
 
 **Files:**
-- `@/lib/security/csrf.ts` — Server-side CSRF helpers
+- `@/lib/security/cookies.ts` — Centralized cookie helpers (used by CSRF)
+- `@/lib/security/csrf.ts` — CSRF-specific logic
 - `@/lib/api/client.ts` — Client auto-attaches CSRF token to POST requests
 - `@/components/providers.tsx` — `CsrfManager` handles lifecycle
 
