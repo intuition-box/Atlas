@@ -8,6 +8,7 @@ import { ArrowDownLeft, ArrowUpRight, Filter, Undo2, Link2, Check, Loader2, Squa
 
 import { cn } from "@/lib/utils"
 import { apiGet, apiPost } from "@/lib/api/client"
+import { sounds } from "@/lib/sounds"
 import { ROUTES, userPath } from "@/lib/routes"
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -807,9 +808,20 @@ export default function AttestationsPage() {
   )
 
   // Sync fetched items to local state (allows optimistic removal on retract)
+  // Only update if the IDs have changed to avoid overwriting local mint state
+  const fetchedIds = React.useMemo(
+    () => fetchedItems.map((a) => a.id).sort().join(","),
+    [fetchedItems]
+  )
+  const prevFetchedIds = React.useRef(fetchedIds)
+
   React.useEffect(() => {
-    setLocalItems(fetchedItems)
-  }, [fetchedItems])
+    // Only sync if the actual items changed (new fetch), not just re-renders
+    if (fetchedIds !== prevFetchedIds.current || localItems.length === 0) {
+      setLocalItems(fetchedItems)
+      prevFetchedIds.current = fetchedIds
+    }
+  }, [fetchedItems, fetchedIds, localItems.length])
 
   const handleRetract = React.useCallback((attestationId: string) => {
     setLocalItems((prev) => prev.filter((a) => a.id !== attestationId))
@@ -861,12 +873,20 @@ export default function AttestationsPage() {
 
       if (result.ok) {
         // Update local state to mark as minted
+        const mintedAt = result.value.attestation.mintedAt
         setLocalItems((prev) =>
           prev.map((a) =>
-            a.id === id ? { ...a, mintedAt: result.value.attestation.mintedAt } : a
+            a.id === id ? { ...a, mintedAt } : a
           )
         )
+        sounds.success()
+      } else {
+        console.error("[Mint] Failed to mint attestation:", result.error)
+        sounds.error()
       }
+    } catch (err) {
+      console.error("[Mint] Error minting attestation:", err)
+      sounds.error()
     } finally {
       setMintingIds((prev) => {
         const next = new Set(prev)

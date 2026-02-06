@@ -52,13 +52,11 @@ export function NavigationButton({
   if (href) {
     return (
       <Tooltip>
-        <TooltipTrigger
-          render={(props) => (
-            <Link {...props} href={href} className={buttonClasses}>
-              {content}
-            </Link>
-          )}
-        />
+        <TooltipTrigger>
+          <Link href={href} className={buttonClasses}>
+            {content}
+          </Link>
+        </TooltipTrigger>
         <TooltipContent side="top" sideOffset={8}>
           <p className="text-xs">{label}</p>
         </TooltipContent>
@@ -68,8 +66,10 @@ export function NavigationButton({
 
   return (
     <Tooltip>
-      <TooltipTrigger onClick={onClick} className={buttonClasses}>
-        {content}
+      <TooltipTrigger>
+        <button onClick={onClick} className={buttonClasses}>
+          {content}
+        </button>
       </TooltipTrigger>
       <TooltipContent side="top" sideOffset={8}>
         <p className="text-xs">{label}</p>

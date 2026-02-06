@@ -1,10 +1,15 @@
 "use client";
 
 import * as React from "react";
-import { X, Save, Loader2 } from "lucide-react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { useSession } from "next-auth/react";
+import { X, Save, Loader2, Trash2, ExternalLink } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { apiPost } from "@/lib/api/client";
+import { sounds } from "@/lib/sounds";
+import { userAttestationsPath } from "@/lib/routes";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,8 +18,12 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
-  DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useAttestationQueue, type QueuedAttestation } from "./attestation-queue-provider";
 import { ATTESTATION_TYPES, type AttestationType } from "@/config/attestations";
 
@@ -84,9 +93,15 @@ function QueueItem({
 ──────────────────────────── */
 
 export function AttestationQueuePanel() {
+  const { data: session } = useSession();
   const { queue, removeFromQueue, clearQueue, isOpen, setIsOpen, markSaved } = useAttestationQueue();
   const [isSaving, setIsSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const pathname = usePathname();
+
+  const userHandle = session?.user?.handle;
+  const attestationsPath = userHandle ? userAttestationsPath(userHandle) : null;
+  const isOnAttestationsPage = attestationsPath && pathname === attestationsPath;
 
   const handleSaveAll = async () => {
     if (queue.length === 0) return;
@@ -132,14 +147,18 @@ export function AttestationQueuePanel() {
       // If any succeeded, mark as saved so buttons refetch their state
       if (successfulIds.length > 0) {
         markSaved();
+        sounds.success();
       }
 
       // All successful - close dialog
       if (failures.length === 0) {
         setIsOpen(false);
+      } else {
+        sounds.error();
       }
     } catch {
       setError("Something went wrong");
+      sounds.error();
     } finally {
       setIsSaving(false);
     }
@@ -147,12 +166,78 @@ export function AttestationQueuePanel() {
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Attestation Queue</DialogTitle>
-          <DialogDescription>
-            Review and save your queued attestations.
-          </DialogDescription>
+      <DialogContent className="sm:max-w-md" showCloseButton={false}>
+        <DialogHeader className="relative">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex flex-col gap-1">
+              <DialogTitle>Attestation Queue</DialogTitle>
+              <DialogDescription>
+                Review and save your queued attestations.
+              </DialogDescription>
+            </div>
+
+            {/* Action buttons */}
+            <div className="flex items-center gap-1 shrink-0">
+              {/* Clear all */}
+              {queue.length > 0 && (
+                <Tooltip>
+                  <TooltipTrigger>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={clearQueue}
+                      disabled={isSaving}
+                      className="text-red-500 hover:text-red-600 hover:bg-red-500/10"
+                    >
+                      <Trash2 className="size-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Clear all</TooltipContent>
+                </Tooltip>
+              )}
+
+              {/* Save */}
+              {queue.length > 0 && (
+                <Tooltip>
+                  <TooltipTrigger>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={handleSaveAll}
+                      disabled={isSaving}
+                      className="text-emerald-500 hover:text-emerald-600 hover:bg-emerald-500/10"
+                    >
+                      {isSaving ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <Save className="size-4" />
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Save {queue.length}</TooltipContent>
+                </Tooltip>
+              )}
+
+              {/* Attestations page - hide if already on that page */}
+              {attestationsPath && !isOnAttestationsPage && (
+                <Tooltip>
+                  <TooltipTrigger>
+                    <Link
+                      href={attestationsPath}
+                      onClick={() => setIsOpen(false)}
+                      className={cn(
+                        "focus-visible:border-ring focus-visible:ring-ring/50 rounded-4xl border border-transparent text-sm font-medium focus-visible:ring-[3px] inline-flex items-center justify-center transition-all outline-none select-none",
+                        "size-8 text-primary hover:text-primary hover:bg-primary/10"
+                      )}
+                    >
+                      <ExternalLink className="size-4" />
+                    </Link>
+                  </TooltipTrigger>
+                  <TooltipContent>View attestations</TooltipContent>
+                </Tooltip>
+              )}
+            </div>
+          </div>
         </DialogHeader>
 
         <div className="max-h-80 overflow-y-auto">
@@ -185,33 +270,6 @@ export function AttestationQueuePanel() {
           )}
         </div>
 
-        {queue.length > 0 && (
-          <DialogFooter>
-            <Button
-              variant="ghost"
-              onClick={clearQueue}
-              disabled={isSaving}
-            >
-              Clear All
-            </Button>
-            <Button
-              onClick={handleSaveAll}
-              disabled={isSaving}
-            >
-              {isSaving ? (
-                <>
-                  <Loader2 className="size-4 animate-spin mr-2" />
-                  Saving...
-                </>
-              ) : (
-                <>
-                  <Save className="size-4 mr-2" />
-                  Save {queue.length}
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        )}
       </DialogContent>
     </Dialog>
   );

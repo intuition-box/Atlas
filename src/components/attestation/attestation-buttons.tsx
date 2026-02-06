@@ -8,6 +8,7 @@ import { useSession } from "next-auth/react";
 
 import { cn } from "@/lib/utils";
 import { apiGet, apiPost } from "@/lib/api/client";
+import { sounds } from "@/lib/sounds";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -125,6 +126,7 @@ export function AttestationButtons({
     setTimeout(() => {
       setFlyingDots((prev) => [...prev, { id, type, rect }]);
       addToQueue({ toUserId, toName, toHandle, toAvatarUrl, type });
+      sounds.playSpatial("pop", rect.left + rect.width / 2);
     }, 250);
 
     // Clean up animation state
@@ -202,7 +204,7 @@ export function AttestationButtons({
           if (isActive && allowRetract) {
             return (
               <Tooltip key={attestType.id}>
-                <TooltipTrigger asChild>
+                <TooltipTrigger>
                   <Button
                     variant="outline"
                     size={size}
@@ -238,7 +240,7 @@ export function AttestationButtons({
           if (isActive) {
             return (
               <Tooltip key={attestType.id}>
-                <TooltipTrigger asChild>
+                <TooltipTrigger>
                   <Button
                     variant="outline"
                     size={size}

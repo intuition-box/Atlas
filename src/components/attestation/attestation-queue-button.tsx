@@ -21,39 +21,41 @@ export function AttestationQueueButton({ className }: { className?: string }) {
 
   return (
     <Tooltip>
-      <TooltipTrigger
-        ref={buttonRef}
-        onClick={toggleOpen}
-        className={cn(
-          "relative flex items-center justify-center",
-          "size-10 rounded-full",
-          "text-muted-foreground hover:text-foreground",
-          "bg-background/50 hover:bg-background/80",
-          "backdrop-blur-sm",
-          "border border-border/30 hover:border-border/50",
-          "transition-all duration-200",
-          "focus:outline-none focus-visible:ring-2 focus-visible:ring-primary",
-          isOpen && "text-foreground bg-background/80 border-border/50",
-          className
-        )}
-      >
-        <FileCheck className="size-5" />
-        {/* Badge - only show when there are items */}
-        {count > 0 && (
-          <span
-            className={cn(
-              "absolute -top-1 -right-1",
-              "flex items-center justify-center",
-              "min-w-5 h-5 px-1.5",
-              "text-[10px] font-semibold",
-              "bg-primary text-primary-foreground",
-              "rounded-full",
-              "border-2 border-background"
-            )}
-          >
-            {count > 99 ? "99+" : count}
-          </span>
-        )}
+      <TooltipTrigger>
+        <button
+          ref={buttonRef}
+          onClick={toggleOpen}
+          className={cn(
+            "relative flex items-center justify-center",
+            "size-10 rounded-full",
+            "text-muted-foreground hover:text-foreground",
+            "bg-background/50 hover:bg-background/80",
+            "backdrop-blur-sm",
+            "border border-border/30 hover:border-border/50",
+            "transition-all duration-200",
+            "focus:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+            isOpen && "text-foreground bg-background/80 border-border/50",
+            className
+          )}
+        >
+          <FileCheck className="size-5" />
+          {/* Badge - only show when there are items */}
+          {count > 0 && (
+            <span
+              className={cn(
+                "absolute -top-1 -right-1",
+                "flex items-center justify-center",
+                "min-w-5 h-5 px-1.5",
+                "text-[10px] font-semibold",
+                "bg-primary text-primary-foreground",
+                "rounded-full",
+                "border-2 border-background"
+              )}
+            >
+              {count > 99 ? "99+" : count}
+            </span>
+          )}
+        </button>
       </TooltipTrigger>
       <TooltipContent side="bottom" sideOffset={8}>
         <p className="text-xs">
