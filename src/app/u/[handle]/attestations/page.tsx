@@ -879,14 +879,14 @@ export default function AttestationsPage() {
             a.id === id ? { ...a, mintedAt } : a
           )
         )
-        sounds.success()
+        sounds.play("/sounds/mint.mp3")
       } else {
         console.error("[Mint] Failed to mint attestation:", result.error)
-        sounds.error()
+        sounds.play("/sounds/select.mp3", { pitch: 0.8 })
       }
     } catch (err) {
       console.error("[Mint] Error minting attestation:", err)
-      sounds.error()
+      sounds.play("/sounds/select.mp3", { pitch: 0.8 })
     } finally {
       setMintingIds((prev) => {
         const next = new Set(prev)

@@ -126,7 +126,7 @@ export function AttestationButtons({
     setTimeout(() => {
       setFlyingDots((prev) => [...prev, { id, type, rect }]);
       addToQueue({ toUserId, toName, toHandle, toAvatarUrl, type });
-      sounds.playSpatial("pop", rect.left + rect.width / 2);
+      sounds.play("/sounds/select.mp3", { spatial: rect.left + rect.width / 2 });
     }, 250);
 
     // Clean up animation state

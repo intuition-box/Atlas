@@ -147,18 +147,18 @@ export function AttestationQueuePanel() {
       // If any succeeded, mark as saved so buttons refetch their state
       if (successfulIds.length > 0) {
         markSaved();
-        sounds.success();
+        sounds.play("/sounds/tnx-success.mp3");
       }
 
       // All successful - close dialog
       if (failures.length === 0) {
         setIsOpen(false);
       } else {
-        sounds.error();
+        sounds.play("/sounds/select.mp3", { pitch: 0.8 });
       }
     } catch {
       setError("Something went wrong");
-      sounds.error();
+      sounds.play("/sounds/select.mp3", { pitch: 0.8 });
     } finally {
       setIsSaving(false);
     }
