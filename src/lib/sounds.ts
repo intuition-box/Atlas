@@ -3,36 +3,55 @@
  *
  * Uses Web Audio API for low-latency playback with pitch/volume control.
  * Lazy-initializes on first user interaction (browser requirement).
+ *
+ * Supports both preset sounds and custom sound files:
+ * - Presets: sounds.pop(), sounds.success(), sounds.error()
+ * - Custom: sounds.playFile("/sounds/mint.mp3")
  */
 
 /* ────────────────────────────
    Types
 ──────────────────────────── */
 
-type SoundType = "pop" | "success" | "click" | "hover" | "error";
-
 type SoundConfig = {
-  pitchShift: number;
-  volume: number;
+  pitchShift?: number;
+  volume?: number;
   duration?: number;
   pan?: number; // -1 (left) to 1 (right)
+};
+
+type PresetType = "pop" | "success" | "click" | "hover" | "error";
+
+type PresetConfig = Required<Pick<SoundConfig, "pitchShift" | "volume">> & {
+  file: string;
+  duration?: number;
 };
 
 /* ────────────────────────────
    Sound Presets
 ──────────────────────────── */
 
-const SOUND_PRESETS: Record<SoundType, SoundConfig> = {
+const SOUND_PRESETS: Record<PresetType, PresetConfig> = {
   // Satisfying "plop" for adding to queue
-  pop: { pitchShift: 1.2, volume: 0.15, duration: 0.1 },
+  pop: { file: "/sounds/select.mp3", pitchShift: 1.2, volume: 0.15, duration: 0.1 },
   // Success chime for saves/mints
-  success: { pitchShift: 1.5, volume: 0.12, duration: 0.15 },
+  success: { file: "/sounds/tnx-success.mp3", pitchShift: 1.0, volume: 0.12 },
   // Button clicks
-  click: { pitchShift: 1.4, volume: 0.1, duration: 0.08 },
+  click: { file: "/sounds/select.mp3", pitchShift: 1.4, volume: 0.1, duration: 0.08 },
   // Subtle hover feedback
-  hover: { pitchShift: 1.6, volume: 0.06, duration: 0.05 },
+  hover: { file: "/sounds/select.mp3", pitchShift: 1.6, volume: 0.06, duration: 0.05 },
   // Soft error tone
-  error: { pitchShift: 0.8, volume: 0.1, duration: 0.12 },
+  error: { file: "/sounds/select.mp3", pitchShift: 0.8, volume: 0.1, duration: 0.12 },
+};
+
+/* ────────────────────────────
+   Default Config
+──────────────────────────── */
+
+const DEFAULT_CONFIG: Required<Omit<SoundConfig, "duration">> = {
+  pitchShift: 1.0,
+  volume: 0.15,
+  pan: 0,
 };
 
 /* ────────────────────────────
@@ -47,8 +66,8 @@ const STORAGE_KEY = "orbyt-sounds-enabled";
 
 class SoundEffects {
   private audioContext: AudioContext | null = null;
-  private audioBuffer: AudioBuffer | null = null;
-  private isLoading = false;
+  private buffers: Map<string, AudioBuffer> = new Map();
+  private loadingPaths: Set<string> = new Set();
   private _isEnabled = true;
 
   constructor() {
@@ -84,7 +103,6 @@ class SoundEffects {
           window.AudioContext ||
           (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
         this.audioContext = new AudioContextClass();
-        this.loadSound("/sounds/ui-click.mp3");
       }
     };
 
@@ -94,22 +112,47 @@ class SoundEffects {
     document.addEventListener("touchstart", initialize, { once: true });
   }
 
-  private async loadSound(url: string): Promise<void> {
-    if (this.isLoading || this.audioBuffer || !this.audioContext) return;
+  /* ──────────────────────────
+     Buffer Loading
+  ────────────────────────── */
 
-    this.isLoading = true;
+  /**
+   * Load and cache a sound buffer from a file path.
+   */
+  private async loadBuffer(path: string): Promise<AudioBuffer | null> {
+    // Return cached buffer
+    if (this.buffers.has(path)) {
+      return this.buffers.get(path)!;
+    }
+
+    // Already loading this path
+    if (this.loadingPaths.has(path)) {
+      // Wait a bit and check again
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return this.buffers.get(path) ?? null;
+    }
+
+    // Ensure AudioContext exists
+    if (!this.audioContext) {
+      return null;
+    }
+
+    this.loadingPaths.add(path);
+
     try {
-      const response = await fetch(url);
+      const response = await fetch(path);
       if (!response.ok) {
         throw new Error(`Failed to fetch sound: ${response.status}`);
       }
       const arrayBuffer = await response.arrayBuffer();
-      this.audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+      const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+      this.buffers.set(path, audioBuffer);
+      return audioBuffer;
     } catch (error) {
-      // Sound file not found - sounds will be silently disabled
-      console.debug("[Sounds] Could not load sound file:", error);
+      console.debug("[Sounds] Could not load sound file:", path, error);
+      return null;
     } finally {
-      this.isLoading = false;
+      this.loadingPaths.delete(path);
     }
   }
 
@@ -138,14 +181,14 @@ class SoundEffects {
   }
 
   /* ──────────────────────────
-     Playback
+     Core Playback
   ────────────────────────── */
 
   /**
-   * Play a sound with custom parameters.
+   * Play a buffer with the given config.
    */
-  private playSound(config: SoundConfig): void {
-    if (!this._isEnabled || !this.audioContext || !this.audioBuffer) {
+  private playBuffer(buffer: AudioBuffer, config: SoundConfig = {}): void {
+    if (!this._isEnabled || !this.audioContext) {
       return;
     }
 
@@ -158,22 +201,27 @@ class SoundEffects {
       const ctx = this.audioContext;
       const now = ctx.currentTime;
 
+      const pitchShift = config.pitchShift ?? DEFAULT_CONFIG.pitchShift;
+      const volume = config.volume ?? DEFAULT_CONFIG.volume;
+      const pan = config.pan ?? DEFAULT_CONFIG.pan;
+      const duration = config.duration;
+
       // Create nodes
       const source = ctx.createBufferSource();
       const gainNode = ctx.createGain();
       const pannerNode = ctx.createStereoPanner();
 
       // Configure
-      source.buffer = this.audioBuffer;
-      source.playbackRate.value = config.pitchShift;
-      gainNode.gain.setValueAtTime(config.volume, now);
-      pannerNode.pan.value = config.pan ?? 0;
+      source.buffer = buffer;
+      source.playbackRate.value = pitchShift;
+      gainNode.gain.setValueAtTime(volume, now);
+      pannerNode.pan.value = pan;
 
       // Fade out to avoid click artifacts
-      if (config.duration) {
-        const fadeStart = now + config.duration - 0.01;
-        gainNode.gain.setValueAtTime(config.volume, fadeStart);
-        gainNode.gain.linearRampToValueAtTime(0, now + config.duration);
+      if (duration) {
+        const fadeStart = now + duration - 0.01;
+        gainNode.gain.setValueAtTime(volume, fadeStart);
+        gainNode.gain.linearRampToValueAtTime(0, now + duration);
       }
 
       // Connect: source -> gain -> panner -> destination
@@ -183,8 +231,8 @@ class SoundEffects {
 
       // Play
       source.start(now);
-      if (config.duration) {
-        source.stop(now + config.duration);
+      if (duration) {
+        source.stop(now + duration);
       }
     } catch (error) {
       console.debug("[Sounds] Playback error:", error);
@@ -192,15 +240,83 @@ class SoundEffects {
   }
 
   /* ──────────────────────────
-     Public Methods
+     Public Methods - Custom Files
+  ────────────────────────── */
+
+  /**
+   * Play any sound file by path. Lazy-loads and caches.
+   *
+   * @param path - Path to sound file (e.g., "/sounds/mint.mp3")
+   * @param options - Optional pitch/volume/pan/duration overrides
+   */
+  async playFile(path: string, options?: SoundConfig): Promise<void> {
+    const buffer = await this.loadBuffer(path);
+    if (buffer) {
+      this.playBuffer(buffer, options);
+    }
+  }
+
+  /**
+   * Play a sound file with spatial positioning based on screen location.
+   *
+   * @param path - Path to sound file
+   * @param x - X coordinate (e.g., from click event)
+   * @param options - Optional config overrides
+   */
+  async playFileSpatial(path: string, x: number, options?: SoundConfig): Promise<void> {
+    if (typeof window === "undefined") {
+      return this.playFile(path, options);
+    }
+
+    const screenCenter = window.innerWidth / 2;
+    const pan = Math.max(-1, Math.min(1, (x - screenCenter) / screenCenter));
+    const pitchOffset = pan * 0.1;
+
+    return this.playFile(path, {
+      ...options,
+      pitchShift: (options?.pitchShift ?? DEFAULT_CONFIG.pitchShift) + pitchOffset,
+      pan,
+    });
+  }
+
+  /**
+   * Play a sound file with spatial positioning from a MouseEvent.
+   */
+  async playFileFromEvent(
+    path: string,
+    event: { clientX: number },
+    options?: SoundConfig
+  ): Promise<void> {
+    return this.playFileSpatial(path, event.clientX, options);
+  }
+
+  /**
+   * Play a sound file with spatial positioning from an element's center.
+   */
+  async playFileFromElement(
+    path: string,
+    element: Element,
+    options?: SoundConfig
+  ): Promise<void> {
+    const rect = element.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    return this.playFileSpatial(path, centerX, options);
+  }
+
+  /* ──────────────────────────
+     Public Methods - Presets
   ────────────────────────── */
 
   /**
    * Play a preset sound by type.
    */
-  play(type: SoundType): void {
-    const config = SOUND_PRESETS[type];
-    this.playSound(config);
+  play(type: PresetType): void {
+    const preset = SOUND_PRESETS[type];
+    this.playFile(preset.file, {
+      pitchShift: preset.pitchShift,
+      volume: preset.volume,
+      duration: preset.duration,
+    });
   }
 
   /**
@@ -211,7 +327,7 @@ class SoundEffects {
   }
 
   /**
-   * Play success sound (save/mint completed).
+   * Play success sound (operation completed).
    */
   success(): void {
     this.play("success");
@@ -231,8 +347,9 @@ class SoundEffects {
   hover(elementId?: string): void {
     if (elementId) {
       const hash = this.hashString(elementId);
-      const pitchVariation = 1.5 + hash * 0.3; // Range: 1.5 to 1.8
-      this.playSound({
+      const pitchVariation = 1.5 + hash * 0.3;
+      const preset = SOUND_PRESETS.hover;
+      this.playFile(preset.file, {
         pitchShift: pitchVariation,
         volume: 0.05,
         duration: 0.05,
@@ -250,45 +367,28 @@ class SoundEffects {
   }
 
   /**
-   * Play a sound with spatial positioning based on screen location.
-   * Automatically calculates pan and pitch from element position.
-   *
-   * @param type - Sound preset type
-   * @param x - X coordinate (e.g., from click event or element center)
+   * Play a preset sound with spatial positioning.
    */
-  playSpatial(type: SoundType, x: number): void {
-    if (typeof window === "undefined") {
-      this.play(type);
-      return;
-    }
-
+  playSpatial(type: PresetType, x: number): void {
     const preset = SOUND_PRESETS[type];
-    const screenCenter = window.innerWidth / 2;
-
-    // Calculate pan: -1 (left edge) to 1 (right edge)
-    const pan = Math.max(-1, Math.min(1, (x - screenCenter) / screenCenter));
-
-    // Subtle pitch variation tied to pan: left = slightly lower, right = slightly higher
-    const pitchOffset = pan * 0.1; // ±10% pitch shift
-
-    this.playSound({
-      ...preset,
-      pitchShift: preset.pitchShift + pitchOffset,
-      pan,
+    this.playFileSpatial(preset.file, x, {
+      pitchShift: preset.pitchShift,
+      volume: preset.volume,
+      duration: preset.duration,
     });
   }
 
   /**
-   * Play a sound with spatial positioning from a MouseEvent.
+   * Play a preset sound from a MouseEvent.
    */
-  playFromEvent(type: SoundType, event: { clientX: number }): void {
+  playFromEvent(type: PresetType, event: { clientX: number }): void {
     this.playSpatial(type, event.clientX);
   }
 
   /**
-   * Play a sound with spatial positioning from an element's center.
+   * Play a preset sound from an element's center.
    */
-  playFromElement(type: SoundType, element: Element): void {
+  playFromElement(type: PresetType, element: Element): void {
     const rect = element.getBoundingClientRect();
     const centerX = rect.left + rect.width / 2;
     this.playSpatial(type, centerX);
@@ -306,9 +406,9 @@ class SoundEffects {
     for (let i = 0; i < str.length; i++) {
       const char = str.charCodeAt(i);
       hash = (hash << 5) - hash + char;
-      hash = hash & hash; // Convert to 32-bit integer
+      hash = hash & hash;
     }
-    return Math.abs(hash) / 2147483647; // Normalize to 0-1
+    return Math.abs(hash) / 2147483647;
   }
 }
 
