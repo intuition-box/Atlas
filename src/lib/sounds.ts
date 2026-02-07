@@ -31,6 +31,44 @@ type PlayOptions = {
   duration?: number;
 };
 
+/** Control object returned by loop() to stop a looping sound */
+export type LoopControl = {
+  stop: () => void;
+};
+
+/* ────────────────────────────
+   Sound Paths
+──────────────────────────── */
+
+/**
+ * Semantic sound definitions.
+ * Maps logical names to actual file paths in /public/sounds/.
+ */
+const SOUNDS = {
+  // Feedback
+  success: "/sounds/success.mp3",
+  error: "/sounds/error.wav",
+  alert: "/sounds/alert.mp3",
+  save: "/sounds/save.mp3",
+
+  // Interactions
+  hover: "/sounds/hover.mp3",
+  select: "/sounds/select.mp3",
+  tap: "/sounds/tap.wav",
+  pop: "/sounds/pop.wav",
+
+  // Actions
+  achievement: "/sounds/achievement.mp3",
+  mint: "/sounds/mint.mp3",
+  mintAll: "/sounds/mint-all.mp3",
+  notification: "/sounds/notification.mp3",
+  quest: "/sounds/quest.mp3",
+  presentation: "/sounds/presentation.mp3",
+  coins: "/sounds/coins.mp3",
+} as const;
+
+export type SoundName = keyof typeof SOUNDS;
+
 /* ────────────────────────────
    Defaults
 ──────────────────────────── */
@@ -217,7 +255,7 @@ class SoundEffects {
         const screenCenterY = screenHeight / 2;
 
         // Get X position: true = mouse, number = explicit
-        const x = options.spatial === true ? this.lastMouseX : options.spatial;
+        const x = options.spatial === true ? this.lastMouseX : (options.spatial as number);
         const y = options.spatial === true ? this.lastMouseY : screenCenterY;
 
         // X → stereo pan (-1 to +1)
@@ -294,6 +332,111 @@ class SoundEffects {
     if (buffer) {
       this.playBuffer(buffer, options);
     }
+  }
+
+  /* ──────────────────────────
+     Semantic Sound Methods
+  ────────────────────────── */
+
+  /** Play success feedback sound */
+  success(options?: PlayOptions): Promise<void> {
+    return this.play(SOUNDS.success, options);
+  }
+
+  /** Play error feedback sound (with lower pitch) */
+  error(options?: PlayOptions): Promise<void> {
+    return this.play(SOUNDS.error, { pitch: 0.8, ...options });
+  }
+
+  /** Play UI select/click sound */
+  select(options?: PlayOptions): Promise<void> {
+    return this.play(SOUNDS.select, options);
+  }
+
+  /** Play UI tap sound */
+  tap(options?: PlayOptions): Promise<void> {
+    return this.play(SOUNDS.tap, options);
+  }
+
+  /** Play UI pop sound */
+  pop(options?: PlayOptions): Promise<void> {
+    return this.play(SOUNDS.pop, options);
+  }
+
+  /** Play hover sound */
+  hover(options?: PlayOptions): Promise<void> {
+    return this.play(SOUNDS.hover, options);
+  }
+
+  /** Play mint/blockchain action sound */
+  mint(options?: PlayOptions): Promise<void> {
+    return this.play(SOUNDS.mint, options);
+  }
+
+  /** Play batch mint sound (while minting multiple attestations) */
+  mintAll(options?: PlayOptions): Promise<void> {
+    return this.play(SOUNDS.mintAll, options);
+  }
+
+  /** Play notification sound */
+  notification(options?: PlayOptions): Promise<void> {
+    return this.play(SOUNDS.notification, options);
+  }
+
+  /* ──────────────────────────
+     Looping Playback
+  ────────────────────────── */
+
+  /**
+   * Start looping a sound until stop() is called.
+   * Returns a control object with a stop() function.
+   *
+   * @example
+   * const loop = await sounds.loop("/sounds/mint-all.mp3");
+   * // ... do work ...
+   * loop.stop(); // Stops the loop with a quick fade out
+   */
+  async loop(path: string, options?: PlayOptions): Promise<LoopControl> {
+    const buffer = await this.loadBuffer(path);
+    if (!buffer || !this.audioContext || !this._isEnabled) {
+      return { stop: () => {} };
+    }
+
+    const ctx = this.audioContext;
+
+    if (ctx.state === "suspended") {
+      await ctx.resume().catch(() => {});
+    }
+
+    const source = ctx.createBufferSource();
+    const gainNode = ctx.createGain();
+
+    source.buffer = buffer;
+    source.loop = true;
+    gainNode.gain.value = options?.volume ?? DEFAULTS.volume;
+
+    source.connect(gainNode);
+    gainNode.connect(ctx.destination);
+    source.start();
+
+    return {
+      stop: () => {
+        try {
+          // Fade out quickly to avoid click artifacts
+          const now = ctx.currentTime;
+          gainNode.gain.setValueAtTime(gainNode.gain.value, now);
+          gainNode.gain.linearRampToValueAtTime(0, now + 0.1);
+          source.stop(now + 0.1);
+        } catch {
+          // Already stopped
+        }
+      },
+    };
+  }
+
+  /** Loop the mintAll sound (for batch minting) */
+  loopMintAll(options?: PlayOptions): Promise<LoopControl> {
+    return this.loop(SOUNDS.mintAll, options);
   }
 }
 
