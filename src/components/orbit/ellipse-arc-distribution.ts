@@ -19,12 +19,16 @@ export class EllipseArcTable {
   private readonly n!: number;
 
   constructor(rx: number, ry: number, samples?: number) {
+    // Cache by geometric shape + sampling resolution
     const key = `${rx}:${ry}:${samples ?? "auto"}`;
     const cached = ellipseTableCache.get(key);
     if (cached) {
       return cached;
     }
 
+    // Sampling heuristic:
+    // - scales with ellipse size (rx + ry)
+    // - enforces a high minimum to avoid visible spacing artifacts
     const adaptiveSamples =
       samples ??
       Math.max(2048, Math.ceil((rx + ry) * 2));
@@ -59,6 +63,7 @@ export class EllipseArcTable {
       this.cumulativeArc[i] /= total;
     }
 
+    Object.freeze(this);
     ellipseTableCache.set(key, this);
   }
 

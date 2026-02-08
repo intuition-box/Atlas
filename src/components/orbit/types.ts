@@ -76,4 +76,5 @@ export type TooltipState = {
   node: SimulatedNode;
   x: number;
   y: number;
+  screenRadius: number;
 } | null;

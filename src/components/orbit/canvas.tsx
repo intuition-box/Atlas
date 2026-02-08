@@ -126,8 +126,8 @@ export interface OrbitCanvasProps {
   centerName?: string;
   onDrag: (id: string, x: number, y: number) => void;
   onDragEnd: (id: string) => void;
-  onNodeHover?: (node: SimulatedNode | null, screenPos: { x: number; y: number }) => void;
-  onNodeClick?: (node: SimulatedNode, screenPos: { x: number; y: number }) => void;
+  onNodeHover?: (node: SimulatedNode | null, screenPos: { x: number; y: number; screenRadius: number }) => void;
+  onNodeClick?: (node: SimulatedNode, screenPos: { x: number; y: number; screenRadius: number }) => void;
 }
 
 export function OrbitCanvas({
@@ -144,7 +144,10 @@ export function OrbitCanvas({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>(0);
 
+  // Gate for the render loop.
+  // When false, the rAF loop stays alive but skips draw work.
   const needsRedrawRef = useRef(true);
+  // Offscreen canvas for static geometry (rings, center logo, label)
   const staticCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Mutable refs so the rAF loop reads fresh values
@@ -167,6 +170,8 @@ export function OrbitCanvas({
   // Eagerly kick off center logo load
   if (centerLogoUrl) imageCacheRef.current.get(centerLogoUrl);
 
+  // World → screen transform (camera state).
+  // Mutated imperatively to avoid React re-renders during interaction.
   // Transform: centered on canvas initially
   const transformRef = useRef<Transform>({ x: width / 2, y: height / 2, k: 1 });
 
@@ -322,7 +327,7 @@ export function OrbitCanvas({
         ctx.fill();
 
         // Avatar image (if available)
-        const avatarImg = imageCacheRef.current.get(node.avatarUrl);
+        const avatarImg = imageCacheRef.current.get(node.avatarUrl ?? null);
         if (avatarImg && avatarImg.complete && avatarImg.naturalWidth > 0) {
           ctx.save();
           ctx.beginPath();
@@ -369,7 +374,9 @@ export function OrbitCanvas({
       const mouseY = e.clientY - rect.top;
 
       const t = transformRef.current;
-      const scaleFactor = e.deltaY < 0 ? 1.1 : 0.9;
+      // Gentle exponential zoom for smoother trackpad / wheel behavior
+      const zoomIntensity = 0.0015;
+      const scaleFactor = Math.exp(-e.deltaY * zoomIntensity);
       const newK = Math.min(
         INTERACTION.MAX_ZOOM,
         Math.max(INTERACTION.MIN_ZOOM, t.k * scaleFactor),
@@ -456,6 +463,7 @@ export function OrbitCanvas({
       return;
     }
 
+    // Throttle hover hit-testing to reduce CPU without affecting perceived responsiveness
     const now = performance.now();
     if (now - lastHoverCheckRef.current < 60) return;
     lastHoverCheckRef.current = now;
@@ -485,9 +493,9 @@ export function OrbitCanvas({
           const nx = (hitNode.x ?? simCx) - simCx;
           const ny = (hitNode.y ?? simCy) - simCy;
           const screen = worldToScreen(nx, ny, transformRef.current);
-          onNodeHoverRef.current(hitNode, { x: screen.x + rect.left, y: screen.y + rect.top });
+          onNodeHoverRef.current(hitNode, { x: screen.x + rect.left, y: screen.y + rect.top, screenRadius: hitNode.radius * transformRef.current.k + 1.5 });
         } else {
-          onNodeHoverRef.current(null, { x: 0, y: 0 });
+          onNodeHoverRef.current(null, { x: 0, y: 0, screenRadius: 0 });
         }
       }
       needsRedrawRef.current = true;
@@ -517,7 +525,7 @@ export function OrbitCanvas({
           const nx = (node.x ?? simCx) - simCx;
           const ny = (node.y ?? simCy) - simCy;
           const screen = worldToScreen(nx, ny, transformRef.current);
-          onNodeClickRef.current(node, { x: screen.x + rect.left, y: screen.y + rect.top });
+          onNodeClickRef.current(node, { x: screen.x + rect.left, y: screen.y + rect.top, screenRadius: node.radius * transformRef.current.k + 1.5 });
         }
       }
     }
@@ -529,7 +537,7 @@ export function OrbitCanvas({
   const handlePointerLeave = useCallback(() => {
     if (hoveredNodeIdRef.current) {
       hoveredNodeIdRef.current = null;
-      onNodeHoverRef.current?.(null, { x: 0, y: 0 });
+      onNodeHoverRef.current?.(null, { x: 0, y: 0, screenRadius: 0 });
     }
   }, []);
 

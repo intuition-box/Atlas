@@ -117,6 +117,8 @@ function forceOrbitTargets(
   let nodes: SimulatedNode[] = [];
 
   function force() {
+    if (strength === 0) return;
+
     for (const node of nodes) {
       if (node.fx != null || node.fy != null) continue;
 
@@ -242,7 +244,7 @@ export function useOrbitSimulation(
       }
 
       if (!pausedRef.current) {
-        sim.alphaTarget(0.3);
+        sim.alphaTarget(0.2);
       } else {
         sim.alphaTarget(0);
       }
@@ -292,7 +294,11 @@ export function useOrbitSimulation(
     const currentRotation = ringRotationRef.current[node.orbitLevel] ?? 0;
 
     // Convert angle → t, subtract current rotation to get baseT
-    node.baseT = table.angleToT(angle < 0 ? angle + Math.PI * 2 : angle) - currentRotation;
+    const rawT =
+      table.angleToT(angle < 0 ? angle + Math.PI * 2 : angle) - currentRotation;
+
+    // Clamp to [0,1) to avoid drift / negative wrap
+    node.baseT = ((rawT % 1) + 1) % 1;
 
     node.fx = null;
     node.fy = null;

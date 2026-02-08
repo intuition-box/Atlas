@@ -13,11 +13,17 @@ import {
   type SimulationLinkDatum,
 } from "d3-force";
 
-import { UsersIcon, UserIcon, CheckIcon, PlusIcon, FileTextIcon, CogIcon } from "@/components/ui/icons";
+import { UsersIcon, PlusIcon, FileTextIcon, CogIcon } from "@/components/ui/icons";
 import { apiGet } from "@/lib/api/client";
 import { useNavigation, useNavigationContext, type NavigationControls } from "@/components/navigation/navigation-provider";
-import { NodeTooltip, NodePopover } from "./node-popover";
-import { CommunityPopover } from "./community-popover";
+import {
+  NodeTooltip,
+  NodePopover,
+  CommunityTooltipContent,
+  MemberTooltipContent,
+  MemberPopoverContent,
+  CommunityPopoverContent,
+} from "./node-popover";
 import {
   RING_RADII,
   PERSPECTIVE_RATIO,
@@ -84,14 +90,14 @@ interface UniverseLink extends SimulationLinkDatum<UniverseNode> {
   sharedMembers: number;
 }
 
-type UniverseTooltipData = {
+type CommunityTooltipData = {
   name: string;
-  handle: string;
   memberCount: number;
   isPublic: boolean;
   isMembershipOpen: boolean;
   x: number;
   y: number;
+  screenRadius: number;
 };
 
 type Transform = { x: number; y: number; k: number };
@@ -325,53 +331,6 @@ function parseMemberLinks(raw: unknown[] | undefined): MemberLink[] {
 }
 
 /* ────────────────────────────
-   Universe Tooltip
-──────────────────────────── */
-
-function UniverseTooltip({ data }: { data: UniverseTooltipData }) {
-  return (
-    <div
-      style={{
-        position: "absolute",
-        left: data.x + 16,
-        top: data.y + 16,
-        pointerEvents: "none",
-        padding: "12px 14px",
-        borderRadius: 10,
-        backdropFilter: "blur(12px)",
-        background: "rgba(0, 0, 0, 0.75)",
-        color: "rgba(255, 255, 255, 0.95)",
-        fontSize: 13,
-        lineHeight: "20px",
-        minWidth: 180,
-        maxWidth: 280,
-        boxShadow: "0 4px 16px rgba(0, 0, 0, 0.4)",
-      }}
-    >
-      <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 14 }}>{data.name}</div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6, opacity: 0.85 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <UsersIcon style={{ width: 14, height: 14, flexShrink: 0 }} />
-          <span>{data.memberCount} {data.memberCount === 1 ? "member" : "members"}</span>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <UserIcon style={{ width: 14, height: 14, flexShrink: 0 }} />
-          <span>{data.isPublic ? "Public" : "Private"} community</span>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {data.isMembershipOpen ? (
-            <CheckIcon style={{ width: 14, height: 14, flexShrink: 0 }} />
-          ) : (
-            <PlusIcon style={{ width: 14, height: 14, flexShrink: 0 }} />
-          )}
-          <span>{data.isMembershipOpen ? "Open" : "Closed"} membership</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ────────────────────────────
    Component
 ──────────────────────────── */
 
@@ -471,26 +430,23 @@ export function OrbitScene({
   });
 
   // React state for tooltips/popovers (need re-renders)
-  const [universeTooltip, setUniverseTooltip] = React.useState<UniverseTooltipData | null>(null);
+  const [communityTooltip, setCommunityTooltip] = React.useState<CommunityTooltipData | null>(null);
   const [orbitTooltip, setOrbitTooltip] = React.useState<{
     node: SimulatedNode;
     x: number;
     y: number;
-  } | null>(null);
-  const [communityTooltip, setCommunityTooltip] = React.useState<{
-    name: string;
-    memberCount: number;
-    x: number;
-    y: number;
+    screenRadius: number;
   } | null>(null);
   const [orbitPopover, setOrbitPopover] = React.useState<{
     node: SimulatedNode;
     x: number;
     y: number;
+    screenRadius: number;
   } | null>(null);
   const [communityPopover, setCommunityPopover] = React.useState<{
     x: number;
     y: number;
+    screenRadius: number;
   } | null>(null);
   const [sceneMode, setSceneMode] = React.useState<SceneMode>("universe");
   const [activeCommunity, setActiveCommunity] = React.useState<{
@@ -986,7 +942,7 @@ export function OrbitScene({
 
     // Clear tooltips
     s.hoveredUniverseNode = null;
-    setUniverseTooltip(null);
+    setCommunityTooltip(null);
 
     // Start fetching community data
     s.fetchAbort?.abort();
@@ -1351,43 +1307,6 @@ export function OrbitScene({
 
       ctx.clearRect(0, 0, w, h);
 
-      // Hover detection (universe mode — orbit handled in pointer events)
-      if (mode === "universe" && s.pointer.inside && !s.draggedNode) {
-        const t = s.transform;
-        const wx = (s.pointer.x - t.x) / t.k;
-        const wy = (s.pointer.y - t.y) / t.k;
-
-        let picked: UniverseNode | null = null;
-        for (let i = s.universe.nodes.length - 1; i >= 0; i--) {
-          const n = s.universe.nodes[i];
-          if (n.x === undefined || n.y === undefined) continue;
-          const dx = n.x - wx;
-          const dy = n.y - wy;
-          if (dx * dx + dy * dy <= n.radius * n.radius) { picked = n; break; }
-        }
-
-        if (picked !== s.hoveredUniverseNode) {
-          s.hoveredUniverseNode = picked;
-          if (picked) {
-            setUniverseTooltip({
-              name: picked.name,
-              handle: picked.handle,
-              memberCount: picked.memberCount,
-              isPublic: picked.isPublic,
-              isMembershipOpen: picked.isMembershipOpen,
-              x: s.pointer.x,
-              y: s.pointer.y,
-            });
-          } else {
-            setUniverseTooltip(null);
-          }
-        } else if (picked) {
-          setUniverseTooltip((prev) =>
-            prev ? { ...prev, x: s.pointer.x, y: s.pointer.y } : null,
-          );
-        }
-      }
-
       switch (mode) {
         case "universe":
         case "zoom-in":
@@ -1441,6 +1360,40 @@ export function OrbitScene({
         const t = s.transform;
         s.draggedNode.fx = (x - t.x) / t.k;
         s.draggedNode.fy = (y - t.y) / t.k;
+      } else {
+        // Hover detection — same pattern as orbit nodes
+        const t = s.transform;
+        const wx = (x - t.x) / t.k;
+        const wy = (y - t.y) / t.k;
+
+        let picked: UniverseNode | null = null;
+        for (let i = s.universe.nodes.length - 1; i >= 0; i--) {
+          const n = s.universe.nodes[i];
+          if (n.x === undefined || n.y === undefined) continue;
+          const dx = n.x - wx;
+          const dy = n.y - wy;
+          if (dx * dx + dy * dy <= n.radius * n.radius) { picked = n; break; }
+        }
+
+        if (picked !== s.hoveredUniverseNode) {
+          s.hoveredUniverseNode = picked;
+          if (picked && picked.x !== undefined && picked.y !== undefined) {
+            const screenX = picked.x * t.k + t.x + rect.left;
+            const screenY = picked.y * t.k + t.y + rect.top;
+            const screenRadius = picked.radius * t.k + 1.5;
+            setCommunityTooltip({
+              name: picked.name,
+              memberCount: picked.memberCount,
+              isPublic: picked.isPublic,
+              isMembershipOpen: picked.isMembershipOpen,
+              x: screenX,
+              y: screenY,
+              screenRadius,
+            });
+          } else {
+            setCommunityTooltip(null);
+          }
+        }
       }
       scheduleFrame();
     } else if (s.mode === "orbit") {
@@ -1457,6 +1410,11 @@ export function OrbitScene({
         if (node) {
           node.fx = wx + cx;
           node.fy = wy + cy;
+          // Keep simulation warm so it enforces fx/fy each tick
+          if (s.orbit.simulation) {
+            s.orbit.simulation.alpha(Math.max(s.orbit.simulation.alpha(), SIMULATION.DRAG_ALPHA));
+            s.orbit.simulation.restart();
+          }
         }
         scheduleFrame();
         return;
@@ -1489,7 +1447,7 @@ export function OrbitScene({
           const ny = (hitNode.y ?? s.height / 2) - s.height / 2;
           const screenX = nx * t.k + t.x + rect.left;
           const screenY = ny * t.k + t.y + rect.top;
-          setOrbitTooltip({ node: hitNode, x: screenX, y: screenY });
+          setOrbitTooltip({ node: hitNode, x: screenX, y: screenY, screenRadius: hitNode.radius * t.k + 1.5 });
         } else {
           setOrbitTooltip(null);
         }
@@ -1510,8 +1468,11 @@ export function OrbitScene({
             setCommunityTooltip({
               name: s.orbit.communityName ?? "",
               memberCount: s.transition.targetCommunity?.memberCount ?? 0,
+              isPublic: s.transition.targetCommunity?.isPublic ?? true,
+              isMembershipOpen: s.transition.targetCommunity?.isMembershipOpen ?? false,
               x: screenX,
               y: screenY,
+              screenRadius: COMMUNITY_AVATAR_RADIUS * t.k + 1.5,
             });
           } else {
             setCommunityTooltip(null);
@@ -1568,7 +1529,7 @@ export function OrbitScene({
           n.fy = n.y;
 
           s.hoveredUniverseNode = null;
-          setUniverseTooltip(null);
+          setCommunityTooltip(null);
           s.universe.simulation?.alphaTarget(0.3).restart();
           scheduleFrame();
           return;
@@ -1592,6 +1553,9 @@ export function OrbitScene({
         const cy = s.height / 2;
         hitNode.fx = (hitNode.x ?? cx);
         hitNode.fy = (hitNode.y ?? cy);
+        // Warm the simulation so it ticks and enforces fx/fy
+        s.orbit.simulation?.alpha(SIMULATION.DRAG_ALPHA).restart();
+        scheduleFrame();
         return;
       }
 
@@ -1661,7 +1625,7 @@ export function OrbitScene({
             const screenX = nx * t.k + t.x + rect.left;
             const screenY = ny * t.k + t.y + rect.top;
 
-            setOrbitPopover({ node, x: screenX, y: screenY });
+            setOrbitPopover({ node, x: screenX, y: screenY, screenRadius: node.radius * t.k + 1.5 });
             setCommunityPopover(null);
             setOrbitTooltip(null);
             setCommunityTooltip(null);
@@ -1692,7 +1656,9 @@ export function OrbitScene({
         const wy = (y - t.y) / t.k;
         const hitRadius = COMMUNITY_AVATAR_RADIUS * 1.3;
         if (wx * wx + wy * wy <= hitRadius * hitRadius) {
-          setCommunityPopover({ x: e.clientX, y: e.clientY });
+          const avatarScreenX = t.x + rect.left;
+          const avatarScreenY = t.y + rect.top;
+          setCommunityPopover({ x: avatarScreenX, y: avatarScreenY, screenRadius: COMMUNITY_AVATAR_RADIUS * t.k + 1.5 });
           setOrbitPopover(null);
           setOrbitTooltip(null);
           setCommunityTooltip(null);
@@ -1713,7 +1679,7 @@ export function OrbitScene({
     if (s.mode === "universe") {
       if (s.hoveredUniverseNode) {
         s.hoveredUniverseNode = null;
-        setUniverseTooltip(null);
+        setCommunityTooltip(null);
         scheduleFrame();
       }
     } else if (s.mode === "orbit") {
@@ -1786,7 +1752,7 @@ export function OrbitScene({
 
   let cursor = "default";
   if (sceneMode === "universe") {
-    cursor = universeTooltip ? "pointer" : "default";
+    cursor = communityTooltip ? "pointer" : "default";
   } else if (sceneMode === "orbit") {
     cursor = (orbitTooltip || communityTooltip) ? "pointer" : "grab";
   }
@@ -1842,62 +1808,65 @@ export function OrbitScene({
         role="img"
       />
 
-      {/* Universe tooltip */}
-      {universeTooltip && sceneMode === "universe" && (
-        <UniverseTooltip data={universeTooltip} />
+      {/* Community tooltip — hover on community bubbles or center avatar */}
+      {communityTooltip && !orbitPopover && !communityPopover && (
+        <NodeTooltip
+          x={communityTooltip.x}
+          y={communityTooltip.y}
+          screenRadius={communityTooltip.screenRadius}
+          className="min-w-[180px] max-w-[280px]"
+        >
+          <CommunityTooltipContent
+            name={communityTooltip.name}
+            memberCount={communityTooltip.memberCount}
+            isPublic={communityTooltip.isPublic}
+            isMembershipOpen={communityTooltip.isMembershipOpen}
+          />
+        </NodeTooltip>
       )}
 
-      {/* Orbit tooltip */}
-      {orbitTooltip && sceneMode === "orbit" && !orbitPopover && !communityPopover && containerRef.current && (
+      {/* Member tooltip — hover on orbit member nodes */}
+      {orbitTooltip && sceneMode === "orbit" && !orbitPopover && !communityPopover && (
         <NodeTooltip
-          node={orbitTooltip.node}
           x={orbitTooltip.x}
           y={orbitTooltip.y}
-          containerRect={containerRef.current.getBoundingClientRect()}
-        />
+          screenRadius={orbitTooltip.screenRadius}
+        >
+          <MemberTooltipContent node={orbitTooltip.node} />
+        </NodeTooltip>
       )}
 
-      {/* Community avatar tooltip */}
-      {communityTooltip && sceneMode === "orbit" && !orbitPopover && !communityPopover && containerRef.current && (() => {
-        const cr = containerRef.current!.getBoundingClientRect();
-        const left = communityTooltip.x - cr.left + 16;
-        const top = communityTooltip.y - cr.top + 16;
-        return (
-          <div
-            className="pointer-events-none absolute z-50 rounded-lg border border-border bg-background/95 px-3 py-2 shadow-lg backdrop-blur-md"
-            style={{ left, top }}
-          >
-            <div className="text-sm font-medium text-foreground">{communityTooltip.name}</div>
-            <div className="mt-1 text-xs text-muted-foreground">
-              {communityTooltip.memberCount} members
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* Orbit popover */}
+      {/* Orbit popover — click on member nodes */}
       {orbitPopover && sceneMode === "orbit" && (
         <NodePopover
-          node={orbitPopover.node}
           x={orbitPopover.x}
           y={orbitPopover.y}
+          screenRadius={orbitPopover.screenRadius}
           onClose={handleClosePopover}
-          onViewProfile={handleViewProfile}
-        />
+        >
+          <MemberPopoverContent
+            node={orbitPopover.node}
+            onViewProfile={handleViewProfile}
+          />
+        </NodePopover>
       )}
 
-      {/* Community popover — community avatar click */}
+      {/* Community popover — click on center logo */}
       {communityPopover && sceneMode === "orbit" && stateRef.current.transition.targetCommunity && (
-        <CommunityPopover
-          community={{
-            ...stateRef.current.transition.targetCommunity,
-            description: stateRef.current.fetchedData?.description ?? null,
-            viewerMembership: stateRef.current.fetchedData?.viewerMembership ?? null,
-          }}
+        <NodePopover
           x={communityPopover.x}
           y={communityPopover.y}
+          screenRadius={communityPopover.screenRadius}
           onClose={handleCloseCommunityPopover}
-        />
+        >
+          <CommunityPopoverContent
+            community={{
+              ...stateRef.current.transition.targetCommunity,
+              description: stateRef.current.fetchedData?.description ?? null,
+              viewerMembership: stateRef.current.fetchedData?.viewerMembership ?? null,
+            }}
+          />
+        </NodePopover>
       )}
 
     </div>

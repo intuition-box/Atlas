@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 
 import { OrbitCanvas } from "./canvas";
-import { NodeTooltip, NodePopover } from "./node-popover";
+import { NodeTooltip, NodePopover, MemberTooltipContent, MemberPopoverContent } from "./node-popover";
 import { useOrbitSimulation } from "./simulation";
 import type { OrbitViewProps, SimulatedNode } from "./types";
 
@@ -11,13 +11,18 @@ type TooltipState = {
   node: SimulatedNode;
   x: number;
   y: number;
+  screenRadius: number;
 } | null;
 
 type PopoverState = {
   node: SimulatedNode;
   x: number;
   y: number;
+  screenRadius: number;
 } | null;
+
+// Cached layout rect for future hit-testing / overlay alignment
+const containerRectRef = useRef<DOMRect | null>(null);
 
 export function OrbitView({
   members,
@@ -36,8 +41,6 @@ export function OrbitView({
   // Tracks pointer presence independently of React state to avoid rerenders
   const mouseInsideRef = useRef(false);
 
-  const containerRectRef = useRef<DOMRect | null>(null);
-
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -52,17 +55,18 @@ export function OrbitView({
     return () => ro.disconnect();
   }, []);
 
+  // During initial mount size is 0; simulation handles center (0,0) safely
   const sim = useOrbitSimulation(
     members,
     links,
-    size.w > 0 ? size.w / 2 : 0,
-    size.h > 0 ? size.h / 2 : 0,
+    size.w / 2,
+    size.h / 2,
   );
 
   const handleNodeHover = useCallback(
-    (node: SimulatedNode | null, screenPos: { x: number; y: number }) => {
+    (node: SimulatedNode | null, screenPos: { x: number; y: number; screenRadius: number }) => {
       if (node) {
-        setTooltip({ node, x: screenPos.x, y: screenPos.y });
+        setTooltip({ node, x: screenPos.x, y: screenPos.y, screenRadius: screenPos.screenRadius });
       } else {
         setTooltip(null);
       }
@@ -71,17 +75,18 @@ export function OrbitView({
   );
 
   const handleNodeClick = useCallback(
-    (node: SimulatedNode, screenPos: { x: number; y: number }) => {
-      setPopover({ node, x: screenPos.x, y: screenPos.y });
+    (node: SimulatedNode, screenPos: { x: number; y: number; screenRadius: number }) => {
+      setPopover({ node, x: screenPos.x, y: screenPos.y, screenRadius: screenPos.screenRadius });
       setTooltip(null);
       sim.setPaused(true);
+      // Ensure hover tooltip never reappears while popover is active
     },
     [sim],
   );
 
   const handleClosePopover = useCallback(() => {
     setPopover(null);
-    // Only unpause if mouse is outside the container
+    // Resume only when pointer is outside to avoid instant re-pause
     if (!mouseInsideRef.current) {
       sim.setPaused(false);
     }
@@ -111,7 +116,8 @@ export function OrbitView({
     <div
       ref={containerRef}
       className={`relative overflow-hidden ${className}`}
-      style={{ width: "100vw", height: "100vh" }}
+      // Size is controlled by parent; canvas adapts via ResizeObserver
+      style={{ width: "100%", height: "100%" }}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
@@ -130,24 +136,29 @@ export function OrbitView({
       )}
 
       {/* Tooltip — hover only, hidden when popover is open */}
-      {tooltip && containerRectRef.current && !popover && (
+      {tooltip && !popover && (
         <NodeTooltip
-          node={tooltip.node}
           x={tooltip.x}
           y={tooltip.y}
-          containerRect={containerRectRef.current}
-        />
+          screenRadius={tooltip.screenRadius}
+        >
+          <MemberTooltipContent node={tooltip.node} />
+        </NodeTooltip>
       )}
 
       {/* Popover — click */}
       {popover && (
         <NodePopover
-          node={popover.node}
           x={popover.x}
           y={popover.y}
+          screenRadius={popover.screenRadius}
           onClose={handleClosePopover}
-          onViewProfile={handleViewProfile}
-        />
+        >
+          <MemberPopoverContent
+            node={popover.node}
+            onViewProfile={handleViewProfile}
+          />
+        </NodePopover>
       )}
     </div>
   );
