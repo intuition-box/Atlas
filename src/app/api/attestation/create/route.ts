@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import { api, okJson, errJson } from "@/lib/api/server";
 import { db } from "@/lib/db/client";
-import { ATTESTATION_TYPES, type AttestationType } from "@/config/attestations";
+import { ATTESTATION_TYPES, type AttestationType } from "@/lib/attestations/definitions";
 
 export const runtime = "nodejs";
 

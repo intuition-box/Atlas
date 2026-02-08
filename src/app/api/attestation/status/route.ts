@@ -60,4 +60,4 @@ export const GET = api(QuerySchema, async (ctx) => {
   }));
 
   return okJson<AttestationStatusOk>({ activeTypes, activeAttestations });
-}, { methods: ["GET"], auth: "public" });
+}, { methods: ["GET"], auth: "auth" });

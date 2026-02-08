@@ -22,7 +22,8 @@ import { Spinner } from "@/components/ui/spinner"
 import { Checkbox } from "@/components/ui/checkbox"
 import { OnchainBanner } from "@/components/attestation/onchain-banner"
 import { SelectionActionBar } from "@/components/attestation/selection-action-bar"
-import { ATTESTATION_TYPES, ATTESTATION_TYPE_LIST, type AttestationType } from "@/config/attestations"
+import { useAttestationQueue } from "@/components/attestation/attestation-queue-provider"
+import { ATTESTATION_TYPES, ATTESTATION_TYPE_LIST, type AttestationType } from "@/lib/attestations/definitions"
 
 // === CONSTANTS ===
 
@@ -131,7 +132,9 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
 function useAttestationsData(
   handle: string,
   filters: FilterState,
-  cursor: string | null
+  cursor: string | null,
+  /** Timestamp of last cart save - triggers refetch when changed */
+  lastSavedAt: number = 0
 ) {
   const router = useRouter()
   const [items, setItems] = React.useState<Attestation[]>([])
@@ -245,7 +248,7 @@ function useAttestationsData(
     return () => {
       ac.abort()
     }
-  }, [router, queryParams, cursor, handle, filters.direction, filters.type])
+  }, [router, queryParams, cursor, handle, filters.direction, filters.type, lastSavedAt])
 
   // Filter by search query client-side
   const filteredItems = React.useMemo(() => {
@@ -380,10 +383,14 @@ function AttestationCard({
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
-              {isMinted && (
-                <Badge variant="secondary" className="gap-1 bg-primary/10 text-primary border-primary/20">
+              {isMinted ? (
+                <Badge variant="secondary" className="gap-1 bg-emerald-500/10 text-emerald-600 border-emerald-500/20">
                   <Link2 className="size-3" />
                   Onchain
+                </Badge>
+              ) : (
+                <Badge variant="secondary" className="gap-1 bg-amber-500/10 text-amber-600 border-amber-500/20">
+                  Off-chain
                 </Badge>
               )}
               {isReceived ? (
@@ -557,12 +564,14 @@ function AttestationRow({
 
       <div className="flex items-center">
         {isMinted ? (
-          <Badge variant="secondary" className="gap-1 bg-primary/10 text-primary border-primary/20">
+          <Badge variant="secondary" className="gap-1 bg-emerald-500/10 text-emerald-600 border-emerald-500/20">
             <Link2 className="size-3" />
             Onchain
           </Badge>
         ) : (
-          <span className="text-xs text-muted-foreground">Off-chain</span>
+          <Badge variant="secondary" className="gap-1 bg-amber-500/10 text-amber-600 border-amber-500/20">
+            Off-chain
+          </Badge>
         )}
       </div>
 
@@ -786,6 +795,9 @@ export default function AttestationsPage() {
 
   const viewerId = session?.user?.id ?? null
 
+  // Get lastSavedAt from queue context to trigger refetch when cart saves
+  const { lastSavedAt } = useAttestationQueue()
+
   const [view, setView] = React.useState<"cards" | "list">("cards")
   const [cursor, setCursor] = React.useState<string | null>(null)
   const [isFiltersOpen, setIsFiltersOpen] = React.useState(false)
@@ -801,10 +813,18 @@ export default function AttestationsPage() {
     direction: "all",
   })
 
+  // Reset cursor when cart saves to force fresh fetch from page 1
+  React.useEffect(() => {
+    if (lastSavedAt > 0) {
+      setCursor(null)
+    }
+  }, [lastSavedAt])
+
   const { items: fetchedItems, nextCursor, loading, loadingMore, error } = useAttestationsData(
     handle,
     filters,
-    cursor
+    cursor,
+    lastSavedAt
   )
 
   // Sync fetched items to local state (allows optimistic removal on retract)
@@ -849,7 +869,7 @@ export default function AttestationsPage() {
   }, [])
 
   // Mint function - calls API to persist state, will be extended with Intuition SDK later
-  const handleMint = React.useCallback(async (id: string) => {
+  const handleMint = React.useCallback(async (id: string, options?: { silent?: boolean }) => {
     setMintingIds((prev) => new Set(prev).add(id))
 
     try {
@@ -879,14 +899,20 @@ export default function AttestationsPage() {
             a.id === id ? { ...a, mintedAt } : a
           )
         )
-        sounds.play("/sounds/mint.mp3")
+        if (!options?.silent) {
+          sounds.mint()
+        }
       } else {
         console.error("[Mint] Failed to mint attestation:", result.error)
-        sounds.play("/sounds/select.mp3", { pitch: 0.8 })
+        if (!options?.silent) {
+          sounds.error()
+        }
       }
     } catch (err) {
       console.error("[Mint] Error minting attestation:", err)
-      sounds.play("/sounds/select.mp3", { pitch: 0.8 })
+      if (!options?.silent) {
+        sounds.error()
+      }
     } finally {
       setMintingIds((prev) => {
         const next = new Set(prev)
@@ -903,8 +929,19 @@ export default function AttestationsPage() {
 
   const handleMintSelected = React.useCallback(async () => {
     const ids = Array.from(selectedIds)
-    for (const id of ids) {
-      await handleMint(id)
+    if (ids.length === 0) return
+
+    // Start looping mintAll sound while minting batch
+    const loopControl = await sounds.loopMintAll()
+
+    try {
+      for (const id of ids) {
+        await handleMint(id, { silent: true })
+      }
+    } finally {
+      // Stop loop and play completion sound once
+      loopControl.stop()
+      sounds.mint()
     }
   }, [selectedIds, handleMint])
 
@@ -914,8 +951,19 @@ export default function AttestationsPage() {
       .filter((a) => !a.mintedAt && a.fromUser.id === viewerId)
       .map((a) => a.id)
 
-    for (const id of unmintedIds) {
-      await handleMint(id)
+    if (unmintedIds.length === 0) return
+
+    // Start looping mintAll sound while minting batch
+    const loopControl = await sounds.loopMintAll()
+
+    try {
+      for (const id of unmintedIds) {
+        await handleMint(id, { silent: true })
+      }
+    } finally {
+      // Stop loop and play completion sound once
+      loopControl.stop()
+      sounds.mint()
     }
   }, [localItems, viewerId, handleMint])
 

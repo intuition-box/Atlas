@@ -25,7 +25,8 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useAttestationQueue, type QueuedAttestation } from "./attestation-queue-provider";
-import { ATTESTATION_TYPES, type AttestationType } from "@/config/attestations";
+import { ATTESTATION_TYPES, type AttestationType } from "@/lib/attestations/definitions";
+import { TrashIcon } from "../ui/icons";
 
 /* ────────────────────────────
    Helpers
@@ -94,7 +95,7 @@ function QueueItem({
 
 export function AttestationQueuePanel() {
   const { data: session } = useSession();
-  const { queue, removeFromQueue, clearQueue, isOpen, setIsOpen, markSaved } = useAttestationQueue();
+  const { queue, removeFromQueue, removeMultiple, clearQueue, isOpen, setIsOpen, markSaved } = useAttestationQueue();
   const [isSaving, setIsSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const pathname = usePathname();
@@ -134,31 +135,26 @@ export function AttestationQueuePanel() {
         .filter((r): r is PromiseFulfilledResult<string> => r.status === "fulfilled")
         .map((r) => r.value);
 
-      for (const id of successfulIds) {
-        removeFromQueue(id);
-      }
-
       // Check for failures
       const failures = results.filter((r) => r.status === "rejected");
       if (failures.length > 0) {
         setError(`${failures.length} attestation(s) failed to save`);
       }
 
-      // If any succeeded, mark as saved so buttons refetch their state
+      // If any succeeded, remove from queue and trigger refetch
       if (successfulIds.length > 0) {
+        removeMultiple(successfulIds);
         markSaved();
-        sounds.play("/sounds/tnx-success.mp3");
+        sounds.success();
       }
 
-      // All successful - close dialog
-      if (failures.length === 0) {
-        setIsOpen(false);
-      } else {
-        sounds.play("/sounds/select.mp3", { pitch: 0.8 });
+      // Play error sound if any failed
+      if (failures.length > 0) {
+        sounds.error();
       }
     } catch {
       setError("Something went wrong");
-      sounds.play("/sounds/select.mp3", { pitch: 0.8 });
+      sounds.error();
     } finally {
       setIsSaving(false);
     }
@@ -187,9 +183,9 @@ export function AttestationQueuePanel() {
                       size="icon-sm"
                       onClick={clearQueue}
                       disabled={isSaving}
-                      className="text-red-500 hover:text-red-600 hover:bg-red-500/10"
+                      className="text-red-500 hover:text-red-600"
                     >
-                      <Trash2 className="size-4" />
+                      <TrashIcon className="size-4" />
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>Clear all</TooltipContent>

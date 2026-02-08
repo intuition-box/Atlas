@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import type { AttestationType } from "@/config/attestations";
+import type { AttestationType } from "@/lib/attestations/definitions";
 
 /* ────────────────────────────
    Constants
@@ -26,6 +26,7 @@ type AttestationQueueContextValue = {
   queue: QueuedAttestation[];
   addToQueue: (attestation: Omit<QueuedAttestation, "id">) => void;
   removeFromQueue: (id: string) => void;
+  removeMultiple: (ids: string[]) => void;
   clearQueue: () => void;
   isInQueue: (toUserId: string, type: AttestationType) => boolean;
   isOpen: boolean;
@@ -118,6 +119,11 @@ export function AttestationQueueProvider({ children }: { children: React.ReactNo
     setQueue((prev) => prev.filter((item) => item.id !== id));
   }, []);
 
+  const removeMultiple = React.useCallback((ids: string[]) => {
+    const idSet = new Set(ids);
+    setQueue((prev) => prev.filter((item) => !idSet.has(item.id)));
+  }, []);
+
   const clearQueue = React.useCallback(() => {
     setQueue([]);
   }, []);
@@ -146,6 +152,7 @@ export function AttestationQueueProvider({ children }: { children: React.ReactNo
       queue,
       addToQueue,
       removeFromQueue,
+      removeMultiple,
       clearQueue,
       isInQueue,
       isOpen,
@@ -155,7 +162,7 @@ export function AttestationQueueProvider({ children }: { children: React.ReactNo
       lastSavedAt,
       markSaved,
     }),
-    [queue, addToQueue, removeFromQueue, clearQueue, isInQueue, isOpen, toggleOpen, lastSavedAt, markSaved]
+    [queue, addToQueue, removeFromQueue, removeMultiple, clearQueue, isInQueue, isOpen, toggleOpen, lastSavedAt, markSaved]
   );
 
   return (

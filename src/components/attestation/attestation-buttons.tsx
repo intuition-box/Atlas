@@ -10,13 +10,21 @@ import { cn } from "@/lib/utils";
 import { apiGet, apiPost } from "@/lib/api/client";
 import { sounds } from "@/lib/sounds";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useAttestationQueue } from "./attestation-queue-provider";
-import { ATTESTATION_TYPES, type AttestationType } from "@/config/attestations";
+import { ATTESTATION_TYPES, type AttestationType } from "@/lib/attestations/definitions";
+
+const ANIMATION = {
+  shineDelay: 250,
+  shineCleanup: 300,
+  dotLifetime: 800,
+  flightDuration: 0.45,
+};
 
 /* ────────────────────────────
    Types
@@ -45,14 +53,9 @@ type FlyingDot = {
   rect: DOMRect;
 };
 
-type ActiveAttestation = {
-  type: string;
-  mintedAt: string | null;
-};
-
 type StatusResponse = {
   activeTypes: string[];
-  activeAttestations: ActiveAttestation[];
+  activeAttestations: Array<{ type: string; mintedAt: string | null }>;
 };
 
 /* ────────────────────────────
@@ -68,42 +71,71 @@ export function AttestationButtons({
   size = "xs",
   allowRetract = false,
 }: AttestationButtonsProps) {
-  const { data: session } = useSession();
+  const { data: session, status: sessionStatus } = useSession();
   const [animatingTypes, setAnimatingTypes] = useState<Set<AttestationType>>(new Set());
   const [flyingDots, setFlyingDots] = useState<FlyingDot[]>([]);
   const [activeTypes, setActiveTypes] = useState<Set<AttestationType>>(new Set());
   const [mintedTypes, setMintedTypes] = useState<Set<AttestationType>>(new Set());
   const [retractingTypes, setRetractingTypes] = useState<Set<AttestationType>>(new Set());
+  const [isFetching, setIsFetching] = useState(true);
   const { addToQueue, isInQueue, buttonRef, lastSavedAt } = useAttestationQueue();
 
+  const timeoutsRef = React.useRef<number[]>([]);
+
+  useEffect(() => {
+    return () => {
+      timeoutsRef.current.forEach(clearTimeout);
+      timeoutsRef.current = [];
+      setFlyingDots([]);
+    };
+  }, []);
+
   const currentUserId = session?.user?.id;
+  const isSessionLoading = sessionStatus === "loading";
 
   // Fetch existing attestations on mount and when attestations are saved
   useEffect(() => {
-    if (!currentUserId || currentUserId === toUserId) return;
+    // Wait for session to load before deciding
+    if (isSessionLoading) {
+      return;
+    }
 
+    // No session or viewing own profile - no fetch needed
+    if (!currentUserId || currentUserId === toUserId) {
+      setIsFetching(false);
+      return;
+    }
+
+    setIsFetching(true);
     const controller = new AbortController();
 
     apiGet<StatusResponse>("/api/attestation/status", { toUserId }, { signal: controller.signal })
       .then((result) => {
         if (result.ok) {
-          setActiveTypes(new Set(result.value.activeTypes as AttestationType[]));
-          // Track which attestations are minted onchain
+          const active = new Set(
+            result.value.activeTypes.filter(
+              (t): t is AttestationType => t in ATTESTATION_TYPES
+            )
+          );
           const minted = new Set<AttestationType>();
           for (const att of result.value.activeAttestations) {
-            if (att.mintedAt) {
+            if (att.mintedAt && att.type in ATTESTATION_TYPES) {
               minted.add(att.type as AttestationType);
             }
           }
+          setActiveTypes(active);
           setMintedTypes(minted);
         }
       })
       .catch(() => {
         // Ignore errors (e.g., aborted)
+      })
+      .finally(() => {
+        setIsFetching(false);
       });
 
     return () => controller.abort();
-  }, [currentUserId, toUserId, lastSavedAt]);
+  }, [currentUserId, toUserId, lastSavedAt, isSessionLoading]);
 
   // Don't show attestation buttons for yourself
   if (currentUserId === toUserId) {
@@ -120,34 +152,48 @@ export function AttestationButtons({
     const id = `${type}-${Date.now()}`;
 
     // Start button animation
-    setAnimatingTypes((prev) => new Set(prev).add(type));
+    setAnimatingTypes((prev) => {
+      const next = new Set(prev);
+      next.add(type);
+      return next;
+    });
 
     // After button "shine", spawn flying dot and add to queue
-    setTimeout(() => {
-      setFlyingDots((prev) => [...prev, { id, type, rect }]);
-      addToQueue({ toUserId, toName, toHandle, toAvatarUrl, type });
-      sounds.play("/sounds/select.mp3", { spatial: rect.left + rect.width / 2 });
-    }, 250);
+    timeoutsRef.current.push(
+      window.setTimeout(() => {
+        setFlyingDots((prev) => [...prev, { id, type, rect }]);
+        addToQueue({ toUserId, toName, toHandle, toAvatarUrl, type });
+        sounds.select({ spatial: rect.left + rect.width / 2 });
+      }, ANIMATION.shineDelay)
+    );
 
     // Clean up animation state
-    setTimeout(() => {
-      setAnimatingTypes((prev) => {
-        const next = new Set(prev);
-        next.delete(type);
-        return next;
-      });
-    }, 300);
+    timeoutsRef.current.push(
+      window.setTimeout(() => {
+        setAnimatingTypes((prev) => {
+          const next = new Set(prev);
+          next.delete(type);
+          return next;
+        });
+      }, ANIMATION.shineCleanup)
+    );
 
     // Remove flying dot after flight
-    setTimeout(() => {
-      setFlyingDots((prev) => prev.filter((d) => d.id !== id));
-    }, 800);
+    timeoutsRef.current.push(
+      window.setTimeout(() => {
+        setFlyingDots((prev) => prev.filter((d) => d.id !== id));
+      }, ANIMATION.dotLifetime)
+    );
   };
 
   const handleRetractClick = async (type: AttestationType) => {
     if (retractingTypes.has(type)) return;
 
-    setRetractingTypes((prev) => new Set(prev).add(type));
+    setRetractingTypes((prev) => {
+      const next = new Set(prev);
+      next.add(type);
+      return next;
+    });
 
     try {
       // First, we need to find the attestation ID
@@ -187,6 +233,25 @@ export function AttestationButtons({
       });
     }
   };
+
+  // Show buttons with spinner while loading (no layout shift)
+  if (isSessionLoading || isFetching) {
+    return (
+      <div className={cn("flex flex-wrap gap-1.5", className)}>
+        {Object.values(ATTESTATION_TYPES).map((attestType) => (
+          <Button
+            key={attestType.id}
+            variant="outline"
+            size={size}
+            disabled
+          >
+            <Spinner className="size-3 mr-1" />
+            {attestType.label}
+          </Button>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <>
@@ -323,10 +388,10 @@ export function AttestationButtons({
                 scale: 0,
               }}
               transition={{
-                duration: 0.45,
+                duration: ANIMATION.flightDuration,
                 ease: [0.32, 0, 0.15, 1],
-                left: { duration: 0.45, ease: [0.32, 0, 0.15, 1] },
-                top: { duration: 0.45, ease: [0.0, 0.55, 0.35, 1] },
+                left: { duration: ANIMATION.flightDuration, ease: [0.32, 0, 0.15, 1] },
+                top: { duration: ANIMATION.flightDuration, ease: [0.0, 0.55, 0.35, 1] },
               }}
             >
               <div className="w-full h-full rounded-full bg-primary text-primary-foreground flex items-center justify-center shadow-lg shadow-primary/50">

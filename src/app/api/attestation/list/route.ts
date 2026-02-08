@@ -8,7 +8,7 @@ import {
   resolveHandleNamesForOwners,
   resolveUserIdFromHandle,
 } from "@/lib/handle-registry";
-import { ATTESTATION_TYPES, type AttestationType } from "@/config/attestations";
+import { ATTESTATION_TYPES, type AttestationType } from "@/lib/attestations/definitions";
 
 export const runtime = "nodejs";
 

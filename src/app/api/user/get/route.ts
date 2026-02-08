@@ -6,7 +6,7 @@ import { auth } from "@/lib/auth/session";
 import { errJson, okJson } from "@/lib/api/server";
 import { db } from "@/lib/db/client";
 import { resolveHandleNameForOwner, resolveUserIdFromHandle } from "@/lib/handle-registry";
-import type { AttestationType } from "@/config/attestations";
+import type { AttestationType } from "@/lib/attestations/definitions";
 
 export const runtime = "nodejs";
 

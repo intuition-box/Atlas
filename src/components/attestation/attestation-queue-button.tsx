@@ -1,6 +1,5 @@
 "use client";
 
-import * as React from "react";
 import { FileCheck } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -10,6 +9,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useAttestationQueue } from "./attestation-queue-provider";
+import { Button } from "@/components/ui/button";
 
 /* ────────────────────────────
    Component
@@ -22,24 +22,22 @@ export function AttestationQueueButton({ className }: { className?: string }) {
   return (
     <Tooltip>
       <TooltipTrigger>
-        <button
+        <Button
           ref={buttonRef}
+          variant="ghost"
+          size="icon"
           onClick={toggleOpen}
+          type="button"
           className={cn(
-            "relative flex items-center justify-center",
-            "size-10 rounded-full",
-            "text-muted-foreground hover:text-foreground",
+            "relative size-10 rounded-full",
             "bg-background/50 hover:bg-background/80",
             "backdrop-blur-sm",
             "border border-border/30 hover:border-border/50",
-            "transition-all duration-200",
-            "focus:outline-none focus-visible:ring-2 focus-visible:ring-primary",
-            isOpen && "text-foreground bg-background/80 border-border/50",
+            isOpen && "bg-background/80 border-border/50",
             className
           )}
         >
           <FileCheck className="size-5" />
-          {/* Badge - only show when there are items */}
           {count > 0 && (
             <span
               className={cn(
@@ -55,13 +53,13 @@ export function AttestationQueueButton({ className }: { className?: string }) {
               {count > 99 ? "99+" : count}
             </span>
           )}
-        </button>
+        </Button>
       </TooltipTrigger>
       <TooltipContent side="bottom" sideOffset={8}>
         <p className="text-xs">
           {count > 0
             ? `${count} attestation${count !== 1 ? "s" : ""} queued`
-            : "Attestations"}
+            : "No attestations queued"}
         </p>
       </TooltipContent>
     </Tooltip>
