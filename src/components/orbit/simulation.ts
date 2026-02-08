@@ -124,13 +124,14 @@ function forceOrbitTargets(
       const ry = rx * PERSPECTIVE_RATIO;
       const table = getArcTable(rx);
 
-      const effectiveT = node.baseT + (ringRotation[node.orbitLevel] ?? 0);
+      const effectiveT =
+        (node.baseT + (ringRotation[node.orbitLevel] ?? 0)) % 1;
       const angle = table.tToAngle(effectiveT);
 
       const targetX = cx + Math.cos(angle) * rx;
       const targetY = cy + Math.sin(angle) * ry;
 
-      // Zero velocity first — no accumulation from previous ticks
+      // Reset velocity each tick — orbit force acts as a constraint, not inertia
       node.vx = 0;
       node.vy = 0;
 
@@ -232,15 +233,27 @@ export function useOrbitSimulation(
         // Rotation is in t-space: radians/sec ÷ 2π = revolutions/sec = Δt/sec
         for (const level of Object.keys(ORBIT_ROTATION.SPEED_MULTIPLIER) as OrbitLevel[]) {
           ringRotationRef.current[level] ??= 0;
-          ringRotationRef.current[level] +=
-            dt *
-            (ORBIT_ROTATION.BASE_SPEED / (Math.PI * 2)) *
-            ORBIT_ROTATION.SPEED_MULTIPLIER[level];
+          ringRotationRef.current[level] =
+            (ringRotationRef.current[level] +
+              dt *
+                (ORBIT_ROTATION.BASE_SPEED / (Math.PI * 2)) *
+                ORBIT_ROTATION.SPEED_MULTIPLIER[level]) % 1;
         }
       }
 
-      sim.alpha(1);
-      rafRef.current = requestAnimationFrame(tick);
+      if (!pausedRef.current) {
+        sim.alphaTarget(0.3);
+      } else {
+        sim.alphaTarget(0);
+      }
+
+      if (pausedRef.current && sim.alpha() < 0.005) {
+        sim.stop();
+      }
+
+      if (!pausedRef.current || sim.alpha() > 0.005) {
+        rafRef.current = requestAnimationFrame(tick);
+      }
     }
 
     rafRef.current = requestAnimationFrame(tick);
