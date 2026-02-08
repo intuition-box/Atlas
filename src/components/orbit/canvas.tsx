@@ -5,6 +5,13 @@ import { useEffect, useRef, useCallback } from "react";
 import { RING_RADII, PERSPECTIVE_RATIO, INTERACTION } from "./constants";
 import type { SimulatedNode } from "./types";
 
+const RING_LEVELS: Array<keyof typeof RING_RADII> = [
+  "ADVOCATE",
+  "CONTRIBUTOR",
+  "PARTICIPANT",
+  "EXPLORER",
+];
+
 /* ────────────────────────────
    Transform (zoom + pan)
 ──────────────────────────── */
@@ -137,6 +144,9 @@ export function OrbitCanvas({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>(0);
 
+  const needsRedrawRef = useRef(true);
+  const staticCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
   // Mutable refs so the rAF loop reads fresh values
   const nodesRef = useRef(nodes);
   const sizeRef = useRef({ width, height });
@@ -144,7 +154,10 @@ export function OrbitCanvas({
   const centerLogoUrlRef = useRef(centerLogoUrl);
 
   useEffect(() => { nodesRef.current = nodes; }, [nodes]);
-  useEffect(() => { sizeRef.current = { width, height }; }, [width, height]);
+  useEffect(() => {
+    sizeRef.current = { width, height };
+    needsRedrawRef.current = true;
+  }, [width, height]);
   useEffect(() => { centerNameRef.current = centerName; }, [centerName]);
   useEffect(() => { centerLogoUrlRef.current = centerLogoUrl; }, [centerLogoUrl]);
 
@@ -164,6 +177,7 @@ export function OrbitCanvas({
       t.x = width / 2;
       t.y = height / 2;
     }
+    needsRedrawRef.current = true;
   }, [width, height]);
 
   // Drag + pan state
@@ -173,6 +187,7 @@ export function OrbitCanvas({
   const onNodeHoverRef = useRef(onNodeHover);
   const onNodeClickRef = useRef(onNodeClick);
   const hoveredNodeIdRef = useRef<string | null>(null);
+  const lastHoverCheckRef = useRef(0);
 
   useEffect(() => { onDragRef.current = onDrag; }, [onDrag]);
   useEffect(() => { onDragEndRef.current = onDragEnd; }, [onDragEnd]);
@@ -184,10 +199,87 @@ export function OrbitCanvas({
   ──────────────────────────── */
 
   useEffect(() => {
+    needsRedrawRef.current = true;
     let running = true;
+
+    function rebuildStaticLayer(
+      w: number,
+      h: number,
+      transform: Transform
+    ) {
+      const staticCanvas = document.createElement("canvas");
+      staticCanvas.width = w;
+      staticCanvas.height = h;
+
+      const sctx = staticCanvas.getContext("2d");
+      if (!sctx) return;
+
+      sctx.clearRect(0, 0, w, h);
+      sctx.save();
+      sctx.translate(transform.x, transform.y);
+      sctx.scale(transform.k, transform.k);
+
+      // Rings
+      for (const level of RING_LEVELS) {
+        const rx = RING_RADII[level];
+        const ry = rx * PERSPECTIVE_RATIO;
+        sctx.beginPath();
+        sctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+        sctx.strokeStyle = "rgba(148, 163, 184, 0.15)";
+        sctx.lineWidth = 1 / transform.k;
+        sctx.stroke();
+      }
+
+      // Center logo
+      const imageCache = imageCacheRef.current;
+      const logoUrl = centerLogoUrlRef.current;
+      const logoImg = logoUrl ? imageCache.get(logoUrl) : null;
+      const r = CENTER_LOGO_RADIUS;
+
+      if (logoImg && logoImg.complete && logoImg.naturalWidth > 0) {
+        sctx.save();
+        sctx.beginPath();
+        sctx.arc(0, 0, r, 0, Math.PI * 2);
+        sctx.clip();
+        sctx.drawImage(logoImg, -r, -r, r * 2, r * 2);
+        sctx.restore();
+
+        sctx.beginPath();
+        sctx.arc(0, 0, r, 0, Math.PI * 2);
+        sctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
+        sctx.lineWidth = 2 / transform.k;
+        sctx.stroke();
+      } else {
+        sctx.beginPath();
+        sctx.arc(0, 0, r, 0, Math.PI * 2);
+        sctx.fillStyle = "#3b82f6";
+        sctx.fill();
+        sctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
+        sctx.lineWidth = 2 / transform.k;
+        sctx.stroke();
+      }
+
+      const name = centerNameRef.current;
+      if (name) {
+        sctx.font = `500 ${12 / transform.k}px system-ui, sans-serif`;
+        sctx.fillStyle = "rgba(255, 255, 255, 0.8)";
+        sctx.textAlign = "center";
+        sctx.textBaseline = "top";
+        sctx.fillText(name, 0, r + 14 / transform.k);
+      }
+
+      sctx.restore();
+      staticCanvasRef.current = staticCanvas;
+    }
 
     function frame() {
       if (!running) return;
+
+      if (!needsRedrawRef.current) {
+        rafRef.current = requestAnimationFrame(frame);
+        return;
+      }
+      needsRedrawRef.current = false;
 
       const { width: w, height: h } = sizeRef.current;
       const ctx = canvasRef.current?.getContext("2d");
@@ -200,64 +292,17 @@ export function OrbitCanvas({
       const transform = transformRef.current;
       const hoveredId = hoveredNodeIdRef.current;
 
+      if (!staticCanvasRef.current) {
+        rebuildStaticLayer(w, h, transform);
+      }
       ctx.clearRect(0, 0, w, h);
+      const staticCanvas = staticCanvasRef.current;
+      if (staticCanvas) {
+        ctx.drawImage(staticCanvas, 0, 0);
+      }
       ctx.save();
       ctx.translate(transform.x, transform.y);
       ctx.scale(transform.k, transform.k);
-
-      // Draw orbit ring ellipses
-      const ringLevels: Array<keyof typeof RING_RADII> = ["ADVOCATE", "CONTRIBUTOR", "PARTICIPANT", "EXPLORER"];
-      for (const level of ringLevels) {
-        const rx = RING_RADII[level];
-        const ry = rx * PERSPECTIVE_RATIO;
-        ctx.beginPath();
-        ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
-        ctx.strokeStyle = "rgba(148, 163, 184, 0.15)";
-        ctx.lineWidth = 1 / transform.k;
-        ctx.stroke();
-      }
-
-      // Draw center logo
-      const imageCache = imageCacheRef.current;
-      const logoUrl = centerLogoUrlRef.current;
-      const logoImg = logoUrl ? imageCache.get(logoUrl) : null;
-      const r = CENTER_LOGO_RADIUS;
-
-      if (logoImg && logoImg.complete && logoImg.naturalWidth > 0) {
-        // Clip to circle and draw image
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(0, 0, r, 0, Math.PI * 2);
-        ctx.clip();
-        ctx.drawImage(logoImg, -r, -r, r * 2, r * 2);
-        ctx.restore();
-
-        // Border
-        ctx.beginPath();
-        ctx.arc(0, 0, r, 0, Math.PI * 2);
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
-        ctx.lineWidth = 2 / transform.k;
-        ctx.stroke();
-      } else {
-        // Fallback: blue circle
-        ctx.beginPath();
-        ctx.arc(0, 0, r, 0, Math.PI * 2);
-        ctx.fillStyle = "#3b82f6";
-        ctx.fill();
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
-        ctx.lineWidth = 2 / transform.k;
-        ctx.stroke();
-      }
-
-      // Community name below logo
-      const name = centerNameRef.current;
-      if (name) {
-        ctx.font = `500 ${12 / transform.k}px system-ui, sans-serif`;
-        ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "top";
-        ctx.fillText(name, 0, r + 14 / transform.k);
-      }
 
       // Draw nodes
       const currentNodes = nodesRef.current;
@@ -277,7 +322,7 @@ export function OrbitCanvas({
         ctx.fill();
 
         // Avatar image (if available)
-        const avatarImg = imageCache.get(node.avatarUrl);
+        const avatarImg = imageCacheRef.current.get(node.avatarUrl);
         if (avatarImg && avatarImg.complete && avatarImg.naturalWidth > 0) {
           ctx.save();
           ctx.beginPath();
@@ -336,6 +381,7 @@ export function OrbitCanvas({
         y: mouseY - (mouseY - t.y) * ratio,
         k: newK,
       };
+      needsRedrawRef.current = true;
     }
 
     canvas.addEventListener("wheel", handleWheel, { passive: false });
@@ -394,6 +440,7 @@ export function OrbitCanvas({
       const world = screenToWorld(screenX, screenY, transformRef.current);
       const { width: cw, height: ch } = sizeRef.current;
       onDragRef.current(drag.nodeId, world.x + cw / 2, world.y + ch / 2);
+      needsRedrawRef.current = true;
       return;
     }
 
@@ -405,8 +452,13 @@ export function OrbitCanvas({
         x: drag.startTx + dx,
         y: drag.startTy + dy,
       };
+      needsRedrawRef.current = true;
       return;
     }
+
+    const now = performance.now();
+    if (now - lastHoverCheckRef.current < 60) return;
+    lastHoverCheckRef.current = now;
 
     // Not dragging → hover detection
     const canvas = canvasRef.current;
@@ -438,6 +490,7 @@ export function OrbitCanvas({
           onNodeHoverRef.current(null, { x: 0, y: 0 });
         }
       }
+      needsRedrawRef.current = true;
     }
   }, []);
 
@@ -470,6 +523,7 @@ export function OrbitCanvas({
     }
 
     dragRef.current = { type: "none" };
+    needsRedrawRef.current = true;
   }, []);
 
   const handlePointerLeave = useCallback(() => {
