@@ -33,7 +33,10 @@ export function OrbitView({
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [tooltip, setTooltip] = useState<TooltipState>(null);
   const [popover, setPopover] = useState<PopoverState>(null);
+  // Tracks pointer presence independently of React state to avoid rerenders
   const mouseInsideRef = useRef(false);
+
+  const containerRectRef = useRef<DOMRect | null>(null);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -42,13 +45,19 @@ export function OrbitView({
     const ro = new ResizeObserver(() => {
       const r = el.getBoundingClientRect();
       setSize({ w: Math.round(r.width), h: Math.round(r.height) });
+      containerRectRef.current = r;
     });
 
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
 
-  const sim = useOrbitSimulation(members, links, size.w / 2, size.h / 2);
+  const sim = useOrbitSimulation(
+    members,
+    links,
+    size.w > 0 ? size.w / 2 : 0,
+    size.h > 0 ? size.h / 2 : 0,
+  );
 
   const handleNodeHover = useCallback(
     (node: SimulatedNode | null, screenPos: { x: number; y: number }) => {
@@ -86,15 +95,25 @@ export function OrbitView({
     [onMemberClick],
   );
 
-  const containerRect = containerRef.current?.getBoundingClientRect();
+  const handleMouseEnter = useCallback(() => {
+    mouseInsideRef.current = true;
+    sim.setPaused(true);
+  }, [sim]);
+
+  const handleMouseLeave = useCallback(() => {
+    mouseInsideRef.current = false;
+    if (!popover) {
+      sim.setPaused(false);
+    }
+  }, [sim, popover]);
 
   return (
     <div
       ref={containerRef}
       className={`relative overflow-hidden ${className}`}
       style={{ width: "100vw", height: "100vh" }}
-      onMouseEnter={() => { mouseInsideRef.current = true; sim.setPaused(true); }}
-      onMouseLeave={() => { mouseInsideRef.current = false; if (!popover) sim.setPaused(false); }}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
     >
       {size.w > 0 && size.h > 0 && (
         <OrbitCanvas
@@ -111,12 +130,12 @@ export function OrbitView({
       )}
 
       {/* Tooltip — hover only, hidden when popover is open */}
-      {tooltip && containerRect && !popover && (
+      {tooltip && containerRectRef.current && !popover && (
         <NodeTooltip
           node={tooltip.node}
           x={tooltip.x}
           y={tooltip.y}
-          containerRect={containerRect}
+          containerRect={containerRectRef.current}
         />
       )}
 
