@@ -1,7 +1,14 @@
+/**
+ * Attestation Database Operations
+ *
+ * CRUD operations for attestations using Prisma.
+ * Handles soft-delete, supersession, and conflict resolution.
+ */
+
 import "server-only";
 
 import { db } from "@/lib/db/client";
-import type { AttestationType } from "@/config/attestations";
+import type { AttestationType } from "./definitions";
 import type { Result } from "@/lib/api/shapes";
 import { ok, err } from "@/lib/api/shapes";
 
