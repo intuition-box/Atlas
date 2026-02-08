@@ -12,10 +12,12 @@ type PopoverPositionerProps = React.ComponentProps<typeof PopoverPrimitive.Posit
 type PopoverTitleProps = React.ComponentProps<typeof PopoverPrimitive.Title>
 type PopoverDescriptionProps = React.ComponentProps<typeof PopoverPrimitive.Description>
 
+type PopoverBackdropProps = React.ComponentProps<typeof PopoverPrimitive.Backdrop>
+
 type PopoverContentProps = React.ComponentProps<typeof PopoverPrimitive.Popup> &
   Pick<
     React.ComponentProps<typeof PopoverPrimitive.Positioner>,
-    "align" | "alignOffset" | "side" | "sideOffset"
+    "align" | "alignOffset" | "side" | "sideOffset" | "anchor"
   >
 
 function Popover({ ...props }: PopoverProps) {
@@ -40,17 +42,29 @@ function PopoverPositioner({ className, ...props }: PopoverPositionerProps) {
   )
 }
 
+function PopoverBackdrop({ className, ...props }: PopoverBackdropProps) {
+  return (
+    <PopoverPrimitive.Backdrop
+      data-slot="popover-backdrop"
+      className={cn("fixed inset-0 z-40", className)}
+      {...props}
+    />
+  )
+}
+
 function PopoverContent({
   className,
   align = "center",
   alignOffset = 0,
   side = "bottom",
   sideOffset = 4,
+  anchor,
   ...props
 }: PopoverContentProps) {
   return (
     <PopoverPortal>
       <PopoverPositioner
+        anchor={anchor}
         align={align}
         alignOffset={alignOffset}
         side={side}
@@ -105,6 +119,7 @@ function PopoverDescription({
 
 export {
   Popover,
+  PopoverBackdrop,
   PopoverContent,
   PopoverDescription,
   PopoverHeader,
