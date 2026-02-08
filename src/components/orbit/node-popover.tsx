@@ -255,7 +255,7 @@ export function MemberPopoverContent({
         size="sm"
         variant="outline"
         className="w-full"
-        onClick={() => onViewProfile(node.id)}
+        onClick={() => onViewProfile(node.handle ?? node.id)}
       >
         View Profile
       </Button>
