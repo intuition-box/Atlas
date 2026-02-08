@@ -13,8 +13,9 @@ import {
   type SimulationLinkDatum,
 } from "d3-force";
 
-import { UsersIcon, UserIcon, CheckIcon, PlusIcon, ArrowLeftIcon } from "@/components/ui/icons";
+import { UsersIcon, UserIcon, CheckIcon, PlusIcon, ArrowLeftIcon, FileTextIcon, CogIcon } from "@/components/ui/icons";
 import { apiGet } from "@/lib/api/client";
+import { useNavigation, type NavigationControls } from "@/components/navigation/navigation-provider";
 import { NodeTooltip, NodePopover } from "./node-popover";
 import {
   RING_RADII,
@@ -454,12 +455,9 @@ export function OrbitScene({
     // Saved universe transform (for zoom-out return)
     savedUniverseTransform: { x: 0, y: 0, k: 1 } as Transform,
 
-    // rAF
-    raf: null as number | null,
-
     // Data fetch state
     fetchAbort: null as AbortController | null,
-    fetchedData: null as { members: OrbitMember[]; links: MemberLink[] } | null,
+    fetchedData: null as { members: OrbitMember[]; links: MemberLink[]; isAdmin: boolean } | null,
     fetchError: null as string | null,
   });
 
@@ -476,10 +474,71 @@ export function OrbitScene({
     y: number;
   } | null>(null);
   const [sceneMode, setSceneMode] = React.useState<SceneMode>("universe");
+  const [activeCommunity, setActiveCommunity] = React.useState<{
+    handle: string;
+    isAdmin: boolean;
+  } | null>(null);
 
   // Stable refs
   const onMemberClickRef = React.useRef(onMemberClick);
   onMemberClickRef.current = onMemberClick;
+
+  /* ────────────────────────────
+     Navigation controls
+
+     Register bottom-left community controls when in orbit mode.
+     Same controls as the standalone community page.
+  ──────────────────────────── */
+
+  const navigationControls = React.useMemo<NavigationControls>(() => {
+    if (!activeCommunity) return {};
+
+    const { handle, isAdmin } = activeCommunity;
+
+    const bottomLeft = [
+      { icon: UsersIcon, label: "Members", href: `/c/${handle}/members` },
+      { icon: PlusIcon, label: "Apply", href: `/c/${handle}/apply` },
+    ];
+
+    const bottomRight = isAdmin
+      ? [
+          { icon: FileTextIcon, label: "Applications", href: `/c/${handle}/applications` },
+          { icon: CogIcon, label: "Settings", href: `/c/${handle}/settings` },
+        ]
+      : [];
+
+    return { bottomLeft, bottomRight };
+  }, [activeCommunity]);
+
+  useNavigation(navigationControls);
+
+  /* ────────────────────────────
+     Render scheduler
+
+     Instead of an always-on rAF loop, each animation source
+     schedules frames on demand. All sources share draw().
+     Sources: d3 simulation ticks, orbit rotation, transitions,
+     pointer interactions, resize.
+  ──────────────────────────── */
+
+  const schedulerRef = React.useRef({
+    raf: null as number | null,
+    running: true,
+    rotationRaf: null as number | null,
+  });
+
+  /** Schedule a single draw on the next animation frame (coalesced). */
+  const scheduleFrame = React.useCallback(() => {
+    const sched = schedulerRef.current;
+    if (!sched.running || sched.raf) return;
+    sched.raf = requestAnimationFrame(() => {
+      sched.raf = null;
+      drawRef.current?.();
+    });
+  }, []);
+
+  /** Exposed draw function — set by the render effect */
+  const drawRef = React.useRef<(() => void) | null>(null);
 
   /* ────────────────────────────
      Initialize universe simulation
@@ -545,7 +604,10 @@ export function OrbitScene({
       .force("charge", forceManyBody().strength(-350))
       .force("x", forceX(width / 2).strength(0.04))
       .force("y", forceY(height / 2).strength(0.04))
-      .force("collide", forceCollide<UniverseNode>().radius((d) => d.radius + 12).strength(1));
+      .force("collide", forceCollide<UniverseNode>().radius((d) => d.radius + 12).strength(1))
+      .on("tick", () => {
+        scheduleFrame();
+      });
 
     s.universe.simulation = sim;
 
@@ -554,7 +616,7 @@ export function OrbitScene({
       s.universe.startTime = performance.now();
       s.universe.fadeIn = 0;
     }
-  }, [communities, links]);
+  }, [communities, links, scheduleFrame]);
 
   React.useEffect(() => {
     initUniverse();
@@ -596,13 +658,68 @@ export function OrbitScene({
         s.universe.simulation.force("x", forceX(w / 2).strength(0.04));
         s.universe.simulation.force("y", forceY(h / 2).strength(0.04));
       }
+      scheduleFrame();
     };
 
     const ro = new ResizeObserver(handleResize);
     ro.observe(el);
     handleResize();
     return () => ro.disconnect();
-  }, [initUniverse]);
+  }, [initUniverse, scheduleFrame]);
+
+  /* ────────────────────────────
+     Orbit rotation loop
+
+     Self-scheduling rAF that only runs when orbit is active
+     and not paused. Advances ring rotation in t-space and
+     re-warms the simulation so nodes follow their new targets.
+  ──────────────────────────── */
+
+  const startOrbitRotation = React.useCallback(() => {
+    const sched = schedulerRef.current;
+    // Don't start if already running
+    if (sched.rotationRaf) return;
+
+    let lastTick = performance.now();
+
+    const tick = (now: number) => {
+      sched.rotationRaf = null;
+      const s = stateRef.current;
+
+      // Stop if we're no longer in orbit mode
+      if (s.mode !== "orbit") return;
+
+      if (!s.orbit.paused) {
+        const dt = (now - lastTick) / 1000;
+        for (const level of Object.keys(ORBIT_ROTATION.SPEED_MULTIPLIER) as OrbitLevel[]) {
+          s.orbit.ringRotation[level] ??= 0;
+          s.orbit.ringRotation[level] +=
+            dt * (ORBIT_ROTATION.BASE_SPEED / (Math.PI * 2)) * ORBIT_ROTATION.SPEED_MULTIPLIER[level];
+        }
+        // Re-warm simulation so nodes follow new rotation targets
+        if (s.orbit.simulation) {
+          s.orbit.simulation.alpha(Math.max(s.orbit.simulation.alpha(), 0.3));
+          s.orbit.simulation.restart();
+        }
+      }
+      lastTick = now;
+
+      // Keep running while in orbit mode
+      if (sched.running && s.mode === "orbit" && !s.orbit.paused) {
+        sched.rotationRaf = requestAnimationFrame(tick);
+      }
+    };
+
+    sched.rotationRaf = requestAnimationFrame(tick);
+  }, []);
+
+  const stopOrbitRotation = React.useCallback(() => {
+    const sched = schedulerRef.current;
+    if (sched.rotationRaf) {
+      cancelAnimationFrame(sched.rotationRaf);
+      sched.rotationRaf = null;
+    }
+  }, []);
 
   /* ────────────────────────────
      Start orbit simulation
@@ -624,7 +741,8 @@ export function OrbitScene({
     s.orbit.nodes = nodes;
     s.orbit.members = members;
     s.orbit.ringRotation = {};
-    s.orbit.paused = false;
+    // Pause rotation if pointer is already inside the container
+    s.orbit.paused = s.pointer.inside;
     s.orbit.fadeIn = 0;
     s.orbit.startTime = performance.now();
 
@@ -639,7 +757,7 @@ export function OrbitScene({
     s.orbit.simulation?.stop();
 
     const sim = forceSimulation<SimulatedNode>(nodes)
-      .alphaDecay(0)
+      .alphaDecay(SIMULATION.ALPHA_DECAY)
       .alpha(1)
       .velocityDecay(SIMULATION.VELOCITY_DECAY)
       .force(
@@ -654,11 +772,156 @@ export function OrbitScene({
           .iterations(SIMULATION.COLLISION_ITERATIONS),
       )
       .on("tick", () => {
-        // d3 mutates positions in place — rAF reads them
+        // Simulation mutated positions — schedule a draw
+        scheduleFrame();
       });
 
     s.orbit.simulation = sim;
-  }, []);
+
+    // Start orbit rotation loop
+    startOrbitRotation();
+  }, [scheduleFrame, startOrbitRotation]);
+
+  /* ────────────────────────────
+     Transition animation loop
+
+     Temporary rAF loop that runs only during zoom-in/out
+     transitions. Self-terminates when the animation completes.
+     Each transition is identified by its startTime to prevent
+     stale loops from interfering.
+  ──────────────────────────── */
+
+  const transitionRafRef = React.useRef<number | null>(null);
+
+  const runTransition = React.useCallback(() => {
+    // Cancel any existing transition loop
+    if (transitionRafRef.current) {
+      cancelAnimationFrame(transitionRafRef.current);
+      transitionRafRef.current = null;
+    }
+
+    const s = stateRef.current;
+    const sched = schedulerRef.current;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const tick = (now: number) => {
+      if (!sched.running) return;
+      transitionRafRef.current = null;
+
+      const { mode } = s;
+      if (s.width === 0 || s.height === 0) return;
+
+      const elapsed = now - s.transition.startTime;
+      const rawT = Math.min(1, elapsed / ZOOM_DURATION);
+      const t = easeInOutCubic(rawT);
+
+      // Interpolate transform
+      s.transform = {
+        x: lerp(s.transition.transformFrom.x, s.transition.transformTo.x, t),
+        y: lerp(s.transition.transformFrom.y, s.transition.transformTo.y, t),
+        k: lerp(s.transition.transformFrom.k, s.transition.transformTo.k, t),
+      };
+
+      // Draw via shared draw function (handles all modes + opacity)
+      drawRef.current?.();
+
+      if (rawT >= 1) {
+        // Transition complete
+        if (mode === "zoom-in") {
+          if (s.fetchedData) {
+            startOrbitSimulation(s.fetchedData.members, s.fetchedData.links);
+            s.mode = "orbit";
+            setSceneMode("orbit");
+            setActiveCommunity({
+              handle: s.transition.targetCommunity?.handle ?? "",
+              isAdmin: s.fetchedData.isAdmin,
+            });
+            s.transform = { x: s.width / 2, y: s.height / 2, k: 1 };
+            scheduleFrame();
+          } else if (s.fetchError) {
+            s.mode = "universe";
+            setSceneMode("universe");
+            s.transform = { ...s.savedUniverseTransform };
+            if (s.universe.simulation) {
+              const targetNode = s.transition.targetNode;
+              if (targetNode) { targetNode.fx = null; targetNode.fy = null; }
+              s.universe.simulation.alphaTarget(0.1).restart();
+              setTimeout(() => { s.universe.simulation?.alphaTarget(0); }, 500);
+            }
+          } else {
+            s.mode = "loading";
+            setSceneMode("loading");
+            runLoadingLoop();
+          }
+        } else if (mode === "zoom-out") {
+          s.mode = "universe";
+          setSceneMode("universe");
+          s.transform = { ...s.savedUniverseTransform };
+          scheduleFrame();
+        }
+        return;
+      }
+
+      transitionRafRef.current = requestAnimationFrame(tick);
+    };
+
+    transitionRafRef.current = requestAnimationFrame(tick);
+  }, [scheduleFrame, startOrbitSimulation]);
+
+  /* ── Loading loop — pulsing indicator while waiting for data ── */
+
+  const loadingRafRef = React.useRef<number | null>(null);
+
+  const runLoadingLoop = React.useCallback(() => {
+    if (loadingRafRef.current) {
+      cancelAnimationFrame(loadingRafRef.current);
+      loadingRafRef.current = null;
+    }
+
+    const s = stateRef.current;
+    const sched = schedulerRef.current;
+
+    const tick = () => {
+      if (!sched.running || s.mode !== "loading") return;
+      loadingRafRef.current = null;
+
+      // Draw the zoomed-in universe via shared draw (target bubble pulses in drawUniverse)
+      drawRef.current?.();
+
+      // Check if data arrived
+      if (s.fetchedData) {
+        startOrbitSimulation(s.fetchedData.members, s.fetchedData.links);
+        s.mode = "orbit";
+        setSceneMode("orbit");
+        setActiveCommunity({
+          handle: s.transition.targetCommunity?.handle ?? "",
+          isAdmin: s.fetchedData.isAdmin,
+        });
+        s.transform = { x: s.width / 2, y: s.height / 2, k: 1 };
+        scheduleFrame();
+        return;
+      }
+      if (s.fetchError) {
+        s.mode = "universe";
+        setSceneMode("universe");
+        s.transform = { ...s.savedUniverseTransform };
+        if (s.universe.simulation) {
+          const targetNode = s.transition.targetNode;
+          if (targetNode) { targetNode.fx = null; targetNode.fy = null; }
+          s.universe.simulation.alphaTarget(0.1).restart();
+          setTimeout(() => { s.universe.simulation?.alphaTarget(0); }, 500);
+        }
+        return;
+      }
+
+      loadingRafRef.current = requestAnimationFrame(tick);
+    };
+
+    loadingRafRef.current = requestAnimationFrame(tick);
+  }, [scheduleFrame, startOrbitSimulation]);
 
   /* ────────────────────────────
      Community click → zoom in
@@ -671,9 +934,16 @@ export function OrbitScene({
     // Save current universe transform for zoom-out return
     s.savedUniverseTransform = { ...s.transform };
 
-    // Calculate target transform: zoom so the clicked bubble fills center
+    // Pin the clicked node so it doesn't drift during zoom animation
     const nodeWorldX = node.x ?? s.width / 2;
     const nodeWorldY = node.y ?? s.height / 2;
+    node.fx = nodeWorldX;
+    node.fy = nodeWorldY;
+
+    // Pause the universe simulation during zoom
+    s.universe.simulation?.stop();
+
+    // Calculate target transform: zoom so the clicked bubble fills center
     const targetScale = Math.min(s.width, s.height) / (node.radius * 4);
     const clampedScale = Math.min(10, Math.max(1, targetScale));
 
@@ -707,6 +977,9 @@ export function OrbitScene({
     s.orbit.centerLogoUrl = community.avatarUrl ?? null;
     s.orbit.centerName = community.name;
 
+    // Start the transition animation loop
+    runTransition();
+
     void (async () => {
       try {
         const result = await apiGet<CommunityGetResponse>(
@@ -720,15 +993,17 @@ export function OrbitScene({
         if (result.ok && result.value.canViewDirectory) {
           const members = parseMembers(result.value.orbitMembers ?? []);
           const memberLinks = parseMemberLinks(result.value.memberLinks);
-          s.fetchedData = { members, links: memberLinks };
+          const isAdmin = result.value.isAdmin;
+          s.fetchedData = { members, links: memberLinks, isAdmin };
 
-          // If zoom already finished, transition to orbit now
+          // If zoom already finished and in loading state, transition now
           if (s.mode === "loading") {
             startOrbitSimulation(members, memberLinks);
             s.mode = "orbit";
             setSceneMode("orbit");
-            // Reset transform for orbit view
+            setActiveCommunity({ handle: community.handle, isAdmin });
             s.transform = { x: s.width / 2, y: s.height / 2, k: 1 };
+            scheduleFrame();
           }
         } else {
           s.fetchError = "Could not load community data";
@@ -739,7 +1014,7 @@ export function OrbitScene({
         }
       }
     })();
-  }, [startOrbitSimulation]);
+  }, [startOrbitSimulation, runTransition, scheduleFrame]);
 
   /* ────────────────────────────
      Back → zoom out
@@ -749,14 +1024,16 @@ export function OrbitScene({
     const s = stateRef.current;
     if (s.mode !== "orbit" && s.mode !== "loading") return;
 
-    // Stop orbit simulation
+    // Stop orbit simulation + rotation
     s.orbit.simulation?.stop();
     s.orbit.simulation = null;
     s.orbit.nodes = [];
+    stopOrbitRotation();
 
-    // Clear orbit UI
+    // Clear orbit UI + navigation
     setOrbitTooltip(null);
     setOrbitPopover(null);
+    setActiveCommunity(null);
 
     // Setup zoom-out transition
     s.transition = {
@@ -776,17 +1053,34 @@ export function OrbitScene({
     s.fetchedData = null;
     s.fetchError = null;
 
-    // Resume universe simulation
+    // Unpin the target node so it returns to simulation control
+    const targetNode = s.transition.targetNode;
+    if (targetNode) {
+      targetNode.fx = null;
+      targetNode.fy = null;
+    }
+
+    // Resume universe simulation (will drive draws via on("tick"))
     if (s.universe.simulation) {
       s.universe.simulation.alphaTarget(0.1).restart();
       setTimeout(() => {
         s.universe.simulation?.alphaTarget(0);
       }, 500);
     }
-  }, []);
+
+    // Start the transition animation loop
+    runTransition();
+  }, [stopOrbitRotation, runTransition]);
 
   /* ────────────────────────────
-     Animation loop
+     Render effect
+
+     Sets up the draw() function and canvas context.
+     No always-on rAF loop — rendering is driven by:
+     - D3 simulation ticks (universe/orbit) via on("tick")
+     - Orbit rotation loop (self-scheduling rAF, only when unpaused)
+     - Transition animations (temporary rAF loops)
+     - Pointer/wheel events calling scheduleFrame()
   ──────────────────────────── */
 
   React.useEffect(() => {
@@ -797,40 +1091,8 @@ export function OrbitScene({
     if (!ctx) return;
 
     const s = stateRef.current;
-    let running = true;
-    let lastOrbitTick = performance.now();
-
-    const screenToWorld = (sx: number, sy: number): { x: number; y: number } => {
-      const t = s.transform;
-      return { x: (sx - t.x) / t.k, y: (sy - t.y) / t.k };
-    };
-
-    const pickUniverseNode = (sx: number, sy: number): UniverseNode | null => {
-      const world = screenToWorld(sx, sy);
-      for (let i = s.universe.nodes.length - 1; i >= 0; i--) {
-        const n = s.universe.nodes[i];
-        if (n.x === undefined || n.y === undefined) continue;
-        const dx = n.x - world.x;
-        const dy = n.y - world.y;
-        if (dx * dx + dy * dy <= n.radius * n.radius) return n;
-      }
-      return null;
-    };
-
-    const pickOrbitNode = (wx: number, wy: number): SimulatedNode | null => {
-      const cx = s.width / 2;
-      const cy = s.height / 2;
-      for (let i = s.orbit.nodes.length - 1; i >= 0; i--) {
-        const node = s.orbit.nodes[i];
-        const nx = (node.x ?? cx) - cx;
-        const ny = (node.y ?? cy) - cy;
-        const dx = wx - nx;
-        const dy = wy - ny;
-        const hr = node.radius * 1.3;
-        if (dx * dx + dy * dy <= hr * hr) return node;
-      }
-      return null;
-    };
+    const sched = schedulerRef.current;
+    sched.running = true;
 
     /* ── Draw universe ── */
 
@@ -859,8 +1121,8 @@ export function OrbitScene({
       ctx.translate(t.x, t.y);
       ctx.scale(t.k, t.k);
 
-      // Links
-      if (bridgeProgress > 0) {
+      // Links (hidden during loading — only target bubble visible)
+      if (bridgeProgress > 0 && s.mode !== "loading") {
         ctx.globalAlpha = opacity;
         for (let i = 0; i < u.links.length; i++) {
           const link = u.links[i];
@@ -895,13 +1157,22 @@ export function OrbitScene({
         const radius = isHovered ? n.radius * 1.1 : n.radius;
 
         // During zoom-in, keep the target node visible, fade others
-        if (s.mode === "zoom-in" && s.transition.targetNode) {
+        if ((s.mode === "zoom-in" || s.mode === "loading") && s.transition.targetNode) {
           const isTarget = n.id === s.transition.targetNode.id;
           if (!isTarget) {
-            const elapsed = performance.now() - s.transition.startTime;
-            const fadeStart = ZOOM_DURATION - FADE_OVERLAP;
-            const fadeT = Math.max(0, Math.min(1, (elapsed - fadeStart) / FADE_OVERLAP));
-            ctx.globalAlpha = bubbleOpacity * (1 - fadeT);
+            if (s.mode === "zoom-in") {
+              const elapsed = performance.now() - s.transition.startTime;
+              const fadeStart = ZOOM_DURATION - FADE_OVERLAP;
+              const fadeT = Math.max(0, Math.min(1, (elapsed - fadeStart) / FADE_OVERLAP));
+              ctx.globalAlpha = bubbleOpacity * (1 - fadeT);
+            } else {
+              // loading — non-target nodes fully hidden
+              ctx.globalAlpha = 0;
+            }
+          } else if (s.mode === "loading") {
+            // Pulse the target bubble while loading
+            const pulse = 0.5 + 0.5 * Math.sin(now / 300);
+            ctx.globalAlpha = bubbleOpacity * (0.4 + pulse * 0.6);
           } else {
             ctx.globalAlpha = bubbleOpacity;
           }
@@ -1034,40 +1305,33 @@ export function OrbitScene({
       ctx.restore();
     };
 
-    /* ── Main frame ── */
+    /* ── Shared draw — called by all animation sources ── */
 
-    const frame = (now: number) => {
-      if (!running) return;
-
+    const draw = () => {
       const { width: w, height: h, mode } = s;
-      if (w === 0 || h === 0) {
-        s.raf = requestAnimationFrame(frame);
-        return;
-      }
+      if (w === 0 || h === 0) return;
 
       ctx.clearRect(0, 0, w, h);
 
-      // Advance orbit rotation
-      if ((mode === "orbit" || mode === "zoom-out") && s.orbit.simulation) {
-        const dt = (now - lastOrbitTick) / 1000;
-        if (!s.orbit.paused && mode === "orbit") {
-          for (const level of Object.keys(ORBIT_ROTATION.SPEED_MULTIPLIER) as OrbitLevel[]) {
-            s.orbit.ringRotation[level] ??= 0;
-            s.orbit.ringRotation[level] +=
-              dt * (ORBIT_ROTATION.BASE_SPEED / (Math.PI * 2)) * ORBIT_ROTATION.SPEED_MULTIPLIER[level];
-          }
-        }
-        s.orbit.simulation.alpha(1);
-      }
-      lastOrbitTick = now;
-
-      // Hover detection (universe mode only — orbit handled in pointer events)
+      // Hover detection (universe mode — orbit handled in pointer events)
       if (mode === "universe" && s.pointer.inside && !s.draggedNode) {
-        const picked = pickUniverseNode(s.pointer.x, s.pointer.y);
+        const t = s.transform;
+        const wx = (s.pointer.x - t.x) / t.k;
+        const wy = (s.pointer.y - t.y) / t.k;
+
+        let picked: UniverseNode | null = null;
+        for (let i = s.universe.nodes.length - 1; i >= 0; i--) {
+          const n = s.universe.nodes[i];
+          if (n.x === undefined || n.y === undefined) continue;
+          const dx = n.x - wx;
+          const dy = n.y - wy;
+          if (dx * dx + dy * dy <= n.radius * n.radius) { picked = n; break; }
+        }
+
         if (picked !== s.hoveredUniverseNode) {
           s.hoveredUniverseNode = picked;
           if (picked) {
-            const tip: UniverseTooltipData = {
+            setUniverseTooltip({
               name: picked.name,
               handle: picked.handle,
               memberCount: picked.memberCount,
@@ -1075,8 +1339,7 @@ export function OrbitScene({
               isMembershipOpen: picked.isMembershipOpen,
               x: s.pointer.x,
               y: s.pointer.y,
-            };
-            setUniverseTooltip(tip);
+            });
           } else {
             setUniverseTooltip(null);
           }
@@ -1088,111 +1351,41 @@ export function OrbitScene({
       }
 
       switch (mode) {
-        case "universe": {
+        case "universe":
+        case "zoom-in":
+        case "loading":
           drawUniverse(1);
           break;
-        }
-
-        case "zoom-in": {
-          const elapsed = now - s.transition.startTime;
-          const rawT = Math.min(1, elapsed / ZOOM_DURATION);
-          const t = easeInOutCubic(rawT);
-
-          s.transform = {
-            x: lerp(s.transition.transformFrom.x, s.transition.transformTo.x, t),
-            y: lerp(s.transition.transformFrom.y, s.transition.transformTo.y, t),
-            k: lerp(s.transition.transformFrom.k, s.transition.transformTo.k, t),
-          };
-
-          drawUniverse(1);
-
-          if (rawT >= 1) {
-            // Zoom complete
-            if (s.fetchedData) {
-              startOrbitSimulation(s.fetchedData.members, s.fetchedData.links);
-              s.mode = "orbit";
-              setSceneMode("orbit");
-              s.transform = { x: s.width / 2, y: s.height / 2, k: 1 };
-            } else if (s.fetchError) {
-              // Error — go back
-              s.mode = "universe";
-              setSceneMode("universe");
-              s.transform = { ...s.savedUniverseTransform };
-            } else {
-              // Still loading
-              s.mode = "loading";
-              setSceneMode("loading");
-            }
-          }
-          break;
-        }
-
-        case "loading": {
-          // Keep showing the zoomed-in universe with the target bubble
-          drawUniverse(1);
-
-          // Draw a loading indicator at center
-          const pulse = 0.5 + 0.5 * Math.sin(now / 300);
-          ctx.save();
-          ctx.fillStyle = `rgba(255, 255, 255, ${0.3 + pulse * 0.3})`;
-          ctx.beginPath();
-          ctx.arc(s.width / 2, s.height / 2, 4, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.restore();
-
-          // Check if data arrived
-          if (s.fetchedData) {
-            startOrbitSimulation(s.fetchedData.members, s.fetchedData.links);
-            s.mode = "orbit";
-            setSceneMode("orbit");
-            s.transform = { x: s.width / 2, y: s.height / 2, k: 1 };
-          } else if (s.fetchError) {
-            s.mode = "universe";
-            setSceneMode("universe");
-            s.transform = { ...s.savedUniverseTransform };
-          }
-          break;
-        }
-
-        case "orbit": {
+        case "orbit":
           drawOrbit(1);
           break;
-        }
-
         case "zoom-out": {
-          const elapsed = now - s.transition.startTime;
+          // During zoom-out, fade universe in based on transition progress
+          const elapsed = performance.now() - s.transition.startTime;
           const rawT = Math.min(1, elapsed / ZOOM_DURATION);
-          const t = easeInOutCubic(rawT);
-
-          s.transform = {
-            x: lerp(s.transition.transformFrom.x, s.transition.transformTo.x, t),
-            y: lerp(s.transition.transformFrom.y, s.transition.transformTo.y, t),
-            k: lerp(s.transition.transformFrom.k, s.transition.transformTo.k, t),
-          };
-
-          // Fade universe in during last portion
           const universeOpacity = Math.max(0, Math.min(1, (rawT - 0.3) / 0.7));
           drawUniverse(universeOpacity);
-
-          if (rawT >= 1) {
-            s.mode = "universe";
-            setSceneMode("universe");
-            s.transform = { ...s.savedUniverseTransform };
-          }
           break;
         }
       }
-
-      s.raf = requestAnimationFrame(frame);
     };
 
-    s.raf = requestAnimationFrame(frame);
+    // Expose draw for scheduleFrame and transition loops
+    drawRef.current = draw;
+
+    // Initial draw
+    draw();
 
     return () => {
-      running = false;
-      if (s.raf) cancelAnimationFrame(s.raf);
+      sched.running = false;
+      if (sched.raf) { cancelAnimationFrame(sched.raf); sched.raf = null; }
+      if (sched.rotationRaf) { cancelAnimationFrame(sched.rotationRaf); sched.rotationRaf = null; }
+      if (transitionRafRef.current) { cancelAnimationFrame(transitionRafRef.current); transitionRafRef.current = null; }
+      if (loadingRafRef.current) { cancelAnimationFrame(loadingRafRef.current); loadingRafRef.current = null; }
+      drawRef.current = null;
+      s.fetchAbort?.abort();
     };
-  }, [startOrbitSimulation]);
+  }, [stopOrbitRotation]);
 
   /* ────────────────────────────
      Pointer events
@@ -1211,6 +1404,7 @@ export function OrbitScene({
         s.draggedNode.fx = (x - t.x) / t.k;
         s.draggedNode.fy = (y - t.y) / t.k;
       }
+      scheduleFrame();
     } else if (s.mode === "orbit") {
       const drag = s.orbitDrag;
 
@@ -1226,6 +1420,7 @@ export function OrbitScene({
           node.fx = wx + cx;
           node.fy = wy + cy;
         }
+        scheduleFrame();
         return;
       }
 
@@ -1237,6 +1432,7 @@ export function OrbitScene({
           x: (drag.startTx ?? 0) + dx,
           y: (drag.startTy ?? 0) + dy,
         };
+        scheduleFrame();
         return;
       }
 
@@ -1244,7 +1440,7 @@ export function OrbitScene({
       const t = s.transform;
       const wx = (x - t.x) / t.k;
       const wy = (y - t.y) / t.k;
-      const hitNode = pickOrbitNode(wx, wy);
+      const hitNode = findOrbitNodeAt(wx, wy);
       const prevId = s.hoveredOrbitNodeId;
       const newId = hitNode?.id ?? null;
 
@@ -1259,11 +1455,13 @@ export function OrbitScene({
         } else {
           setOrbitTooltip(null);
         }
+        scheduleFrame();
       }
     }
-  }, []);
+  }, [scheduleFrame]);
 
-  const pickOrbitNode = React.useCallback((wx: number, wy: number): SimulatedNode | null => {
+  /** Hit-test orbit nodes in world space */
+  function findOrbitNodeAt(wx: number, wy: number): SimulatedNode | null {
     const s = stateRef.current;
     const cx = s.width / 2;
     const cy = s.height / 2;
@@ -1277,7 +1475,7 @@ export function OrbitScene({
       if (dx * dx + dy * dy <= hr * hr) return node;
     }
     return null;
-  }, []);
+  }
 
   const onPointerDown = React.useCallback((e: React.PointerEvent) => {
     const s = stateRef.current;
@@ -1306,6 +1504,7 @@ export function OrbitScene({
           s.hoveredUniverseNode = null;
           setUniverseTooltip(null);
           s.universe.simulation?.alphaTarget(0.3).restart();
+          scheduleFrame();
           return;
         }
       }
@@ -1313,7 +1512,7 @@ export function OrbitScene({
       const t = s.transform;
       const wx = (x - t.x) / t.k;
       const wy = (y - t.y) / t.k;
-      const hitNode = pickOrbitNode(wx, wy);
+      const hitNode = findOrbitNodeAt(wx, wy);
 
       if (hitNode) {
         (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -1341,7 +1540,7 @@ export function OrbitScene({
         startTy: t.y,
       };
     }
-  }, [pickOrbitNode]);
+  }, [scheduleFrame]);
 
   const onPointerUp = React.useCallback((e: React.PointerEvent) => {
     const s = stateRef.current;
@@ -1366,16 +1565,18 @@ export function OrbitScene({
         s.draggedNode = null;
         s.dragStart = null;
 
-        if (moved < 5) {
-          draggedNode.fx = null;
-          draggedNode.fy = null;
+        // Always unpin so the node returns to simulation control
+        draggedNode.fx = null;
+        draggedNode.fy = null;
 
+        if (moved < 5) {
           // Click on community — trigger zoom
           const community = communities.find((c) => c.id === draggedNode.id);
           if (community) {
             handleCommunityClick(community, draggedNode);
           }
         }
+        scheduleFrame();
       }
     } else if (s.mode === "orbit") {
       const drag = s.orbitDrag;
@@ -1397,6 +1598,7 @@ export function OrbitScene({
             setOrbitPopover({ node, x: screenX, y: screenY });
             setOrbitTooltip(null);
             s.orbit.paused = true;
+            stopOrbitRotation();
           }
 
           // Release — convert drop position back to baseT
@@ -1416,8 +1618,9 @@ export function OrbitScene({
       }
 
       s.orbitDrag = null;
+      scheduleFrame();
     }
-  }, [communities, handleCommunityClick]);
+  }, [communities, handleCommunityClick, scheduleFrame, stopOrbitRotation]);
 
   const onPointerLeave = React.useCallback(() => {
     const s = stateRef.current;
@@ -1427,14 +1630,16 @@ export function OrbitScene({
       if (s.hoveredUniverseNode) {
         s.hoveredUniverseNode = null;
         setUniverseTooltip(null);
+        scheduleFrame();
       }
     } else if (s.mode === "orbit") {
       if (s.hoveredOrbitNodeId) {
         s.hoveredOrbitNodeId = null;
         setOrbitTooltip(null);
+        scheduleFrame();
       }
     }
-  }, []);
+  }, [scheduleFrame]);
 
   const onWheel = React.useCallback((e: React.WheelEvent) => {
     e.preventDefault();
@@ -1460,7 +1665,8 @@ export function OrbitScene({
       x: x - wx * newK,
       y: y - wy * newK,
     };
-  }, []);
+    scheduleFrame();
+  }, [scheduleFrame]);
 
   /* ────────────────────────────
      Orbit popover handlers
@@ -1469,8 +1675,12 @@ export function OrbitScene({
   const handleClosePopover = React.useCallback(() => {
     const s = stateRef.current;
     setOrbitPopover(null);
-    s.orbit.paused = false;
-  }, []);
+    // Only unpause if mouse is outside the container
+    if (!s.pointer.inside) {
+      s.orbit.paused = false;
+      startOrbitRotation();
+    }
+  }, [startOrbitRotation]);
 
   const handleViewProfile = React.useCallback((memberId: string) => {
     setOrbitPopover(null);
@@ -1478,24 +1688,19 @@ export function OrbitScene({
   }, []);
 
   /* ────────────────────────────
-     Cursor
+     Cursor — derived from React state (not stateRef) so it re-renders
   ──────────────────────────── */
 
-  const cursor = React.useMemo(() => {
-    if (sceneMode === "universe") {
-      return stateRef.current.hoveredUniverseNode ? "pointer" : "default";
-    }
-    if (sceneMode === "orbit") {
-      return stateRef.current.hoveredOrbitNodeId ? "pointer" : "grab";
-    }
-    return "default";
-  }, [sceneMode, universeTooltip, orbitTooltip]);
+  let cursor = "default";
+  if (sceneMode === "universe") {
+    cursor = universeTooltip ? "pointer" : "default";
+  } else if (sceneMode === "orbit") {
+    cursor = orbitTooltip ? "pointer" : "grab";
+  }
 
   /* ────────────────────────────
      Render
   ──────────────────────────── */
-
-  const containerRect = containerRef.current?.getBoundingClientRect();
 
   return (
     <div
@@ -1507,6 +1712,23 @@ export function OrbitScene({
         height: "100%",
         overflow: "hidden",
         ...style,
+      }}
+      onMouseEnter={() => {
+        const s = stateRef.current;
+        s.pointer.inside = true;
+        if (s.mode === "orbit") {
+          s.orbit.paused = true;
+          stopOrbitRotation();
+          scheduleFrame(); // Redraw with updated hover state
+        }
+      }}
+      onMouseLeave={() => {
+        const s = stateRef.current;
+        s.pointer.inside = false;
+        if (s.mode === "orbit" && !orbitPopover) {
+          s.orbit.paused = false;
+          startOrbitRotation();
+        }
       }}
     >
       <canvas
@@ -1533,12 +1755,12 @@ export function OrbitScene({
       )}
 
       {/* Orbit tooltip */}
-      {orbitTooltip && sceneMode === "orbit" && containerRect && !orbitPopover && (
+      {orbitTooltip && sceneMode === "orbit" && !orbitPopover && containerRef.current && (
         <NodeTooltip
           node={orbitTooltip.node}
           x={orbitTooltip.x}
           y={orbitTooltip.y}
-          containerRect={containerRect}
+          containerRect={containerRef.current.getBoundingClientRect()}
         />
       )}
 
