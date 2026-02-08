@@ -1,9 +1,35 @@
-import { forceCollide, forceSimulation, type Simulation } from "d3-force";
-import { useEffect, useRef, useMemo, useState, useCallback } from "react";
+import {
+  forceCollide,
+  forceSimulation,
+  type Simulation
+} from "d3-force";
+import {
+  useEffect,
+  useRef,
+  useMemo,
+  useState,
+  useCallback
+} from "react";
 
-import { SIMULATION, RING_RADII, PERSPECTIVE_RATIO, LEVEL_COLORS, NODE_RADIUS, ORBIT_ROTATION } from "./constants";
-import { EllipseArcTable, distributeEvenlyOnEllipse } from "./ellipse-arc-distribution";
-import type { OrbitMember, MemberLink, SimulatedNode, SimulatedLink, OrbitLevel } from "./types";
+import {
+  SIMULATION,
+  RING_RADII,
+  PERSPECTIVE_RATIO,
+  LEVEL_COLORS,
+  NODE_RADIUS,
+  ORBIT_ROTATION
+} from "./constants";
+import {
+  EllipseArcTable,
+  distributeEvenlyOnEllipse
+} from "./ellipse-arc-distribution";
+import type {
+  OrbitMember,
+  MemberLink,
+  SimulatedNode,
+  SimulatedLink,
+  OrbitLevel
+} from "./types";
 
 /* ────────────────────────────
    Helpers
