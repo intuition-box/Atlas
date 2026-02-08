@@ -10,9 +10,10 @@ import { normalizeHandle, validateHandle } from "@/lib/handle";
 import { Button } from "@/components/ui/button";
 import { CogIcon, FileTextIcon, PlusIcon, UsersIcon } from "@/components/ui/icons";
 
-import { OrbitView } from "@/components/orbit/orbit-view";
+import { OrbitView } from "@/components/orbit/view";
 import type { OrbitMember, MemberLink } from "@/components/orbit/types";
 import { useNavigation, type NavigationControls } from "@/components/navigation/navigation-provider";
+import { userPath } from "@/lib/routes";
 import { Spinner } from "@/components/ui/spinner";
 
 /* ────────────────────────────
@@ -274,6 +275,19 @@ function CommunityReadyState({
   // Register navigation controls
   useNavigation(navigationControls);
 
+  // Handle member click - navigate to their profile
+  const handleMemberClick = React.useCallback(
+    (memberId: string) => {
+      const member = members.find((m) => m.id === memberId);
+      if (member) {
+        // Use handle if available, otherwise fall back to ID
+        const identifier = member.handle ?? memberId;
+        router.push(userPath(identifier));
+      }
+    },
+    [members, router]
+  );
+
   if (canViewDirectory) {
     return (
       <OrbitView
@@ -283,6 +297,7 @@ function CommunityReadyState({
         centerName={community.name}
         isMembershipOpen={isMembershipOpen}
         isPublicDirectory={isPublicDirectory}
+        onMemberClick={handleMemberClick}
       />
     );
   }
