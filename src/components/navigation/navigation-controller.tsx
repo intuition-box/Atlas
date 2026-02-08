@@ -44,7 +44,7 @@ export function NavigationController({
   className,
 }: NavigationControllerProps) {
   const { data: session } = useSession();
-  const { controls, isVisible } = useNavigationContext();
+  const { controls, breadcrumb, isVisible } = useNavigationContext();
   const { toggle } = useNavigationVisibility();
 
   const userHandle = session?.user?.handle;
@@ -61,35 +61,68 @@ export function NavigationController({
         className
       )}
     >
-      {/* Top Left - Logo/Home */}
+      {/* Top Left - Logo/Home + Breadcrumb */}
       <div className="absolute top-4 left-4 sm:top-6 sm:left-6 pointer-events-auto">
         {showControls && (
-          <Tooltip>
-            <TooltipTrigger>
-              <Link
-                href={ROUTES.home}
-                className={cn(
-                  "flex items-center justify-center",
-                  "size-10 rounded-full",
-                  "bg-background/50 hover:bg-background/80",
-                  "backdrop-blur-sm",
-                  "border border-border/30 hover:border-border/50",
-                  "transition-all duration-200",
-                  "focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          <div className="flex items-center gap-2">
+            <Tooltip>
+              <TooltipTrigger>
+                {breadcrumb ? (
+                  <button
+                    onClick={breadcrumb.onBack}
+                    className={cn(
+                      "flex items-center justify-center",
+                      "size-10 rounded-full",
+                      "bg-background/50 hover:bg-background/80",
+                      "backdrop-blur-sm",
+                      "border border-border/30 hover:border-border/50",
+                      "transition-all duration-200",
+                      "focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                    )}
+                  >
+                    <Avatar className="size-8">
+                      <AvatarImage src={logoUrl ?? ""} alt={siteName} />
+                      <AvatarFallback className="text-xs font-semibold bg-transparent">
+                        {siteName.slice(0, 2).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                  </button>
+                ) : (
+                  <Link
+                    href={ROUTES.home}
+                    className={cn(
+                      "flex items-center justify-center",
+                      "size-10 rounded-full",
+                      "bg-background/50 hover:bg-background/80",
+                      "backdrop-blur-sm",
+                      "border border-border/30 hover:border-border/50",
+                      "transition-all duration-200",
+                      "focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                    )}
+                  >
+                    <Avatar className="size-8">
+                      <AvatarImage src={logoUrl ?? ""} alt={siteName} />
+                      <AvatarFallback className="text-xs font-semibold bg-transparent">
+                        {siteName.slice(0, 2).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                  </Link>
                 )}
-              >
-                <Avatar className="size-8">
-                  <AvatarImage src={logoUrl ?? ""} alt={siteName} />
-                  <AvatarFallback className="text-xs font-semibold bg-transparent">
-                    {siteName.slice(0, 2).toUpperCase()}
-                  </AvatarFallback>
-                </Avatar>
-              </Link>
-            </TooltipTrigger>
-            <TooltipContent side="right" sideOffset={8}>
-              <p className="text-xs">Home</p>
-            </TooltipContent>
-          </Tooltip>
+              </TooltipTrigger>
+              <TooltipContent side="right" sideOffset={8}>
+                <p className="text-xs">{breadcrumb ? "Back" : "Home"}</p>
+              </TooltipContent>
+            </Tooltip>
+
+            {breadcrumb && (
+              <>
+                <span className="text-muted-foreground/50 text-sm select-none">›</span>
+                <span className="text-sm font-medium text-foreground/80 backdrop-blur-sm">
+                  {breadcrumb.label}
+                </span>
+              </>
+            )}
+          </div>
         )}
       </div>
 
