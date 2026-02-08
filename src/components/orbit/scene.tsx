@@ -13,10 +13,11 @@ import {
   type SimulationLinkDatum,
 } from "d3-force";
 
-import { UsersIcon, UserIcon, CheckIcon, PlusIcon, ArrowLeftIcon, FileTextIcon, CogIcon } from "@/components/ui/icons";
+import { UsersIcon, UserIcon, CheckIcon, PlusIcon, FileTextIcon, CogIcon } from "@/components/ui/icons";
 import { apiGet } from "@/lib/api/client";
-import { useNavigation, type NavigationControls } from "@/components/navigation/navigation-provider";
+import { useNavigation, useNavigationContext, type NavigationControls } from "@/components/navigation/navigation-provider";
 import { NodeTooltip, NodePopover } from "./node-popover";
+import { CommunityPopover } from "./community-popover";
 import {
   RING_RADII,
   PERSPECTIVE_RATIO,
@@ -136,7 +137,7 @@ interface OrbitSceneProps {
 
 const UNIVERSE_MIN_RADIUS = 14;
 const UNIVERSE_MAX_RADIUS = 44;
-const CENTER_LOGO_RADIUS = 32;
+const COMMUNITY_AVATAR_RADIUS = 32;
 const ZOOM_DURATION = 800; // ms
 const FADE_OVERLAP = 300; // ms — fade starts this many ms before zoom ends
 
@@ -381,6 +382,7 @@ export function OrbitScene({
   className,
   style,
 }: OrbitSceneProps) {
+  const { setBreadcrumb } = useNavigationContext();
   const containerRef = React.useRef<HTMLDivElement>(null);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
 
@@ -422,8 +424,8 @@ export function OrbitScene({
       simulation: null as Simulation<SimulatedNode, never> | null,
       nodes: [] as SimulatedNode[],
       ringRotation: {} as Record<string, number>,
-      centerLogoUrl: null as string | null,
-      centerName: "",
+      communityAvatarUrl: null as string | null,
+      communityName: "",
       members: [] as OrbitMember[],
       paused: false,
       fadeIn: 0,
@@ -439,6 +441,7 @@ export function OrbitScene({
     dragStart: null as { x: number; y: number } | null,
     hoveredUniverseNode: null as UniverseNode | null,
     hoveredOrbitNodeId: null as string | null,
+    hoveredCommunityAvatar: false,
 
     // Orbit drag
     orbitDrag: null as {
@@ -457,7 +460,13 @@ export function OrbitScene({
 
     // Data fetch state
     fetchAbort: null as AbortController | null,
-    fetchedData: null as { members: OrbitMember[]; links: MemberLink[]; isAdmin: boolean } | null,
+    fetchedData: null as {
+      members: OrbitMember[];
+      links: MemberLink[];
+      isAdmin: boolean;
+      description: string | null;
+      viewerMembership: { status: string; role: string } | null;
+    } | null,
     fetchError: null as string | null,
   });
 
@@ -468,14 +477,25 @@ export function OrbitScene({
     x: number;
     y: number;
   } | null>(null);
+  const [communityTooltip, setCommunityTooltip] = React.useState<{
+    name: string;
+    memberCount: number;
+    x: number;
+    y: number;
+  } | null>(null);
   const [orbitPopover, setOrbitPopover] = React.useState<{
     node: SimulatedNode;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [communityPopover, setCommunityPopover] = React.useState<{
     x: number;
     y: number;
   } | null>(null);
   const [sceneMode, setSceneMode] = React.useState<SceneMode>("universe");
   const [activeCommunity, setActiveCommunity] = React.useState<{
     handle: string;
+    name: string;
     isAdmin: boolean;
   } | null>(null);
 
@@ -751,8 +771,8 @@ export function OrbitScene({
       if (n.avatarUrl) s.imageCache.get(n.avatarUrl);
     }
 
-    // Load center logo
-    if (s.orbit.centerLogoUrl) s.imageCache.get(s.orbit.centerLogoUrl);
+    // Load community avatar
+    if (s.orbit.communityAvatarUrl) s.imageCache.get(s.orbit.communityAvatarUrl);
 
     s.orbit.simulation?.stop();
 
@@ -837,6 +857,7 @@ export function OrbitScene({
             setSceneMode("orbit");
             setActiveCommunity({
               handle: s.transition.targetCommunity?.handle ?? "",
+              name: s.transition.targetCommunity?.name ?? "",
               isAdmin: s.fetchedData.isAdmin,
             });
             s.transform = { x: s.width / 2, y: s.height / 2, k: 1 };
@@ -898,6 +919,7 @@ export function OrbitScene({
         setSceneMode("orbit");
         setActiveCommunity({
           handle: s.transition.targetCommunity?.handle ?? "",
+          name: s.transition.targetCommunity?.name ?? "",
           isAdmin: s.fetchedData.isAdmin,
         });
         s.transform = { x: s.width / 2, y: s.height / 2, k: 1 };
@@ -974,8 +996,8 @@ export function OrbitScene({
     s.fetchError = null;
 
     // Set orbit center info
-    s.orbit.centerLogoUrl = community.avatarUrl ?? null;
-    s.orbit.centerName = community.name;
+    s.orbit.communityAvatarUrl = community.avatarUrl ?? null;
+    s.orbit.communityName = community.name;
 
     // Start the transition animation loop
     runTransition();
@@ -994,14 +1016,16 @@ export function OrbitScene({
           const members = parseMembers(result.value.orbitMembers ?? []);
           const memberLinks = parseMemberLinks(result.value.memberLinks);
           const isAdmin = result.value.isAdmin;
-          s.fetchedData = { members, links: memberLinks, isAdmin };
+          const description = result.value.community.description ?? null;
+          const viewerMembership = result.value.viewerMembership ?? null;
+          s.fetchedData = { members, links: memberLinks, isAdmin, description, viewerMembership };
 
           // If zoom already finished and in loading state, transition now
           if (s.mode === "loading") {
             startOrbitSimulation(members, memberLinks);
             s.mode = "orbit";
             setSceneMode("orbit");
-            setActiveCommunity({ handle: community.handle, isAdmin });
+            setActiveCommunity({ handle: community.handle, name: community.name, isAdmin });
             s.transform = { x: s.width / 2, y: s.height / 2, k: 1 };
             scheduleFrame();
           }
@@ -1032,7 +1056,9 @@ export function OrbitScene({
 
     // Clear orbit UI + navigation
     setOrbitTooltip(null);
+    setCommunityTooltip(null);
     setOrbitPopover(null);
+    setCommunityPopover(null);
     setActiveCommunity(null);
 
     // Setup zoom-out transition
@@ -1071,6 +1097,19 @@ export function OrbitScene({
     // Start the transition animation loop
     runTransition();
   }, [stopOrbitRotation, runTransition]);
+
+  /* ────────────────────────────
+     Breadcrumb — show community name in top-left nav
+  ──────────────────────────── */
+
+  React.useEffect(() => {
+    if (activeCommunity) {
+      setBreadcrumb({ label: activeCommunity.name, onBack: handleBack });
+    } else {
+      setBreadcrumb(null);
+    }
+    return () => setBreadcrumb(null);
+  }, [activeCommunity, handleBack, setBreadcrumb]);
 
   /* ────────────────────────────
      Render effect
@@ -1213,7 +1252,7 @@ export function OrbitScene({
     const drawOrbit = (opacity: number) => {
       const { transform: t, orbit: o, width: w, height: h } = s;
 
-      if (o.nodes.length === 0 && !o.centerLogoUrl && !o.centerName) return;
+      if (o.nodes.length === 0 && !o.communityAvatarUrl && !o.communityName) return;
 
       ctx.save();
       ctx.globalAlpha = opacity;
@@ -1232,40 +1271,39 @@ export function OrbitScene({
         ctx.stroke();
       }
 
-      // Center logo
-      const logoImg = s.imageCache.get(o.centerLogoUrl);
-      const r = CENTER_LOGO_RADIUS;
+      // Community avatar
+      const avatarImg = s.imageCache.get(o.communityAvatarUrl);
+      const r = COMMUNITY_AVATAR_RADIUS;
+      const isAvatarHovered = s.hoveredCommunityAvatar;
 
-      if (logoImg && logoImg.complete && logoImg.naturalWidth > 0) {
+      if (avatarImg && avatarImg.complete && avatarImg.naturalWidth > 0) {
         ctx.save();
         ctx.beginPath();
         ctx.arc(0, 0, r, 0, Math.PI * 2);
         ctx.clip();
-        ctx.drawImage(logoImg, -r, -r, r * 2, r * 2);
+        ctx.drawImage(avatarImg, -r, -r, r * 2, r * 2);
         ctx.restore();
-
-        ctx.beginPath();
-        ctx.arc(0, 0, r, 0, Math.PI * 2);
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
-        ctx.lineWidth = 2 / t.k;
-        ctx.stroke();
       } else {
         ctx.beginPath();
         ctx.arc(0, 0, r, 0, Math.PI * 2);
         ctx.fillStyle = "#3b82f6";
         ctx.fill();
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
-        ctx.lineWidth = 2 / t.k;
-        ctx.stroke();
       }
 
+      // Border — brighter + thicker on hover (same style as orbit nodes)
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, Math.PI * 2);
+      ctx.strokeStyle = isAvatarHovered ? "rgba(255, 255, 255, 1)" : "rgba(255, 255, 255, 0.3)";
+      ctx.lineWidth = (isAvatarHovered ? 3 : 2) / t.k;
+      ctx.stroke();
+
       // Community name below logo
-      if (o.centerName) {
+      if (o.communityName) {
         ctx.font = `500 ${12 / t.k}px system-ui, sans-serif`;
         ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
         ctx.textAlign = "center";
         ctx.textBaseline = "top";
-        ctx.fillText(o.centerName, 0, r + 14 / t.k);
+        ctx.fillText(o.communityName, 0, r + 14 / t.k);
       }
 
       // Draw member nodes
@@ -1284,7 +1322,7 @@ export function OrbitScene({
         ctx.fill();
 
         // Avatar
-        const avatarImg = s.imageCache.get(node.avatarUrl);
+        const avatarImg = s.imageCache.get(node.avatarUrl ?? null);
         if (avatarImg && avatarImg.complete && avatarImg.naturalWidth > 0) {
           ctx.save();
           ctx.beginPath();
@@ -1457,6 +1495,34 @@ export function OrbitScene({
         }
         scheduleFrame();
       }
+
+      // Community avatar hover — tooltip + border glow (same pattern as orbit nodes)
+      if (!hitNode) {
+        const distSq = wx * wx + wy * wy;
+        const hitRadius = COMMUNITY_AVATAR_RADIUS * 1.3;
+        const wasHovered = s.hoveredCommunityAvatar;
+        s.hoveredCommunityAvatar = distSq <= hitRadius * hitRadius;
+
+        if (s.hoveredCommunityAvatar !== wasHovered) {
+          if (s.hoveredCommunityAvatar) {
+            const screenX = t.x + rect.left;
+            const screenY = t.y + rect.top;
+            setCommunityTooltip({
+              name: s.orbit.communityName ?? "",
+              memberCount: s.transition.targetCommunity?.memberCount ?? 0,
+              x: screenX,
+              y: screenY,
+            });
+          } else {
+            setCommunityTooltip(null);
+          }
+          scheduleFrame();
+        }
+      } else if (s.hoveredCommunityAvatar) {
+        s.hoveredCommunityAvatar = false;
+        setCommunityTooltip(null);
+        scheduleFrame();
+      }
     }
   }, [scheduleFrame]);
 
@@ -1596,7 +1662,9 @@ export function OrbitScene({
             const screenY = ny * t.k + t.y + rect.top;
 
             setOrbitPopover({ node, x: screenX, y: screenY });
+            setCommunityPopover(null);
             setOrbitTooltip(null);
+            setCommunityTooltip(null);
             s.orbit.paused = true;
             stopOrbitRotation();
           }
@@ -1614,6 +1682,22 @@ export function OrbitScene({
           node.baseT = table.angleToT(angle < 0 ? angle + Math.PI * 2 : angle) - currentRotation;
           node.fx = null;
           node.fy = null;
+        }
+      }
+
+      // Community avatar click — pan without movement means click on empty space
+      if (drag?.type === "pan" && !drag.didMove) {
+        const t = s.transform;
+        const wx = (x - t.x) / t.k;
+        const wy = (y - t.y) / t.k;
+        const hitRadius = COMMUNITY_AVATAR_RADIUS * 1.3;
+        if (wx * wx + wy * wy <= hitRadius * hitRadius) {
+          setCommunityPopover({ x: e.clientX, y: e.clientY });
+          setOrbitPopover(null);
+          setOrbitTooltip(null);
+          setCommunityTooltip(null);
+          s.orbit.paused = true;
+          stopOrbitRotation();
         }
       }
 
@@ -1682,6 +1766,15 @@ export function OrbitScene({
     }
   }, [startOrbitRotation]);
 
+  const handleCloseCommunityPopover = React.useCallback(() => {
+    const s = stateRef.current;
+    setCommunityPopover(null);
+    if (!s.pointer.inside) {
+      s.orbit.paused = false;
+      startOrbitRotation();
+    }
+  }, [startOrbitRotation]);
+
   const handleViewProfile = React.useCallback((memberId: string) => {
     setOrbitPopover(null);
     onMemberClickRef.current?.(memberId);
@@ -1695,7 +1788,7 @@ export function OrbitScene({
   if (sceneMode === "universe") {
     cursor = universeTooltip ? "pointer" : "default";
   } else if (sceneMode === "orbit") {
-    cursor = orbitTooltip ? "pointer" : "grab";
+    cursor = (orbitTooltip || communityTooltip) ? "pointer" : "grab";
   }
 
   /* ────────────────────────────
@@ -1725,7 +1818,7 @@ export function OrbitScene({
       onMouseLeave={() => {
         const s = stateRef.current;
         s.pointer.inside = false;
-        if (s.mode === "orbit" && !orbitPopover) {
+        if (s.mode === "orbit" && !orbitPopover && !communityPopover) {
           s.orbit.paused = false;
           startOrbitRotation();
         }
@@ -1755,7 +1848,7 @@ export function OrbitScene({
       )}
 
       {/* Orbit tooltip */}
-      {orbitTooltip && sceneMode === "orbit" && !orbitPopover && containerRef.current && (
+      {orbitTooltip && sceneMode === "orbit" && !orbitPopover && !communityPopover && containerRef.current && (
         <NodeTooltip
           node={orbitTooltip.node}
           x={orbitTooltip.x}
@@ -1763,6 +1856,24 @@ export function OrbitScene({
           containerRect={containerRef.current.getBoundingClientRect()}
         />
       )}
+
+      {/* Community avatar tooltip */}
+      {communityTooltip && sceneMode === "orbit" && !orbitPopover && !communityPopover && containerRef.current && (() => {
+        const cr = containerRef.current!.getBoundingClientRect();
+        const left = communityTooltip.x - cr.left + 16;
+        const top = communityTooltip.y - cr.top + 16;
+        return (
+          <div
+            className="pointer-events-none absolute z-50 rounded-lg border border-border bg-background/95 px-3 py-2 shadow-lg backdrop-blur-md"
+            style={{ left, top }}
+          >
+            <div className="text-sm font-medium text-foreground">{communityTooltip.name}</div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              {communityTooltip.memberCount} members
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Orbit popover */}
       {orbitPopover && sceneMode === "orbit" && (
@@ -1775,16 +1886,20 @@ export function OrbitScene({
         />
       )}
 
-      {/* Back button */}
-      {(sceneMode === "orbit" || sceneMode === "loading") && (
-        <button
-          onClick={handleBack}
-          className="absolute left-4 top-4 z-50 flex items-center gap-2 rounded-lg border border-border bg-background/80 px-3 py-2 text-sm font-medium text-foreground backdrop-blur-md transition-colors hover:bg-muted"
-        >
-          <ArrowLeftIcon className="size-4" />
-          <span>{stateRef.current.transition.targetCommunity?.name ?? "Back"}</span>
-        </button>
+      {/* Community popover — community avatar click */}
+      {communityPopover && sceneMode === "orbit" && stateRef.current.transition.targetCommunity && (
+        <CommunityPopover
+          community={{
+            ...stateRef.current.transition.targetCommunity,
+            description: stateRef.current.fetchedData?.description ?? null,
+            viewerMembership: stateRef.current.fetchedData?.viewerMembership ?? null,
+          }}
+          x={communityPopover.x}
+          y={communityPopover.y}
+          onClose={handleCloseCommunityPopover}
+        />
       )}
+
     </div>
   );
 }
