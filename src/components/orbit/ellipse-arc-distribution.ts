@@ -9,43 +9,57 @@
  * equal arc-length distance, regardless of where on
  * the ellipse the node sits.
  */
+const ellipseTableCache = new Map<string, EllipseArcTable>();
+
 export class EllipseArcTable {
   /** Cumulative arc-length at each sample, normalized to 0–1 */
-  private readonly cumulativeT: Float64Array;
+  private readonly cumulativeArc!: Float64Array;
   /** Angle (radians) at each sample */
-  private readonly angles: Float64Array;
-  private readonly n: number;
+  private readonly angles!: Float64Array;
+  private readonly n!: number;
 
-  constructor(rx: number, ry: number, samples = 2048) {
-    this.n = samples;
-    this.cumulativeT = new Float64Array(samples + 1);
-    this.angles = new Float64Array(samples + 1);
+  constructor(rx: number, ry: number, samples?: number) {
+    const key = `${rx}:${ry}:${samples ?? "auto"}`;
+    const cached = ellipseTableCache.get(key);
+    if (cached) {
+      return cached;
+    }
+
+    const adaptiveSamples =
+      samples ??
+      Math.max(2048, Math.ceil((rx + ry) * 2));
+
+    this.n = adaptiveSamples;
+    this.cumulativeArc = new Float64Array(this.n + 1);
+    this.angles = new Float64Array(this.n + 1);
 
     let total = 0;
     let px = rx;
     let py = 0;
 
-    this.cumulativeT[0] = 0;
+    this.cumulativeArc[0] = 0;
     this.angles[0] = 0;
 
-    for (let i = 1; i <= samples; i++) {
-      const theta = (i / samples) * Math.PI * 2;
+    for (let i = 1; i <= this.n; i++) {
+      const theta = (i / this.n) * Math.PI * 2;
       const x = Math.cos(theta) * rx;
       const y = Math.sin(theta) * ry;
 
       total += Math.hypot(x - px, y - py);
 
       this.angles[i] = theta;
-      this.cumulativeT[i] = total;
+      this.cumulativeArc[i] = total;
 
       px = x;
       py = y;
     }
 
     // Normalize to 0–1
-    for (let i = 1; i <= samples; i++) {
-      this.cumulativeT[i] /= total;
+    for (let i = 1; i <= this.n; i++) {
+      this.cumulativeArc[i] /= total;
     }
+
+    ellipseTableCache.set(key, this);
   }
 
   /** Convert arc-length fraction (0–1) to angle (radians). */
@@ -59,7 +73,7 @@ export class EllipseArcTable {
 
     while (lo < hi) {
       const mid = (lo + hi) >> 1;
-      if (this.cumulativeT[mid] < t) {
+      if (this.cumulativeArc[mid] < t) {
         lo = mid + 1;
       } else {
         hi = mid;
@@ -69,8 +83,8 @@ export class EllipseArcTable {
     if (lo === 0) return 0;
 
     // Linear interpolation between samples
-    const t0 = this.cumulativeT[lo - 1];
-    const t1 = this.cumulativeT[lo];
+    const t0 = this.cumulativeArc[lo - 1];
+    const t1 = this.cumulativeArc[lo];
     const a0 = this.angles[lo - 1];
     const a1 = this.angles[lo];
 
@@ -100,8 +114,8 @@ export class EllipseArcTable {
 
     const a0 = this.angles[lo - 1];
     const a1 = this.angles[lo];
-    const t0 = this.cumulativeT[lo - 1];
-    const t1 = this.cumulativeT[lo];
+    const t0 = this.cumulativeArc[lo - 1];
+    const t1 = this.cumulativeArc[lo];
 
     const frac = a1 === a0 ? 0 : (angle - a0) / (a1 - a0);
     return t0 + frac * (t1 - t0);
