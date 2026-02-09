@@ -2,6 +2,11 @@ import { forwardRef, memo, ReactNode, SVGProps } from 'react';
 
 /**
  * Icons base
+ *
+ * Icons with data-duo-icon are custom and part of duo-tone collection.
+ * Path roles are auto-detected in global CSS, if a path has
+ * `opacity` set the shape is filled (fill: currentColor, stroke: none).
+ *
  */
 
 type IconBaseProps = Omit<SVGProps<SVGSVGElement>, 'children'> & {
@@ -13,9 +18,9 @@ type IconBaseProps = Omit<SVGProps<SVGSVGElement>, 'children'> & {
 };
 
 const defaultAttrs = {
-  fill: 'currentColor',
+  fill: 'none',
   stroke: 'currentColor',
-  strokeWidth: 0 as number,
+  strokeWidth: 2 as number,
   strokeLinecap: 'round' as const,
   strokeLinejoin: 'round' as const,
 };
@@ -46,10 +51,35 @@ const IconBase = forwardRef<SVGSVGElement, IconBaseProps>(
 
 /**
  * Icons
- */
+*/
+
+export const EyeIcon = memo(forwardRef<SVGSVGElement, React.SVGProps<SVGSVGElement>>((props, ref) => (
+  <IconBase ref={ref} aria-label="Eye icon" {...props}>
+    <path opacity="0.4" d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876-.001 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876.002" />
+    <circle data-duo-fill cx="12" cy="12" r="4" />
+  </IconBase>
+)));
+
+export const TrashIcon = memo(forwardRef<SVGSVGElement, React.SVGProps<SVGSVGElement>>((props, ref) => (
+  <IconBase ref={ref} aria-label="Trash icon" {...props}>
+    <path data-duo-fill opacity="0.4" d="M4 7H20L19.1758 20.1871C19.077 21.7682 17.7658 23 16.1816 23H7.81835C6.23416 23 4.92301 21.7682 4.8242 20.1871L4 7Z" />
+    <path d="M10 11V17" />
+    <path d="M14 11V17" />
+    <path d="M3 6H21" />
+    <path d="M15 6V3.5A1.5 1.5 0 0 0 13.5 2h-3A1.5 1.5 0 0 0 9 3.5V6" />
+  </IconBase>
+)));
+
+export const GlobeIcon = memo(forwardRef<SVGSVGElement, React.SVGProps<SVGSVGElement>>((props, ref) => (
+  <IconBase ref={ref} aria-label="Globe icon" {...props}>
+    <circle cx="12" cy="12" r="10" />
+    <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" />
+    <path d="M2 12h20" />
+  </IconBase>
+)));
 
 export const UserIcon = memo(forwardRef<SVGSVGElement, React.SVGProps<SVGSVGElement>>((props, ref) => (
-  <IconBase ref={ref} aria-label="Users icon" {...props}>
+  <IconBase ref={ref} aria-label="User icon" {...props}>
     <path d="M7.5 6a4.5 4.5 0 1 1 9 0 4.5 4.5 0 0 1-9 0ZM3.751 20.105a8.25 8.25 0 0 1 16.498 0 .75.75 0 0 1-.437.695A18.683 18.683 0 0 1 12 22.5c-2.786 0-5.433-.608-7.812-1.7a.75.75 0 0 1-.437-.695Z" />
   </IconBase>
 )));
@@ -75,7 +105,7 @@ export const CheckIcon = memo(forwardRef<SVGSVGElement, React.SVGProps<SVGSVGEle
 
 export const PlusIcon = memo(forwardRef<SVGSVGElement, React.SVGProps<SVGSVGElement>>((props, ref) => (
   <IconBase ref={ref} aria-label="Plus icon" {...props}>
-    <path strokeWidth="1.5" d="M12 4.5v15m7.5-7.5h-15" />
+    <path d="M12 4.5v15m7.5-7.5h-15" />
   </IconBase>
 )));
 
@@ -106,13 +136,6 @@ export const NoIcon = memo(forwardRef<SVGSVGElement, React.SVGProps<SVGSVGElemen
 export const SettingsIcon = memo(forwardRef<SVGSVGElement, React.SVGProps<SVGSVGElement>>((props, ref) => (
   <IconBase ref={ref} aria-label="Settings icon" {...props}>
     <path d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75" />
-  </IconBase>
-)));
-
-export const EyeIcon = memo(forwardRef<SVGSVGElement, React.SVGProps<SVGSVGElement>>((props, ref) => (
-  <IconBase ref={ref} aria-label="Eye icon" {...props}>
-    <path strokeWidth="1.5" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z" />
-    <path strokeWidth="1.5" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
   </IconBase>
 )));
 
@@ -161,5 +184,11 @@ export const WalletIcon = memo(forwardRef<SVGSVGElement, React.SVGProps<SVGSVGEl
 export const FileTextIcon = memo(forwardRef<SVGSVGElement, React.SVGProps<SVGSVGElement>>((props, ref) => (
   <IconBase ref={ref} aria-label="File text icon" {...props}>
     <path d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+  </IconBase>
+)));
+
+export const ArrowLeftIcon = memo(forwardRef<SVGSVGElement, React.SVGProps<SVGSVGElement>>((props, ref) => (
+  <IconBase ref={ref} aria-label="Arrow left icon" {...props}>
+    <path d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
   </IconBase>
 )));

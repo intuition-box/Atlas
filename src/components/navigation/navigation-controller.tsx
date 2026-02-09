@@ -2,10 +2,11 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useSession } from "next-auth/react";
-import { Eye, EyeOff, Settings } from "lucide-react";
+import { signOut, useSession } from "next-auth/react";
+import { Eye, EyeOff, LogIn, LogOut, Settings, Volume2, VolumeX } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { useSounds } from "@/lib/sounds";
 import { ROUTES, userSettingsPath } from "@/lib/routes";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -43,10 +44,12 @@ export function NavigationController({
   siteName = "Orbyt",
   className,
 }: NavigationControllerProps) {
-  const { data: session } = useSession();
+  const { data: session, status } = useSession();
   const { controls, breadcrumb, isVisible } = useNavigationContext();
   const { toggle } = useNavigationVisibility();
+  const { isEnabled: isSoundEnabled, toggle: toggleSound } = useSounds();
 
+  const isAuthed = status === "authenticated" && !!session?.user;
   const userHandle = session?.user?.handle;
   const settingsHref = userHandle ? userSettingsPath(userHandle) : null;
 
@@ -140,6 +143,13 @@ export function NavigationController({
               href={settingsHref}
             />
           )}
+          {/* Sound Toggle */}
+          <NavigationButton
+            icon={isSoundEnabled ? Volume2 : VolumeX}
+            label={isSoundEnabled ? "Mute sounds" : "Unmute sounds"}
+            onClick={toggleSound}
+          />
+
           {/* Visibility Toggle - Always visible */}
           <Tooltip>
             <TooltipTrigger>
@@ -167,6 +177,21 @@ export function NavigationController({
               <p className="text-xs">{isVisible ? "Hide UI" : "Show UI"}</p>
             </TooltipContent>
           </Tooltip>
+
+          {/* Auth - Login/Logout */}
+          {isAuthed ? (
+            <NavigationButton
+              icon={LogOut}
+              label="Sign out"
+              onClick={() => signOut({ callbackUrl: "/" })}
+            />
+          ) : status !== "loading" ? (
+            <NavigationButton
+              icon={LogIn}
+              label="Sign in"
+              href={ROUTES.signIn}
+            />
+          ) : null}
 
           {/* Contextual top-right controls */}
           {showControls && controls.topRight?.map((item, idx) => (

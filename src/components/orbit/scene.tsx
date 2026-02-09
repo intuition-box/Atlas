@@ -754,7 +754,7 @@ export function OrbitScene({
       });
 
     s.orbit.simulation = sim;
-    sounds.play("/sounds/drum.mp3");
+    sounds.play("drum");
 
     // Start orbit rotation loop
     startOrbitRotation();
@@ -941,7 +941,7 @@ export function OrbitScene({
 
     s.mode = "zoom-in";
     setSceneMode("zoom-in");
-    sounds.play("/sounds/whoosh.mp3", {volume: 0.3});
+    sounds.play("whoosh", { volume: 0.3 });
 
     // Clear tooltips
     s.hoveredUniverseNode = null;
@@ -1389,7 +1389,7 @@ export function OrbitScene({
         if (picked !== s.hoveredUniverseNode) {
           s.hoveredUniverseNode = picked;
           if (picked && picked.x !== undefined && picked.y !== undefined) {
-            sounds.play("/sounds/hover.mp3");
+            sounds.play("hover");
             const screenX = picked.x * t.k + t.x + rect.left;
             const screenY = picked.y * t.k + t.y + rect.top;
             const screenRadius = picked.radius * t.k + 1.5;
@@ -1455,7 +1455,7 @@ export function OrbitScene({
       if (newId !== prevId) {
         s.hoveredMemberNode = newId;
         if (hitNode) {
-          sounds.play("/sounds/hover.mp3");
+          sounds.play("hover");
           const nx = (hitNode.x ?? s.width / 2) - s.width / 2;
           const ny = (hitNode.y ?? s.height / 2) - s.height / 2;
           const screenX = nx * t.k + t.x + rect.left;
@@ -1476,7 +1476,7 @@ export function OrbitScene({
 
         if (s.hoveredCommunityAvatar !== wasHovered) {
           if (s.hoveredCommunityAvatar) {
-            sounds.play("/sounds/hover.mp3");
+            sounds.play("hover");
             const screenX = t.x + rect.left;
             const screenY = t.y + rect.top;
             setCommunityTooltip({

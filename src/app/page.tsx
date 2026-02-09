@@ -4,10 +4,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { OrbitUniverse, type OrbitCommunity, type OrbitLink } from "@/components/orbit/orbit-universe";
+import { OrbitScene, type OrbitCommunity, type OrbitLink } from "@/components/orbit/scene";
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from "@/components/ui/empty";
 import { apiGet } from "@/lib/api/client";
-import { ROUTES, communityPath } from "@/lib/routes";
+import { ROUTES, userPath } from "@/lib/routes";
 import { Spinner } from "@/components/ui/spinner";
 
 type OrbitUniverseResponse = {
@@ -17,7 +17,7 @@ type OrbitUniverseResponse = {
 
 export default function Home() {
   const router = useRouter();
-  
+
   const [communities, setCommunities] = useState<OrbitCommunity[]>([]);
   const [links, setLinks] = useState<OrbitLink[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -57,11 +57,11 @@ export default function Home() {
   }, []);
 
   return (
-    <main className="fixed inset-0 overflow-hidden">
-      <OrbitUniverse
+    <>
+      <OrbitScene
         communities={communities}
         links={links}
-        onSelect={(c) => router.push(communityPath(c.handle))}
+        onMemberClick={(memberId) => router.push(userPath(memberId))}
       />
 
       {/* Status */}
@@ -72,30 +72,28 @@ export default function Home() {
       ) : null}
 
       {loading ? (
-        <div className="pointer-events-none absolute left-6 top-24 z-10 rounded-xl border border-border bg-background/80 p-3 text-sm text-foreground/70 backdrop-blur">
+        <div className="pointer-events-none rounded-full border border-border bg-background/80 p-3 text-sm text-foreground/70 backdrop-blur">
           <Spinner />
         </div>
       ) : null}
 
       {/* Empty state */}
       {!loading && !error && communities.length === 0 ? (
-        <div className="pointer-events-auto absolute inset-0 z-10 flex items-center justify-center">
-          <Empty className="border-border bg-background/80 backdrop-blur">
-            <EmptyHeader>
-              <EmptyTitle>No public communities yet</EmptyTitle>
-              <EmptyDescription>
-                Be the first to create a community and start building your orbit.
-              </EmptyDescription>
-            </EmptyHeader>
-            <Link
-              href={ROUTES.communityNew}
-              className="inline-flex h-9 items-center rounded-lg border border-border bg-background px-4 text-sm font-medium text-foreground hover:bg-muted"
-            >
-              Create community
-            </Link>
-          </Empty>
-        </div>
+        <Empty className="border-border bg-background/80 backdrop-blur">
+          <EmptyHeader>
+            <EmptyTitle>No public communities yet</EmptyTitle>
+            <EmptyDescription>
+              Be the first to create a community and start building your orbit.
+            </EmptyDescription>
+          </EmptyHeader>
+          <Link
+            href={ROUTES.communityNew}
+            className="inline-flex h-9 items-center rounded-lg border border-border bg-background px-4 text-sm font-medium text-foreground hover:bg-muted"
+          >
+            Create community
+          </Link>
+        </Empty>
       ) : null}
-    </main>
+    </>
   );
 }

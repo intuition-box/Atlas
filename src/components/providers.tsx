@@ -9,6 +9,7 @@ import { resetCsrf, initCsrfVisibilityRefresh } from "@/lib/api/client";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { NavigationProvider } from "@/components/navigation/navigation-provider";
 import { AttestationQueueProvider } from "@/components/attestation/attestation-queue-provider";
+import { useGlobalSound } from "@/hooks/use-global-sound";
 
 /**
  * Manages CSRF token lifecycle:
@@ -111,17 +112,28 @@ function OnboardingGuard({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/**
+ * Registers global event listeners (hover sounds, etc.)
+ * that don't render any UI.
+ */
+function GlobalListeners({ children }: { children: React.ReactNode }) {
+  useGlobalSound();
+  return <>{children}</>;
+}
+
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <SessionProvider refetchOnWindowFocus={true} refetchInterval={0}>
       <CsrfManager>
-        <TooltipProvider delay={300}>
-          <NavigationProvider>
-            <AttestationQueueProvider>
-              <OnboardingGuard>{children}</OnboardingGuard>
-            </AttestationQueueProvider>
-          </NavigationProvider>
-        </TooltipProvider>
+        <GlobalListeners>
+          <TooltipProvider delay={300}>
+            <NavigationProvider>
+              <AttestationQueueProvider>
+                <OnboardingGuard>{children}</OnboardingGuard>
+              </AttestationQueueProvider>
+            </NavigationProvider>
+          </TooltipProvider>
+        </GlobalListeners>
       </CsrfManager>
     </SessionProvider>
   );

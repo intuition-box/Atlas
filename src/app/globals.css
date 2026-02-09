@@ -135,7 +135,7 @@
   }
 
   body {
-    @apply w-full min-h-dvh antialiased;
+    @apply w-full min-h-dvh m-0 p-0 antialiased;
     @apply text-foreground font-sans;
     @apply bg-background selection:bg-foreground/30;
     background-image: var(--color-background-radial-gradient);
@@ -159,7 +159,8 @@
   }
 
   main {
-    @apply mx-auto max-w-5xl flex-col px-4 flex flex-1 items-center justify-center;
+    @apply flex-col flex flex-1;
+    @apply w-full h-dvh;
   }
 }
 
@@ -179,6 +180,12 @@
 
   /* Materials */
 
+
+  /* Duo Icons */
+  svg *[data-duo-fill] {
+    fill: currentColor;
+    stroke: none;
+  }
 
 }
 

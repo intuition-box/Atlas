@@ -27,6 +27,7 @@ export function AttestationQueueButton({ className }: { className?: string }) {
           variant="ghost"
           size="icon"
           onClick={toggleOpen}
+
           type="button"
           className={cn(
             "relative size-10 rounded-full",
