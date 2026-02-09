@@ -400,7 +400,7 @@ export function OrbitScene({
     draggedNode: null as UniverseNode | null,
     dragStart: null as { x: number; y: number } | null,
     hoveredUniverseNode: null as UniverseNode | null,
-    hoveredOrbitNodeId: null as string | null,
+    hoveredMemberNode: null as string | null,
     hoveredCommunityAvatar: false,
 
     // Orbit drag
@@ -1020,6 +1020,10 @@ export function OrbitScene({
     setCommunityPopover(null);
     setActiveCommunity(null);
 
+    // Reset universe fade-in so bubbles and bridges animate in again
+    s.universe.fadeIn = 0;
+    s.universe.startTime = performance.now();
+
     // Setup zoom-out transition
     s.transition = {
       startTime: performance.now(),
@@ -1119,8 +1123,8 @@ export function OrbitScene({
       ctx.translate(t.x, t.y);
       ctx.scale(t.k, t.k);
 
-      // Links (hidden during loading — only target bubble visible)
-      if (bridgeProgress > 0 && s.mode !== "loading") {
+      // Links (hidden during zoom-in and loading)
+      if (bridgeProgress > 0 && s.mode !== "loading" && s.mode !== "zoom-in") {
         ctx.globalAlpha = opacity;
         for (let i = 0; i < u.links.length; i++) {
           const link = u.links[i];
@@ -1160,8 +1164,7 @@ export function OrbitScene({
           if (!isTarget) {
             if (s.mode === "zoom-in") {
               const elapsed = performance.now() - s.transition.startTime;
-              const fadeStart = ZOOM_DURATION - FADE_OVERLAP;
-              const fadeT = Math.max(0, Math.min(1, (elapsed - fadeStart) / FADE_OVERLAP));
+              const fadeT = Math.min(1, elapsed / (ZOOM_DURATION * 0.5));
               ctx.globalAlpha = bubbleOpacity * (1 - fadeT);
             } else {
               // loading — non-target nodes fully hidden
@@ -1272,7 +1275,7 @@ export function OrbitScene({
       for (const node of o.nodes) {
         const nx = (node.x ?? simCx) - simCx;
         const ny = (node.y ?? simCy) - simCy;
-        const isHovered = node.id === s.hoveredOrbitNodeId;
+        const isHovered = node.id === s.hoveredMemberNode;
         const nr = node.radius;
 
         ctx.beginPath();
@@ -1320,11 +1323,16 @@ export function OrbitScene({
           drawOrbit(1);
           break;
         case "zoom-out": {
-          // During zoom-out, fade universe in based on transition progress
+          // During zoom-out, draw universe at its final transform (not the
+          // interpolated one) so nodes fade in at their resting position
+          // instead of sliding across the screen.
           const elapsed = performance.now() - s.transition.startTime;
           const rawT = Math.min(1, elapsed / ZOOM_DURATION);
           const universeOpacity = Math.max(0, Math.min(1, (rawT - 0.3) / 0.7));
+          const savedTransform = s.transform;
+          s.transform = { ...s.savedUniverseTransform };
           drawUniverse(universeOpacity);
+          s.transform = savedTransform;
           break;
         }
       }
@@ -1381,6 +1389,7 @@ export function OrbitScene({
         if (picked !== s.hoveredUniverseNode) {
           s.hoveredUniverseNode = picked;
           if (picked && picked.x !== undefined && picked.y !== undefined) {
+            sounds.play("/sounds/hover.mp3");
             const screenX = picked.x * t.k + t.x + rect.left;
             const screenY = picked.y * t.k + t.y + rect.top;
             const screenRadius = picked.radius * t.k + 1.5;
@@ -1440,12 +1449,13 @@ export function OrbitScene({
       const wx = (x - t.x) / t.k;
       const wy = (y - t.y) / t.k;
       const hitNode = findOrbitNodeAt(wx, wy);
-      const prevId = s.hoveredOrbitNodeId;
+      const prevId = s.hoveredMemberNode;
       const newId = hitNode?.id ?? null;
 
       if (newId !== prevId) {
-        s.hoveredOrbitNodeId = newId;
+        s.hoveredMemberNode = newId;
         if (hitNode) {
+          sounds.play("/sounds/hover.mp3");
           const nx = (hitNode.x ?? s.width / 2) - s.width / 2;
           const ny = (hitNode.y ?? s.height / 2) - s.height / 2;
           const screenX = nx * t.k + t.x + rect.left;
@@ -1466,6 +1476,7 @@ export function OrbitScene({
 
         if (s.hoveredCommunityAvatar !== wasHovered) {
           if (s.hoveredCommunityAvatar) {
+            sounds.play("/sounds/hover.mp3");
             const screenX = t.x + rect.left;
             const screenY = t.y + rect.top;
             setCommunityTooltip({
@@ -1689,8 +1700,8 @@ export function OrbitScene({
         scheduleFrame();
       }
     } else if (s.mode === "orbit") {
-      if (s.hoveredOrbitNodeId) {
-        s.hoveredOrbitNodeId = null;
+      if (s.hoveredMemberNode) {
+        s.hoveredMemberNode = null;
         setMemberTooltip(null);
         scheduleFrame();
       }
