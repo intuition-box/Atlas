@@ -432,13 +432,13 @@ export function OrbitScene({
 
   // React state for tooltips/popovers (need re-renders)
   const [communityTooltip, setCommunityTooltip] = React.useState<CommunityTooltipData | null>(null);
-  const [orbitTooltip, setOrbitTooltip] = React.useState<{
+  const [memberTooltip, setMemberTooltip] = React.useState<{
     node: SimulatedNode;
     x: number;
     y: number;
     screenRadius: number;
   } | null>(null);
-  const [orbitPopover, setOrbitPopover] = React.useState<{
+  const [memberPopover, setMemberPopover] = React.useState<{
     node: SimulatedNode;
     x: number;
     y: number;
@@ -941,6 +941,7 @@ export function OrbitScene({
 
     s.mode = "zoom-in";
     setSceneMode("zoom-in");
+    sounds.play("/sounds/whoosh.mp3", {volume: 0.3});
 
     // Clear tooltips
     s.hoveredUniverseNode = null;
@@ -1013,9 +1014,9 @@ export function OrbitScene({
     stopOrbitRotation();
 
     // Clear orbit UI + navigation
-    setOrbitTooltip(null);
+    setMemberTooltip(null);
     setCommunityTooltip(null);
-    setOrbitPopover(null);
+    setMemberPopover(null);
     setCommunityPopover(null);
     setActiveCommunity(null);
 
@@ -1449,9 +1450,9 @@ export function OrbitScene({
           const ny = (hitNode.y ?? s.height / 2) - s.height / 2;
           const screenX = nx * t.k + t.x + rect.left;
           const screenY = ny * t.k + t.y + rect.top;
-          setOrbitTooltip({ node: hitNode, x: screenX, y: screenY, screenRadius: hitNode.radius * t.k + 1.5 });
+          setMemberTooltip({ node: hitNode, x: screenX, y: screenY, screenRadius: hitNode.radius * t.k + 1.5 });
         } else {
-          setOrbitTooltip(null);
+          setMemberTooltip(null);
         }
         scheduleFrame();
       }
@@ -1557,6 +1558,8 @@ export function OrbitScene({
         hitNode.fy = (hitNode.y ?? cy);
         // Warm the simulation so it ticks and enforces fx/fy
         s.orbit.simulation?.alpha(SIMULATION.DRAG_ALPHA).restart();
+        setMemberTooltip(null);
+        setCommunityTooltip(null);
         scheduleFrame();
         return;
       }
@@ -1571,6 +1574,7 @@ export function OrbitScene({
         startTx: t.x,
         startTy: t.y,
       };
+      setCommunityTooltip(null);
     }
   }, [scheduleFrame]);
 
@@ -1627,9 +1631,9 @@ export function OrbitScene({
             const screenX = nx * t.k + t.x + rect.left;
             const screenY = ny * t.k + t.y + rect.top;
 
-            setOrbitPopover({ node, x: screenX, y: screenY, screenRadius: node.radius * t.k + 1.5 });
+            setMemberPopover({ node, x: screenX, y: screenY, screenRadius: node.radius * t.k + 1.5 });
             setCommunityPopover(null);
-            setOrbitTooltip(null);
+            setMemberTooltip(null);
             setCommunityTooltip(null);
             s.orbit.paused = true;
             stopOrbitRotation();
@@ -1661,8 +1665,8 @@ export function OrbitScene({
           const avatarScreenX = t.x + rect.left;
           const avatarScreenY = t.y + rect.top;
           setCommunityPopover({ x: avatarScreenX, y: avatarScreenY, screenRadius: COMMUNITY_AVATAR_RADIUS * t.k + 1.5 });
-          setOrbitPopover(null);
-          setOrbitTooltip(null);
+          setMemberPopover(null);
+          setMemberTooltip(null);
           setCommunityTooltip(null);
           s.orbit.paused = true;
           stopOrbitRotation();
@@ -1687,7 +1691,7 @@ export function OrbitScene({
     } else if (s.mode === "orbit") {
       if (s.hoveredOrbitNodeId) {
         s.hoveredOrbitNodeId = null;
-        setOrbitTooltip(null);
+        setMemberTooltip(null);
         scheduleFrame();
       }
     }
@@ -1726,7 +1730,7 @@ export function OrbitScene({
 
   const handleClosePopover = React.useCallback(() => {
     const s = stateRef.current;
-    setOrbitPopover(null);
+    setMemberPopover(null);
     // Only unpause if mouse is outside the container
     if (!s.pointer.inside) {
       s.orbit.paused = false;
@@ -1744,7 +1748,7 @@ export function OrbitScene({
   }, [startOrbitRotation]);
 
   const handleViewProfile = React.useCallback((memberId: string) => {
-    setOrbitPopover(null);
+    setMemberPopover(null);
     onMemberClickRef.current?.(memberId);
   }, []);
 
@@ -1756,7 +1760,7 @@ export function OrbitScene({
   if (sceneMode === "universe") {
     cursor = communityTooltip ? "pointer" : "default";
   } else if (sceneMode === "orbit") {
-    cursor = (orbitTooltip || communityTooltip) ? "pointer" : "grab";
+    cursor = (memberTooltip || communityTooltip) ? "pointer" : "grab";
   }
 
   /* ────────────────────────────
@@ -1786,7 +1790,7 @@ export function OrbitScene({
       onMouseLeave={() => {
         const s = stateRef.current;
         s.pointer.inside = false;
-        if (s.mode === "orbit" && !orbitPopover && !communityPopover) {
+        if (s.mode === "orbit" && !memberPopover && !communityPopover) {
           s.orbit.paused = false;
           startOrbitRotation();
         }
@@ -1811,7 +1815,7 @@ export function OrbitScene({
       />
 
       {/* Community tooltip — hover on community bubbles or center avatar */}
-      {communityTooltip && !orbitPopover && !communityPopover && (
+      {communityTooltip && !memberPopover && !communityPopover && (
         <NodeTooltip
           x={communityTooltip.x}
           y={communityTooltip.y}
@@ -1828,26 +1832,26 @@ export function OrbitScene({
       )}
 
       {/* Member tooltip — hover on orbit member nodes */}
-      {orbitTooltip && sceneMode === "orbit" && !orbitPopover && !communityPopover && (
+      {memberTooltip && sceneMode === "orbit" && !memberPopover && !communityPopover && (
         <NodeTooltip
-          x={orbitTooltip.x}
-          y={orbitTooltip.y}
-          screenRadius={orbitTooltip.screenRadius}
+          x={memberTooltip.x}
+          y={memberTooltip.y}
+          screenRadius={memberTooltip.screenRadius}
         >
-          <MemberTooltipContent node={orbitTooltip.node} />
+          <MemberTooltipContent node={memberTooltip.node} />
         </NodeTooltip>
       )}
 
       {/* Orbit popover — click on member nodes */}
-      {orbitPopover && sceneMode === "orbit" && (
+      {memberPopover && sceneMode === "orbit" && (
         <NodePopover
-          x={orbitPopover.x}
-          y={orbitPopover.y}
-          screenRadius={orbitPopover.screenRadius}
+          x={memberPopover.x}
+          y={memberPopover.y}
+          screenRadius={memberPopover.screenRadius}
           onClose={handleClosePopover}
         >
           <MemberPopoverContent
-            node={orbitPopover.node}
+            node={memberPopover.node}
             onViewProfile={handleViewProfile}
           />
         </NodePopover>
