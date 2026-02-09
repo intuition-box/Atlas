@@ -15,6 +15,7 @@ import {
 
 import { UsersIcon, PlusIcon, FileTextIcon, CogIcon } from "@/components/ui/icons";
 import { apiGet } from "@/lib/api/client";
+import { sounds } from "@/lib/sounds";
 import { useNavigation, useNavigationContext, type NavigationControls } from "@/components/navigation/navigation-provider";
 import {
   NodeTooltip,
@@ -753,6 +754,7 @@ export function OrbitScene({
       });
 
     s.orbit.simulation = sim;
+    sounds.play("/sounds/drum.mp3");
 
     // Start orbit rotation loop
     startOrbitRotation();
@@ -1149,7 +1151,7 @@ export function OrbitScene({
         if (n.x === undefined || n.y === undefined) continue;
 
         const isHovered = s.hoveredUniverseNode?.id === n.id;
-        const radius = isHovered ? n.radius * 1.1 : n.radius;
+        const radius = n.radius;
 
         // During zoom-in, keep the target node visible, fade others
         if ((s.mode === "zoom-in" || s.mode === "loading") && s.transition.targetNode) {
