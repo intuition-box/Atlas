@@ -23,7 +23,7 @@ import {
  * - Never store secrets or PII beyond opaque IDs.
  */
 
-const REMEMBER_COOKIE_BASE = "orbyt-mfa";
+const REMEMBER_COOKIE_BASE = "atlas-mfa";
 export const REMEMBER_COOKIE_NAME = hostCookieName(REMEMBER_COOKIE_BASE);
 
 const DEFAULT_TTL_DAYS = 30;

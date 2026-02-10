@@ -38,12 +38,12 @@ const MAX_BUCKETS = 10_000;
 const CLEANUP_INTERVAL_MS = 30_000;
 
 function shouldCleanup(t: number): boolean {
-  const last = globalThis.__orbytRateLimitCleanupAtMs ?? 0;
+  const last = globalThis.__atlasRateLimitCleanupAtMs ?? 0;
   return t - last >= CLEANUP_INTERVAL_MS;
 }
 
 function noteCleanup(t: number) {
-  globalThis.__orbytRateLimitCleanupAtMs = t;
+  globalThis.__atlasRateLimitCleanupAtMs = t;
 }
 
 function cleanupBuckets(store: Map<string, Bucket>, t: number) {
@@ -62,16 +62,16 @@ function cleanupBuckets(store: Map<string, Bucket>, t: number) {
 
 declare global {
   // eslint-disable-next-line no-var
-  var __orbytRateLimitBuckets: Map<string, Bucket> | undefined;
+  var __atlasRateLimitBuckets: Map<string, Bucket> | undefined;
   // eslint-disable-next-line no-var
-  var __orbytRateLimitCleanupAtMs: number | undefined;
+  var __atlasRateLimitCleanupAtMs: number | undefined;
 }
 
 function buckets(): Map<string, Bucket> {
-  if (!globalThis.__orbytRateLimitBuckets) {
-    globalThis.__orbytRateLimitBuckets = new Map();
+  if (!globalThis.__atlasRateLimitBuckets) {
+    globalThis.__atlasRateLimitBuckets = new Map();
   }
-  return globalThis.__orbytRateLimitBuckets;
+  return globalThis.__atlasRateLimitBuckets;
 }
 
 function nowMs(): number {

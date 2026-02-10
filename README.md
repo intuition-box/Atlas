@@ -1,10 +1,10 @@
-# Orbyt — Community Platform
+# Atlas — Community Platform
 
-A community directory where people sign to join communities, fill an application, get reviewed by admins, and then appear as orbiting members around each community. Orbyt is designed for communities and teams that need both **organization** and **engagement**. It blends social features (user profile, friendship, attestations) with productivity patterns (quests, tasks, roles) and delivers near real‑time participation.
+A community directory where people sign to join communities, fill an application, get reviewed by admins, and then appear as orbiting members around each community. Atlas is designed for communities and teams that need both **organization** and **engagement**. It blends social features (user profile, friendship, attestations) with productivity patterns (quests, tasks, roles) and delivers near real‑time participation.
 
-Orbyt is a visual summary of a member’s relationship to a community. Hovering a member pauses rotation and shows a tooltip. Clicking takes you to their profile.
+Atlas is a visual summary of a member’s relationship to a community. Hovering a member pauses rotation and shows a tooltip. Clicking takes you to their profile.
 
-### Orbyt layers
+### Atlas layers
 
 We keep four orbit levels (rings), from closest to farthest:
 
@@ -232,7 +232,7 @@ Long-term: these attestations can be minted to Intuition Protocol. This is inten
 
 ## 5) Configuration
 
-Orbyt validates environment variables with **Zod** and splits them into **server**/**client** modules:
+Atlas validates environment variables with **Zod** and splits them into **server**/**client** modules:
 
 - **Server:** `@/lib/env-server` — secrets and server‑only values (e.g., `DATABASE_URL`, `AUTH_SECRET`, Email, R2).
 - **Client:** `@/lib/env-client` — read‑only `NEXT_PUBLIC_*` values.

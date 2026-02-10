@@ -645,7 +645,7 @@ setCookie(res, name, value, { partitioned: true });
 **Constants:**
 - Header name: `X-CSRF-Token`
 - Rotation header: `X-CSRF-Token-Refresh`
-- Cookie name: `__Host-orbyt-csrf` (prod) / `orbyt-csrf` (dev)
+- Cookie name: `__Host-atlas-csrf` (prod) / `atlas-csrf` (dev)
 - Token endpoint response: `{ csrfToken: string }`
 
 **Server usage:**

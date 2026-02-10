@@ -160,7 +160,7 @@
 
   main {
     @apply flex-col flex flex-1;
-    @apply w-full h-dvh;
+    @apply w-full min-h-dvh;
   }
 }
 

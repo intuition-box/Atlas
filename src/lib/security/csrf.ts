@@ -34,7 +34,7 @@ export const CSRF_HEADER_NAME = "X-CSRF-Token";
 export const CSRF_REFRESH_HEADER_NAME = "X-CSRF-Token-Refresh";
 
 /** CSRF cookie name (uses __Host- prefix in production for stronger scoping) */
-export const CSRF_COOKIE_NAME = hostCookieName("orbyt-csrf");
+export const CSRF_COOKIE_NAME = hostCookieName("atlas-csrf");
 
 // ============================================================================
 // Types

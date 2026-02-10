@@ -73,7 +73,7 @@ const ENCRYPTION_VERSION = 0x01;
  * Context strings for HKDF key derivation.
  * Using different contexts ensures derived keys are domain-separated.
  */
-const HKDF_SALT = "orbyt-cookie-encryption-v1";
+const HKDF_SALT = "atlas-cookie-encryption-v1";
 const HKDF_INFO = "cookie-aes-256-gcm";
 
 function getAuthSecret(): string {

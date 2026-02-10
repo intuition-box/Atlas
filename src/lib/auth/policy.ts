@@ -89,7 +89,7 @@ function requireOnboardedContext(
 }
 
 /**
- * Allow only internal absolute paths (e.g. "/c/orbyt").
+ * Allow only internal absolute paths (e.g. "/c/atlas").
  * Reject "//" to avoid scheme-relative redirects.
  */
 export function safeReturnToUrl(input: string | null | undefined): string | null {

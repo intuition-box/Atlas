@@ -228,8 +228,8 @@ export const RESERVED_HANDLES = new Set<string>([
   // ---------------------------------------------------------------------------
   "orbit",
   "orbit-team",
-  "orbyt",
-  "orbyt-team",
+  "atlas",
+  "atlas-team",
 
   // ---------------------------------------------------------------------------
   // "weird" values that should never be real identities

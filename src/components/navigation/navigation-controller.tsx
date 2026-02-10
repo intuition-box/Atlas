@@ -41,7 +41,7 @@ type NavigationControllerProps = {
 
 export function NavigationController({
   logoUrl,
-  siteName = "Orbyt",
+  siteName = "Atlas",
   className,
 }: NavigationControllerProps) {
   const { data: session, status } = useSession();

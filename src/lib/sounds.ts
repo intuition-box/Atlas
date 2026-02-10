@@ -114,7 +114,7 @@ const GROUP_PRIORITY: Record<SoundGroup, number> = {
    Storage Key
 ──────────────────────────── */
 
-const STORAGE_KEY = "orbyt-sounds-enabled";
+const STORAGE_KEY = "atlas-sounds-enabled";
 
 /* ────────────────────────────
    SoundEffects Class

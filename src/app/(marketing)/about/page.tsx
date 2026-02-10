@@ -4,16 +4,16 @@ export default function AboutPage() {
   return (
     <div className="mx-auto w-full max-w-3xl space-y-8 py-24 sm:py-32">
       <header className="space-y-3">
-        <h1 className="text-3xl font-semibold tracking-tight">About Orbyt</h1>
+        <h1 className="text-3xl font-semibold tracking-tight">About Atlas</h1>
         <p className="text-muted-foreground">
-          Orbyt is a directory where members join and appear as orbiting nodes around their communities. It is a visual summary of a member’s relationship to a community.
+          Atlas is a directory where members join and appear as orbiting nodes around their communities. It is a visual summary of a member’s relationship to a community.
         </p>
       </header>
 
       <section className="space-y-3">
         <h2 className="text-xl font-semibold">Gravity, Love, Reach</h2>
         <p className="text-muted-foreground">
-          Orbyt treats facts/attestations as first-class actions and uses them to compute human-readable orbit metrics.
+          Atlas treats facts/attestations as first-class actions and uses them to compute human-readable orbit metrics.
           Current scoring is heuristic and designed to evolve.
         </p>
 

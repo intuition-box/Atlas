@@ -82,9 +82,9 @@ export const DEFAULT_DEPOSIT_AMOUNT = parseEther("0.0001");
  */
 export const HYBRID_PREDICATES = {
   /** Attribute possession: "User has attribute X" */
-  hasAttribute: "orbyt:has_attribute",
+  hasAttribute: "atlas:has_attribute",
   /** Community context: "Attestation is within community X" */
-  inCommunity: "orbyt:in_community",
+  inCommunity: "atlas:in_community",
 } as const;
 
 export type HybridPredicateType = keyof typeof HYBRID_PREDICATES;
@@ -97,13 +97,13 @@ export type HybridPredicateType = keyof typeof HYBRID_PREDICATES;
  * Prefix for community atoms
  *
  * Communities are dynamically created atoms based on their ID:
- * - `orbyt:community:abc123` for community with ID "abc123"
+ * - `atlas:community:abc123` for community with ID "abc123"
  *
  * Triple structure for community-scoped attestations:
  * 1. [User] [trusts] [User] → creates attestation triple
  * 2. [Attestation Triple] [in_community] [Community Atom] → adds context
  */
-export const COMMUNITY_ATOM_PREFIX = "orbyt:community:";
+export const COMMUNITY_ATOM_PREFIX = "atlas:community:";
 
 /**
  * Generate a community atom identifier from a community ID

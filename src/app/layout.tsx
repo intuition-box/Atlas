@@ -22,17 +22,17 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Orbyt",
+  title: "Atlas",
   description: "",
   icons: [{
     rel: "icon",
     url: "/favicon.ico"
   }],
   openGraph: {
-    title: "Orbyt",
+    title: "Atlas",
     description: "",
     url: "",
-    siteName: "Orbyt",
+    siteName: "Atlas",
     images: [],
     type: "website",
   },

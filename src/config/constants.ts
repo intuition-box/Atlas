@@ -26,9 +26,9 @@ export interface MetaConfig {
 }
 
 export const meta: MetaConfig = {
-  url: 'https://example.com',
-  canonical: 'https://example.com',
-  name: 'Orbyt',
+  url: 'https://atlas.box',
+  canonical: 'https://atlas.box',
+  name: 'Atlas',
   title: '',
   description: '',
   themeColor: '#000000',
@@ -42,12 +42,12 @@ export const meta: MetaConfig = {
   og: {
     locale: 'en-US',
     type: 'website',
-    image: 'https://example.com/ogimage.png',
+    image: 'https://atlas.box/ogimage.png',
     width: 1200,
     height: 675,
   },
-  twitterHandle: '@orbyt',
+  twitterHandle: '@atlasdotbox',
   email: {
-    support: 'support@example.com',
+    support: 'support@atlas.box',
   },
 }
