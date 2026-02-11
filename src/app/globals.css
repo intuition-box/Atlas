@@ -135,7 +135,7 @@
   }
 
   body {
-    @apply w-full min-h-dvh m-0 p-0 antialiased;
+    @apply flex flex-col w-full min-h-[100vh] m-0 p-0 antialiased;
     @apply text-foreground font-sans;
     @apply bg-background selection:bg-foreground/30;
     background-image: var(--color-background-radial-gradient);
@@ -159,8 +159,7 @@
   }
 
   main {
-    @apply flex-col flex flex-1;
-    @apply w-full min-h-dvh;
+    @apply flex flex-col min-h-dvh h-dvh;
   }
 }
 
