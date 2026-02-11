@@ -8,7 +8,7 @@ import { ROUTES, isPublicRoute, isOnboardingRoute } from "@/lib/routes";
 import { resetCsrf, initCsrfVisibilityRefresh } from "@/lib/api/client";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { NavigationProvider } from "@/components/navigation/navigation-provider";
-import { AttestationQueueProvider } from "@/components/attestation/attestation-queue-provider";
+import { AttestationQueueProvider } from "@/components/attestation/queue-provider";
 import { useGlobalSound } from "@/hooks/use-global-sound";
 
 /**
