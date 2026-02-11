@@ -1,7 +1,7 @@
 "use client";
 
-import * as React from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
 import { Eye, EyeOff, LogIn, LogOut, Settings, Volume2, VolumeX } from "lucide-react";
 
@@ -20,8 +20,8 @@ import {
   useNavigationContext,
   useNavigationVisibility,
 } from "./navigation-provider";
-import { AttestationQueueButton } from "@/components/attestation/attestation-queue-button";
-import { AttestationQueuePanel } from "@/components/attestation/attestation-queue-panel";
+import { AttestationQueueButton } from "@/components/attestation/queue-button";
+import { AttestationQueuePanel } from "@/components/attestation/queue-panel";
 
 /* ────────────────────────────
    Types
@@ -45,11 +45,17 @@ export function NavigationController({
   className,
 }: NavigationControllerProps) {
   const { data: session, status } = useSession();
+  const pathname = usePathname();
   const { controls, breadcrumb, isVisible } = useNavigationContext();
   const { toggle } = useNavigationVisibility();
   const { isEnabled: isSoundEnabled, toggle: toggleSound } = useSounds();
 
   const isAuthed = status === "authenticated" && !!session?.user;
+  const isSignInPage = pathname === ROUTES.signIn;
+
+  // Hide all navigation on the sign-in page
+  if (isSignInPage) return null;
+
   const userHandle = session?.user?.handle;
   const settingsHref = userHandle ? userSettingsPath(userHandle) : null;
 
@@ -132,25 +138,48 @@ export function NavigationController({
       {/* Top Right - Global Controls */}
       <div className="absolute top-4 right-4 sm:top-6 sm:right-6 pointer-events-auto">
         <div className="flex items-center gap-1">
-          {/* Attestation Queue (cart-like) */}
-          {showControls && <AttestationQueueButton />}
+          {/* Attestation Queue (authed only) */}
+          {showControls && isAuthed && <AttestationQueueButton />}
 
-          {/* User Settings */}
-          {showControls && settingsHref && (
+          {/* User Settings (authed only) */}
+          {showControls && isAuthed && settingsHref && (
             <NavigationButton
               icon={Settings}
               label="Settings"
               href={settingsHref}
             />
           )}
-          {/* Sound Toggle */}
-          <NavigationButton
-            icon={isSoundEnabled ? Volume2 : VolumeX}
-            label={isSoundEnabled ? "Mute sounds" : "Unmute sounds"}
-            onClick={toggleSound}
-          />
 
-          {/* Visibility Toggle - Always visible */}
+          {/* Sound Toggle (authed only) */}
+          {showControls && isAuthed && (
+            <NavigationButton
+              icon={isSoundEnabled ? Volume2 : VolumeX}
+              label={isSoundEnabled ? "Mute sounds" : "Unmute sounds"}
+              onClick={toggleSound}
+            />
+          )}
+
+          {/* Contextual top-right controls (authed only) */}
+          {showControls && isAuthed && controls.topRight?.map((item, idx) => (
+            <NavigationButton key={`topRight-${idx}`} {...item} />
+          ))}
+
+          {/* Auth - Login/Logout */}
+          {showControls && (isAuthed ? (
+            <NavigationButton
+              icon={LogOut}
+              label="Sign out"
+              onClick={() => signOut({ callbackUrl: "/" })}
+            />
+          ) : status !== "loading" ? (
+            <NavigationButton
+              icon={LogIn}
+              label="Sign in"
+              href={ROUTES.signIn}
+            />
+          ) : null)}
+
+          {/* Visibility Toggle - Always visible, rightmost */}
           <Tooltip>
             <TooltipTrigger>
               <button
@@ -177,31 +206,11 @@ export function NavigationController({
               <p className="text-xs">{isVisible ? "Hide UI" : "Show UI"}</p>
             </TooltipContent>
           </Tooltip>
-
-          {/* Auth - Login/Logout */}
-          {isAuthed ? (
-            <NavigationButton
-              icon={LogOut}
-              label="Sign out"
-              onClick={() => signOut({ callbackUrl: "/" })}
-            />
-          ) : status !== "loading" ? (
-            <NavigationButton
-              icon={LogIn}
-              label="Sign in"
-              href={ROUTES.signIn}
-            />
-          ) : null}
-
-          {/* Contextual top-right controls */}
-          {showControls && controls.topRight?.map((item, idx) => (
-            <NavigationButton key={`topRight-${idx}`} {...item} />
-          ))}
         </div>
       </div>
 
-      {/* Bottom Left - Community Controls (horizontal) */}
-      {showControls && ((controls.bottomLeft?.length ?? 0) > 0 || (controls.bottomRight?.length ?? 0) > 0) && (
+      {/* Bottom Left - Community Controls (authed only) */}
+      {showControls && isAuthed && ((controls.bottomLeft?.length ?? 0) > 0 || (controls.bottomRight?.length ?? 0) > 0) && (
         <div className="absolute bottom-4 left-4 sm:bottom-6 sm:left-6 pointer-events-auto">
           <div className="flex items-center gap-1">
             {controls.bottomLeft?.map((item, idx) => (
@@ -214,8 +223,8 @@ export function NavigationController({
         </div>
       )}
 
-      {/* Attestation Queue Panel (global dialog) */}
-      <AttestationQueuePanel />
+      {/* Attestation Queue Panel (authed only) */}
+      {isAuthed && <AttestationQueuePanel />}
     </div>
   );
 }
