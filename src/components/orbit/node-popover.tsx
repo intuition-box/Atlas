@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/icons";
 import { Tooltip, TooltipContent } from "@/components/ui/tooltip";
 import { Popover, PopoverContent } from "@/components/ui/popover";
-import { AttestationButtons } from "@/components/attestation/attestation-buttons";
+import { AttestationButtons } from "@/components/attestation/buttons";
 import { LEVEL_COLORS } from "./constants";
 import type { SimulatedNode } from "./types";
 
