@@ -22,7 +22,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Checkbox } from "@/components/ui/checkbox"
 import { OnchainBanner } from "@/components/attestation/onchain-banner"
 import { SelectionActionBar } from "@/components/attestation/selection-action-bar"
-import { useAttestationQueue } from "@/components/attestation/attestation-queue-provider"
+import { useAttestationQueue } from "@/components/attestation/queue-provider"
 import { ATTESTATION_TYPES, ATTESTATION_TYPE_LIST, type AttestationType } from "@/lib/attestations/definitions"
 
 // === CONSTANTS ===
