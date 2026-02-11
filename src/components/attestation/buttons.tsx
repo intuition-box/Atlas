@@ -16,7 +16,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useAttestationQueue } from "./attestation-queue-provider";
+import { useAttestationQueue } from "./queue-provider";
 import { ATTESTATION_TYPES, type AttestationType } from "@/lib/attestations/definitions";
 
 const ANIMATION = {

@@ -24,7 +24,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useAttestationQueue, type QueuedAttestation } from "./attestation-queue-provider";
+import { useAttestationQueue, type QueuedAttestation } from "./queue-provider";
 import { ATTESTATION_TYPES, type AttestationType } from "@/lib/attestations/definitions";
 import { TrashIcon } from "../ui/icons";
 

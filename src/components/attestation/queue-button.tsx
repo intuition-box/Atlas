@@ -8,7 +8,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useAttestationQueue } from "./attestation-queue-provider";
+import { useAttestationQueue } from "./queue-provider";
 import { Button } from "@/components/ui/button";
 
 /* ────────────────────────────
