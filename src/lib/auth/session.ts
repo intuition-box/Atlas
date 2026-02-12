@@ -70,6 +70,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             // For now store provider image URL; later we can mirror to R2 and overwrite.
             avatarUrl: imageUrl,
             image: imageUrl,
+            lastActiveAt: new Date(),
           },
           select: { id: true },
         });

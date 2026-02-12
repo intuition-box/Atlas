@@ -83,6 +83,7 @@ function createNodes(members: OrbitMember[]): SimulatedNode[] {
         loveScore: m.loveScore,
         reachScore: m.reachScore,
         lastActiveAt: m.lastActiveAt ?? null,
+        joinedAt: m.joinedAt ?? null,
         radius,
         color,
         baseT: tValues[i],

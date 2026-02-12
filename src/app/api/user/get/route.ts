@@ -24,6 +24,7 @@ type GetUserOk = {
     skills: string[] | null;
     tags: string[] | null;
     createdAt: Date;
+    lastActiveAt: Date | null;
   };
   isSelf: boolean;
   attestations: Array<{
@@ -109,6 +110,7 @@ export async function GET(req: NextRequest) {
         skills: true,
         tags: true,
         createdAt: true,
+        lastActiveAt: true,
       },
     });
 
@@ -180,6 +182,7 @@ export async function GET(req: NextRequest) {
         skills: user.skills,
         tags: user.tags,
         createdAt: user.createdAt,
+        lastActiveAt: user.lastActiveAt,
       },
       isSelf: actorId === user.id,
       attestations,

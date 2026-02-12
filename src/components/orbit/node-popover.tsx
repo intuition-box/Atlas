@@ -53,12 +53,19 @@ function formatRelativeTime(iso: string | null): string | null {
   const diff = Date.now() - ts;
   const days = Math.floor(diff / (1000 * 60 * 60 * 24));
 
-  if (days === 0) return "Active today";
-  if (days === 1) return "Active yesterday";
-  if (days < 7) return `Active ${days} days ago`;
-  if (days < 30) return `Active ${Math.floor(days / 7)} weeks ago`;
-  if (days < 365) return `Active ${Math.floor(days / 30)} months ago`;
-  return `Active ${Math.floor(days / 365)} years ago`;
+  if (days === 0) return "Last seen today";
+  if (days === 1) return "Last seen yesterday";
+  if (days < 7) return `Last seen ${days} days ago`;
+  if (days < 30) return `Last seen ${Math.floor(days / 7)} weeks ago`;
+  if (days < 365) return `Last seen ${Math.floor(days / 30)} months ago`;
+  return `Last seen ${Math.floor(days / 365)} years ago`;
+}
+
+function fmtDate(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "short" });
 }
 
 /* ────────────────────────────
@@ -209,7 +216,8 @@ export function MemberPopoverContent({
   node,
   onViewProfile,
 }: MemberPopoverContentProps) {
-  const lastActive = formatRelativeTime(node.lastActiveAt ?? null);
+  const joined = fmtDate(node.joinedAt ?? null);
+  const lastSeen = formatRelativeTime(node.lastActiveAt ?? null);
 
   return (
     <>
@@ -234,9 +242,10 @@ export function MemberPopoverContent({
       </div>
 
       {/* Details */}
-      {(lastActive || node.location) && (
+      {(joined || lastSeen || node.location) && (
         <div className="space-y-1 text-sm text-muted-foreground text-center">
-          {lastActive && <div>{lastActive}</div>}
+          {joined && <div>Joined {joined}</div>}
+          {lastSeen && <div>{lastSeen}</div>}
           {node.location && <div>{node.location}</div>}
         </div>
       )}

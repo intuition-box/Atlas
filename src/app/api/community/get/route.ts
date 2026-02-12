@@ -42,6 +42,7 @@ type CommunityGetOk = {
     headline: string | null;
     tags: string[] | null;
     lastActiveAt: Date | null;
+    joinedAt: Date;
   }>;
 };
 
@@ -174,6 +175,7 @@ export async function GET(req: NextRequest) {
               orbitLevel: true,
               reachScore: true,
               lastActiveAt: true,
+              createdAt: true,
               user: {
                 select: {
                   name: true,
@@ -209,6 +211,7 @@ export async function GET(req: NextRequest) {
             headline: m.user.headline,
             tags: (m.user.tags as unknown as string[] | null) ?? null,
             lastActiveAt: m.lastActiveAt,
+            joinedAt: m.createdAt,
           }));
         })()
       : [];

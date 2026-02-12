@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { SessionProvider, useSession } from "next-auth/react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { ROUTES, isPublicRoute, isOnboardingRoute } from "@/lib/routes";
-import { resetCsrf, initCsrfVisibilityRefresh } from "@/lib/api/client";
+import { apiPost, resetCsrf, initCsrfVisibilityRefresh } from "@/lib/api/client";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { NavigationProvider } from "@/components/navigation/navigation-provider";
 import { AttestationQueueProvider } from "@/components/attestation/queue-provider";
@@ -40,6 +40,66 @@ function CsrfManager({ children }: { children: React.ReactNode }) {
 
     prevSessionIdRef.current = currentSessionId;
   }, [session?.user?.id, status]);
+
+  return <>{children}</>;
+}
+
+/** Interval between heartbeat pings (5 minutes). */
+const HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000;
+
+/**
+ * Periodically pings POST /api/user/heartbeat to keep `User.lastActiveAt`
+ * (and `Membership.lastActiveAt`) fresh. Pauses when the tab is hidden and
+ * resumes immediately when it becomes visible again.
+ */
+function HeartbeatManager({ children }: { children: React.ReactNode }) {
+  const { status } = useSession();
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const ping = useCallback(() => {
+    // Fire-and-forget — we don't care about the response.
+    void apiPost("/api/user/heartbeat", {});
+  }, []);
+
+  useEffect(() => {
+    if (status !== "authenticated") return;
+
+    // Ping immediately on mount / when session becomes authenticated.
+    ping();
+
+    function start() {
+      if (intervalRef.current) return;
+      intervalRef.current = setInterval(ping, HEARTBEAT_INTERVAL_MS);
+    }
+
+    function stop() {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    }
+
+    function handleVisibility() {
+      if (document.visibilityState === "visible") {
+        ping();
+        start();
+      } else {
+        stop();
+      }
+    }
+
+    // Start interval if tab is already visible.
+    if (document.visibilityState === "visible") {
+      start();
+    }
+
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [status, ping]);
 
   return <>{children}</>;
 }
@@ -125,15 +185,17 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <SessionProvider refetchOnWindowFocus={true} refetchInterval={0}>
       <CsrfManager>
-        <GlobalListeners>
-          <TooltipProvider delay={300}>
-            <NavigationProvider>
-              <AttestationQueueProvider>
-                <OnboardingGuard>{children}</OnboardingGuard>
-              </AttestationQueueProvider>
-            </NavigationProvider>
-          </TooltipProvider>
-        </GlobalListeners>
+        <HeartbeatManager>
+          <GlobalListeners>
+            <TooltipProvider delay={300}>
+              <NavigationProvider>
+                <AttestationQueueProvider>
+                  <OnboardingGuard>{children}</OnboardingGuard>
+                </AttestationQueueProvider>
+              </NavigationProvider>
+            </TooltipProvider>
+          </GlobalListeners>
+        </HeartbeatManager>
       </CsrfManager>
     </SessionProvider>
   );

@@ -18,6 +18,7 @@ export type OrbitMember = {
   loveScore: number;
   reachScore: number;
   lastActiveAt?: string | null;
+  joinedAt?: string | null;
 };
 
 export type MemberLink = {
@@ -42,6 +43,7 @@ export interface SimulatedNode extends SimulationNodeDatum {
   loveScore: number;
   reachScore: number;
   lastActiveAt?: string | null;
+  joinedAt?: string | null;
   radius: number;
   color: string;
   /** Position on the ellipse as fraction of total perimeter (0–1) */
