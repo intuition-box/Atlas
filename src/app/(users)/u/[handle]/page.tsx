@@ -8,8 +8,15 @@ import { apiGet } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
 import { normalizeHandle, validateHandle } from "@/lib/handle"
 
+import { userPath, userSettingsPath } from "@/lib/routes"
+
+import { PageHeader } from "@/components/common/page-header"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Skeleton } from "@/components/ui/skeleton"
 
 type UserGetResponse = {
   user: {
@@ -25,13 +32,13 @@ type UserGetResponse = {
     skills: string[] | null
     tags: string[] | null
     createdAt: string
+    lastActiveAt: string | null
   }
   isSelf: boolean
   attestations: Array<{
     id: string
-    communityId: string
     type: string
-    note: string | null
+    confidence: number | null
     createdAt: string
     fromUser: {
       id: string
@@ -39,11 +46,6 @@ type UserGetResponse = {
       handle: string | null
       image: string | null
       avatarUrl: string | null
-    }
-    community: {
-      id: string
-      name: string
-      handle: string | null
     }
   }>
 }
@@ -70,6 +72,22 @@ function fmtDate(iso: string) {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ""
   return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
+}
+
+function formatRelativeTime(iso: string | null): string | null {
+  if (!iso) return null
+  const ts = Date.parse(iso)
+  if (!Number.isFinite(ts)) return null
+
+  const diff = Date.now() - ts
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24))
+
+  if (days === 0) return "Today"
+  if (days === 1) return "Yesterday"
+  if (days < 7) return `${days} days ago`
+  if (days < 30) return `${Math.floor(days / 7)} weeks ago`
+  if (days < 365) return `${Math.floor(days / 30)} months ago`
+  return `${Math.floor(days / 365)} years ago`
 }
 
 function safeUrl(input: string) {
@@ -132,39 +150,57 @@ export default function UserProfilePage() {
 
   if (state.status === "loading" || state.status === "idle") {
     return (
-      <main className="mx-auto w-full max-w-3xl px-4 py-10">
-        <div className="flex items-start gap-4">
-          <div className="bg-muted h-16 w-16 animate-pulse rounded-2xl" />
-          <div className="flex-1">
-            <div className="bg-muted h-6 w-56 animate-pulse rounded" />
-            <div className="bg-muted mt-2 h-4 w-32 animate-pulse rounded" />
-            <div className="bg-muted mt-3 h-4 w-72 animate-pulse rounded" />
-          </div>
-        </div>
-      </main>
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-10 pb-40">
+        {/* Header skeleton */}
+        <Card>
+          <CardContent className="flex items-center gap-4 px-5">
+            <Skeleton className="size-12 rounded-full" />
+            <div className="flex flex-col gap-2">
+              <Skeleton className="h-5 w-40" />
+              <Skeleton className="h-4 w-28" />
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Section skeletons */}
+        {[1, 2, 3].map((i) => (
+          <Card key={i}>
+            <CardContent className="flex flex-col gap-4 px-5">
+              <div className="flex flex-col gap-1">
+                <Skeleton className="h-4 w-24" />
+                <Skeleton className="h-3 w-56" />
+              </div>
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
     )
   }
 
   if (state.status === "not-found") {
     return (
-      <main className="mx-auto w-full max-w-3xl px-4 py-10">
-        <h1 className="text-lg font-semibold">User not found</h1>
-        <p className="text-muted-foreground mt-1 text-sm">We couldn’t find @{handle}.</p>
-      </main>
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-10 pb-40">
+        <Alert>
+          <AlertDescription>We couldn&apos;t find @{handle}.</AlertDescription>
+        </Alert>
+      </div>
     )
   }
 
   if (state.status === "error") {
     return (
-      <main className="mx-auto w-full max-w-3xl px-4 py-10">
-        <h1 className="text-lg font-semibold">Couldn't load profile</h1>
-        <p className="text-muted-foreground mt-1 text-sm">{state.message}</p>
-        <div className="mt-4">
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-10 pb-40">
+        <Alert variant="destructive">
+          <AlertDescription>{state.message}</AlertDescription>
+        </Alert>
+        <div>
           <Button type="button" variant="secondary" onClick={() => setState({ status: "idle" })}>
             Retry
           </Button>
         </div>
-      </main>
+      </div>
     )
   }
 
@@ -183,86 +219,84 @@ export default function UserProfilePage() {
   const links = (user.links ?? []).map((l) => String(l || "").trim()).filter(Boolean)
 
   return (
-    <main className="mx-auto w-full max-w-3xl px-4 py-10">
-      <header className="flex items-start justify-between gap-4">
-        <div className="flex items-start gap-4">
-          <Avatar className="size-16 rounded-2xl">
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-10 pb-40">
+      <PageHeader
+        leading={
+          <Avatar className="h-12 w-12">
             <AvatarImage src={avatarSrc} alt={displayName} />
-            <AvatarFallback className="rounded-2xl">{initials(displayName)}</AvatarFallback>
+            <AvatarFallback>{initials(displayName)}</AvatarFallback>
           </Avatar>
+        }
+        title={displayName}
+        description={userPath(handleLabel)}
+        sticky={false}
+        actions={
+          isSelf ? (
+            <Button type="button" variant="secondary">
+              <Link href={userSettingsPath(handleLabel)}>Edit profile</Link>
+            </Button>
+          ) : null
+        }
+        actionsAsFormActions={false}
+      />
 
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate text-2xl font-semibold tracking-tight">{displayName}</h1>
-            <p className="text-muted-foreground mt-1 text-sm">@{handleLabel}</p>
+      <Card>
+        <CardHeader>
+          <CardTitle>About</CardTitle>
+        </CardHeader>
+        <CardContent className="px-5">
+          <div className="flex flex-col gap-3">
+            {/* Row 1: Joined + Last Active */}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-lg border border-border/60 p-3">
+                <div className="text-xs font-medium text-foreground/70">Joined</div>
+                <div className="mt-1 text-sm text-foreground/80">{fmtDate(user.createdAt)}</div>
+              </div>
 
-            {user.headline ? (
-              <p className="text-muted-foreground mt-1 text-sm">{user.headline}</p>
+              <div className="rounded-lg border border-border/60 p-3">
+                <div className="text-xs font-medium text-foreground/70">Last seen</div>
+                <div className="mt-1 text-sm text-foreground/80">
+                  {formatRelativeTime(user.lastActiveAt) ?? "Never"}
+                </div>
+              </div>
+            </div>
+
+            {/* Row 2: Headline + Location (conditional) */}
+            {(user.headline || user.location) ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {user.headline ? (
+                  <div className="rounded-lg border border-border/60 p-3">
+                    <div className="text-xs font-medium text-foreground/70">Headline</div>
+                    <div className="mt-1 text-sm text-foreground/80">{user.headline}</div>
+                  </div>
+                ) : null}
+
+                {user.location ? (
+                  <div className="rounded-lg border border-border/60 p-3">
+                    <div className="text-xs font-medium text-foreground/70">Location</div>
+                    <div className="mt-1 text-sm text-foreground/80">{user.location}</div>
+                  </div>
+                ) : null}
+              </div>
             ) : null}
 
-            <p className="text-muted-foreground mt-3 text-xs">Joined {fmtDate(user.createdAt)}</p>
+            {/* Row 3: Bio (full width) */}
+            {user.bio ? (
+              <div className="rounded-lg border border-border/60 p-3">
+                <div className="text-xs font-medium text-foreground/70">Bio</div>
+                <div className="mt-1 whitespace-pre-wrap text-sm text-foreground/80">{user.bio}</div>
+              </div>
+            ) : null}
           </div>
-        </div>
-
-        {isSelf ? (
-          <Button type="button" variant="secondary">
-            <Link href={`/u/${handleLabel}/settings`}>Edit profile</Link>
-          </Button>
-        ) : null}
-      </header>
-
-      <section className="mt-6 rounded-xl border border-border p-4">
-        <h2 className="text-sm font-medium text-foreground/80">Profile</h2>
-
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-          <div className="rounded-lg border border-border/60 p-3">
-            <div className="text-xs font-medium text-foreground/70">Handle</div>
-            <div className="mt-1 text-sm text-foreground/80">@{handleLabel}</div>
-          </div>
-
-          {user.location ? (
-            <div className="rounded-lg border border-border/60 p-3">
-              <div className="text-xs font-medium text-foreground/70">Location</div>
-              <div className="mt-1 text-sm text-foreground/80">{user.location}</div>
-            </div>
-          ) : null}
-
-          {user.headline ? (
-            <div className="rounded-lg border border-border/60 p-3 sm:col-span-2">
-              <div className="text-xs font-medium text-foreground/70">Headline</div>
-              <div className="mt-1 text-sm text-foreground/80">{user.headline}</div>
-            </div>
-          ) : null}
-
-          <div className="rounded-lg border border-border/60 p-3">
-            <div className="text-xs font-medium text-foreground/70">Joined</div>
-            <div className="mt-1 text-sm text-foreground/80">{fmtDate(user.createdAt)}</div>
-          </div>
-        </div>
-      </section>
-      {skills.length ? (
-        <section className="mt-6 rounded-xl border border-border p-4">
-          <h2 className="text-sm font-medium text-foreground/80">Skills</h2>
-          <div className="mt-3 flex flex-wrap gap-2 text-xs">
-            {skills.map((s) => (
-              <span key={s} className="rounded-full border border-border px-2 py-1 text-foreground/70">
-                {s}
-              </span>
-            ))}
-          </div>
-        </section>
-      ) : null}
-
-      {user.bio ? (
-        <section className="mt-6 rounded-xl border border-border p-4">
-          <h2 className="text-sm font-medium text-foreground/80">About</h2>
-          <p className="mt-2 whitespace-pre-wrap text-sm text-foreground/80">{user.bio}</p>
-        </section>
-      ) : null}
+        </CardContent>
+      </Card>
 
       {links.length ? (
-        <section className="mt-6 rounded-xl border border-border p-4">
-          <h2 className="text-sm font-medium text-foreground/80">Links</h2>
-          <div className="mt-3 space-y-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Links</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 px-5">
             {links.map((l) => {
               const href = safeUrl(l)
               return href ? (
@@ -281,76 +315,79 @@ export default function UserProfilePage() {
                 </div>
               )
             })}
-          </div>
-        </section>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {skills.length ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Skills</CardTitle>
+          </CardHeader>
+          <CardContent className="px-5">
+            <div className="flex flex-wrap gap-2">
+              {skills.map((s) => (
+                <Badge key={s} variant="secondary">{s}</Badge>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       ) : null}
 
       {tags.length ? (
-        <section className="mt-6 rounded-xl border border-border p-4">
-          <h2 className="text-sm font-medium text-foreground/80">Tools of the trade</h2>
-          <div className="mt-3 flex flex-wrap gap-2 text-xs">
-            {tags.map((t) => (
-              <span key={t} className="rounded-full border border-border px-2 py-1 text-foreground/70">
-                {t}
-              </span>
-            ))}
-          </div>
-        </section>
+        <Card>
+          <CardHeader>
+            <CardTitle>Tools of the trade</CardTitle>
+          </CardHeader>
+          <CardContent className="px-5">
+            <div className="flex flex-wrap gap-2">
+              {tags.map((t) => (
+                <Badge key={t} variant="secondary">{t}</Badge>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       ) : null}
 
-      <section className="mt-6 rounded-xl border border-border p-4">
-        <h2 className="text-sm font-medium text-foreground/80">Attestations</h2>
+      <Card>
+        <CardHeader>
+          <CardTitle>Attestations</CardTitle>
+        </CardHeader>
+        <CardContent className="px-5">
+          {attestations.length === 0 ? (
+            <Alert>
+              <AlertDescription>No attestations yet.</AlertDescription>
+            </Alert>
+          ) : (
+            <div className="space-y-3">
+              {attestations.map((a) => {
+                const fromName = a.fromUser.name?.trim() || a.fromUser.handle || "Unknown"
+                const fromAvatar = a.fromUser.avatarUrl || a.fromUser.image || ""
 
-        {attestations.length === 0 ? (
-          <p className="mt-2 text-sm text-foreground/60">No attestations yet.</p>
-        ) : (
-          <div className="mt-3 space-y-3">
-            {attestations.map((a) => {
-              const fromName = a.fromUser.name?.trim() || a.fromUser.handle || "Unknown"
-              const fromAvatar = a.fromUser.avatarUrl || a.fromUser.image || ""
+                return (
+                  <div key={a.id} className="rounded-lg border border-border/60 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <Avatar className="size-7">
+                          <AvatarImage src={fromAvatar} alt={fromName} />
+                          <AvatarFallback>{initials(fromName)}</AvatarFallback>
+                        </Avatar>
 
-              return (
-                <div key={a.id} className="rounded-lg border border-border p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <Avatar className="size-7">
-                        <AvatarImage src={fromAvatar} alt={fromName} />
-                        <AvatarFallback>{initials(fromName)}</AvatarFallback>
-                      </Avatar>
-
-                      <div className="min-w-0 text-sm">
-                        <span className="font-medium text-foreground">{fromName}</span>
-                        <span className="text-foreground/60"> · {a.type}</span>
+                        <div className="min-w-0 text-sm">
+                          <span className="font-medium text-foreground">{fromName}</span>
+                          <span className="text-foreground/60"> · {a.type}</span>
+                        </div>
                       </div>
+
+                      <div className="shrink-0 text-xs text-foreground/60">{fmtDate(a.createdAt)}</div>
                     </div>
-
-                    <div className="shrink-0 text-xs text-foreground/60">{fmtDate(a.createdAt)}</div>
                   </div>
-
-                  {a.note ? <p className="mt-2 text-sm text-foreground/80">{a.note}</p> : null}
-
-                  <div className="mt-2 text-xs text-foreground/60">
-                    {a.community.handle ? (
-                      <span>
-                        In:{" "}
-                        <Link
-                          href={`/c/${a.community.handle}`}
-                          className="underline underline-offset-2 hover:text-foreground"
-                        >
-                          {a.community.name}
-                        </Link>{" "}
-                        <span className="text-foreground/60">@{a.community.handle}</span>
-                      </span>
-                    ) : (
-                      <span>In: {a.community.name}</span>
-                    )}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </section>
-    </main>
+                )
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   )
 }

@@ -1,8 +1,8 @@
 import "server-only";
 
 import { errJson, okJson } from "@/lib/api/server";
-import { db } from "@/lib/db/client";
 import { requireAuth } from "@/lib/auth/policy";
+import { db } from "@/lib/db/client";
 import { putR2Object, signR2Upload } from "@/lib/r2";
 import { requireCsrf } from "@/lib/security/csrf";
 import { MembershipRole } from "@prisma/client";
@@ -67,29 +67,6 @@ function zodIssuesToApiIssues(
     path: iss.path.map((seg) => (typeof seg === "number" ? seg : String(seg))),
     message: iss.message,
   }));
-}
-
-async function persistLatestAvatarUrl(args: {
-  type: z.infer<typeof UploadTypeSchema>;
-  userId: string;
-  communityId: string | null;
-  publicUrl: string;
-}) {
-  if (args.type === "user.avatar") {
-    await db.user.update({
-      where: { id: args.userId },
-      data: { avatarUrl: args.publicUrl },
-    });
-    return;
-  }
-
-  if (args.type === "community.avatar") {
-    if (!args.communityId) return;
-    await db.community.update({
-      where: { id: args.communityId },
-      data: { avatarUrl: args.publicUrl },
-    });
-  }
 }
 
 export async function POST(req: NextRequest) {
@@ -198,13 +175,6 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      await persistLatestAvatarUrl({
-        type: input.type,
-        userId,
-        communityId,
-        publicUrl,
-      });
-
       return okJson({
         publicUrl,
         upload: {
@@ -290,13 +260,6 @@ export async function POST(req: NextRequest) {
         status: 500,
       });
     }
-
-    await persistLatestAvatarUrl({
-      type: input.type,
-      userId,
-      communityId,
-      publicUrl,
-    });
 
     return okJson({
       publicUrl,

@@ -5,16 +5,20 @@ import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useParams, useRouter } from "next/navigation"
 import { getSession } from "next-auth/react"
-
 import { apiGet, apiPost } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
+import { communityPath, communitySettingsPath } from "@/lib/routes"
 
 import { AvatarDropzone } from "@/components/common/avatar-dropzone"
+import { HandleField } from "@/components/common/handle-field"
 import { PageHeader } from "@/components/common/page-header"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
-import { Form, FormActions, FormField, FormMessage, fieldControlProps, useForm } from "@/components/ui/form"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Form, FormActions, FormField, fieldControlProps, useForm } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
@@ -33,6 +37,7 @@ const ApplicationQuestionSchema = z.object({
 })
 
 const CommunitySettingsSchema = z.object({
+  handle: z.string().trim().min(1, "Handle is required"),
   name: z.string().trim().min(1, "Name is required").max(80, "Name is too long"),
   description: z.string().max(2000, "Description is too long"),
   avatarUrl: z.string().url("Enter a valid image URL").optional().or(z.literal("")),
@@ -66,10 +71,6 @@ type CommunityUpdateResponse = {
   }
 }
 
-type UploadSignResponse = {
-  upload: { uploadUrl: string; publicUrl: string; key: string }
-}
-
 // === UTILITY FUNCTIONS ===
 
 function generateQuestionId(): string {
@@ -78,10 +79,6 @@ function generateQuestionId(): string {
   } catch {
     return `q_${Date.now()}_${Math.random().toString(16).slice(2)}`
   }
-}
-
-function normalizeHandle(value: unknown): string {
-  return String(value ?? "").trim().toLowerCase()
 }
 
 function optionalString(value: string | undefined | null): string | undefined {
@@ -187,6 +184,39 @@ function useCommunityData(handle: string) {
   return { community, loading, error }
 }
 
+// === LOADING SKELETON ===
+
+function SettingsSkeleton() {
+  return (
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-10 pb-40">
+      {/* Header skeleton */}
+      <Card>
+        <CardContent className="flex items-center gap-4 px-5">
+          <Skeleton className="size-12 rounded-full" />
+          <div className="flex flex-col gap-2">
+            <Skeleton className="h-5 w-36" />
+            <Skeleton className="h-4 w-28" />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Section skeletons */}
+      {[1, 2, 3, 4].map((i) => (
+        <Card key={i}>
+          <CardContent className="flex flex-col gap-4 px-5">
+            <div className="flex flex-col gap-1">
+              <Skeleton className="h-4 w-24" />
+              <Skeleton className="h-3 w-56" />
+            </div>
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  )
+}
+
 // === COMPONENT ===
 
 export default function CommunitySettingsPage() {
@@ -200,6 +230,7 @@ export default function CommunitySettingsPage() {
   const form = useForm<CommunitySettingsValues>({
     resolver: zodResolver(CommunitySettingsSchema),
     defaultValues: {
+      handle: "",
       name: "",
       description: "",
       avatarUrl: "",
@@ -232,7 +263,7 @@ export default function CommunitySettingsPage() {
     }
 
     if (ownerHandle && sessionUser.handle) {
-      return normalizeHandle(ownerHandle) === normalizeHandle(sessionUser.handle)
+      return ownerHandle.trim().toLowerCase() === sessionUser.handle.trim().toLowerCase()
     }
 
     return null
@@ -252,6 +283,7 @@ export default function CommunitySettingsPage() {
 
     form.reset(
       {
+        handle: community.handle ?? "",
         name: community.name ?? "",
         description: community.description ?? "",
         avatarUrl: community.avatarUrl ?? "",
@@ -280,6 +312,7 @@ export default function CommunitySettingsPage() {
 
     const payload = {
       communityId: community.id,
+      handle: values.handle.trim(),
       name: optionalString(values.name)!,
       description: optionalString(values.description) ?? null,
       avatarUrl: optionalString(values.avatarUrl) ?? null,
@@ -301,6 +334,10 @@ export default function CommunitySettingsPage() {
     const result = await apiPost<CommunityUpdateResponse>("/api/community/update", payload)
 
     if (result.ok) {
+      const newHandle = result.value.community.handle
+      if (newHandle && newHandle !== communityHandle) {
+        router.replace(communitySettingsPath(newHandle))
+      }
       router.refresh()
       return
     }
@@ -314,29 +351,41 @@ export default function CommunitySettingsPage() {
       }
     }
 
-    form.setError("root", {
-      type: "server",
-      message: parsed.formError || "We couldn't update this community. Try again.",
-    })
+    if (!parsed.formError && parsed.fieldErrors.handle) {
+      // Don't show a generic root error when the handle field already shows the issue.
+    } else {
+      form.setError("root", {
+        type: "server",
+        message: parsed.formError || "We couldn't update this community. Try again.",
+      })
+    }
   }
 
-  async function handleAvatarSign(file: File) {
-    const signed = await apiPost<UploadSignResponse>("/api/upload/sign", {
-      type: "community.avatar",
-      contentType: file.type,
-      size: file.size,
-    })
+  async function handleAvatarUpload(file: File): Promise<{ publicUrl: string }> {
+    const fd = new FormData()
+    fd.set("file", file)
+    fd.set("filename", file.name)
+    fd.set("contentType", file.type || "application/octet-stream")
+    fd.set("size", String(file.size))
+    fd.set("type", "community.avatar")
+    if (community?.id) fd.set("communityId", community.id)
 
-    if (!signed.ok) {
-      const err = signed.error
-      const parsed = parseApiError(err)
+    const resp = await fetch("/api/upload/sign", { method: "POST", body: fd })
+    const json = await resp.json().catch(() => null)
+
+    if (!resp.ok || !json?.ok) {
+      const parsed = parseApiError(json?.error ?? json)
       throw new Error(parsed.formError || "Couldn't upload avatar.")
     }
 
-    return {
-      uploadUrl: signed.value.upload.uploadUrl,
-      publicUrl: signed.value.upload.publicUrl,
-    }
+    const publicUrl =
+      json.data?.publicUrl ??
+      json.data?.upload?.publicUrl ??
+      json.publicUrl
+
+    if (!publicUrl) throw new Error("Upload completed but public URL is missing.")
+
+    return { publicUrl }
   }
 
   function handleAvatarError(message: string) {
@@ -366,42 +415,46 @@ export default function CommunitySettingsPage() {
 
   if (!communityHandle) return null
 
+  if (isLoading) {
+    return <SettingsSkeleton />
+  }
+
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-4 py-10">
-      <Form form={form} onSubmit={handleSubmit} className="flex flex-col gap-10">
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-10 pb-40">
+      <Form form={form} onSubmit={handleSubmit} className="flex flex-col gap-6">
         <PageHeader
           leading={
             <Avatar className="h-12 w-12">
-              <AvatarImage src={community?.avatarUrl ?? undefined} alt={communityName} />
+              <AvatarImage src={form.watch("avatarUrl") || community?.avatarUrl || undefined} alt={communityName} />
               <AvatarFallback><UsersIcon /></AvatarFallback>
             </Avatar>
           }
           title="Settings"
-          description={`/c/${communityHandle}`}
+          description={communityPath(communityHandle)}
           actions={
             <FormActions className="flex items-center gap-3">
-              <Button type="button" variant="secondary" onClick={() => router.replace(`/c/${communityHandle}`)}>
+              <Button type="button" variant="secondary" onClick={() => router.replace(communityPath(communityHandle))}>
                 Cancel
               </Button>
               <Button type="submit" disabled={isLoading || !community || form.formState.isSubmitting}>
-                {form.formState.isSubmitting ? "Saving…" : "Save changes"}
+                {form.formState.isSubmitting ? "Saving…" : "Save"}
               </Button>
             </FormActions>
           }
         />
 
-        {rootError && (
-          <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4">
-            <FormMessage className="text-destructive">{rootError}</FormMessage>
-          </div>
-        )}
+        {rootError ? (
+          <Alert variant="destructive">
+            <AlertDescription>{rootError}</AlertDescription>
+          </Alert>
+        ) : null}
 
         <ProfileSection
           form={form}
           community={community}
           communityName={communityName}
-          communityHandle={communityHandle}
-          onAvatarSign={handleAvatarSign}
+          currentHandle={communityHandle}
+          onAvatarUpload={handleAvatarUpload}
           onAvatarError={handleAvatarError}
         />
 
@@ -413,13 +466,14 @@ export default function CommunitySettingsPage() {
           onAddQuestion={handleAddQuestion}
         />
 
-        <DangerZoneSection
-          deleteConfirm={deleteConfirm}
-          onDeleteConfirmChange={setDeleteConfirm}
-          onDeleteClick={handleDeleteClick}
-        />
       </Form>
-    </main>
+
+      <DangerZoneSection
+        deleteConfirm={deleteConfirm}
+        onDeleteConfirmChange={setDeleteConfirm}
+        onDeleteClick={handleDeleteClick}
+      />
+    </div>
   )
 }
 
@@ -429,59 +483,66 @@ function ProfileSection({
   form,
   community,
   communityName,
-  communityHandle,
-  onAvatarSign,
+  currentHandle,
+  onAvatarUpload,
   onAvatarError,
 }: {
   form: ReturnType<typeof useForm<CommunitySettingsValues>>
   community: CommunityGetResponse["community"] | null
   communityName: string
-  communityHandle: string
-  onAvatarSign: (file: File) => Promise<{ uploadUrl: string; publicUrl: string }>
+  currentHandle: string
+  onAvatarUpload: (file: File) => Promise<{ publicUrl: string }>
   onAvatarError: (message: string) => void
 }) {
-  const avatarFallback = String(form.watch("name") || communityName || "?").slice(0, 1).toUpperCase()
+  const watchedName = form.watch("name")
 
   return (
-    <section className="rounded-xl border border-border p-4">
-      <h2 className="text-sm font-medium text-foreground/80">Profile</h2>
-      <p className="mt-1 text-xs text-muted-foreground">Basic details people see on the community page.</p>
+    <Card>
+      <CardHeader>
+        <CardTitle>Profile</CardTitle>
+        <CardDescription>Basic details people see on the community page.</CardDescription>
+      </CardHeader>
 
-      <div className="mt-4 flex flex-col gap-6">
+      <CardContent className="flex flex-col gap-6 px-5">
         <Field data-slot="community-settings-avatar" name="avatarUrl" invalid={!!form.formState.errors.avatarUrl}>
           <FieldLabel>Avatar</FieldLabel>
-          <FieldDescription>Drop an image on the avatar to replace it.</FieldDescription>
 
-          <AvatarDropzone
-            value={String(form.watch("avatarUrl") || "") || null}
-            alt="Community avatar"
-            fallback={avatarFallback}
-            onChange={(url) => {
-              form.clearErrors("root")
-              form.setValue("avatarUrl", url ?? "", { shouldDirty: true, shouldTouch: true })
-            }}
-            sign={onAvatarSign}
-            onError={onAvatarError}
-          />
+          <div className="flex justify-center rounded-xl border border-dashed border-border p-6">
+            <AvatarDropzone
+              value={String(form.watch("avatarUrl") || "") || null}
+              alt="Community avatar"
+              className="flex flex-col items-center text-center"
+              upload={onAvatarUpload}
+              onChange={(url) => {
+                form.clearErrors("root")
+                form.setValue("avatarUrl", url ?? "", { shouldDirty: true, shouldTouch: true })
+              }}
+              onError={onAvatarError}
+            />
+          </div>
 
           {form.formState.errors.avatarUrl?.message && (
             <FieldError>{String(form.formState.errors.avatarUrl.message)}</FieldError>
           )}
         </Field>
 
-        <div className="grid gap-4">
-          <div className="rounded-lg border border-border/60 p-3">
-            <div className="text-xs font-medium text-foreground/70">Handle</div>
-            <div className="mt-1 text-sm text-foreground/80">/c/{communityHandle}</div>
-            <div className="mt-2 text-xs text-muted-foreground">
-              Handle renaming can be added later.
-              <span className="block mt-1">
-                When we support changing it: the old URL should return 404 immediately (no redirects), and the old
-                handle may be reclaimable for a limited time.
-              </span>
-            </div>
-          </div>
-        </div>
+        <FormField<CommunitySettingsValues, "handle">
+          name="handle"
+          label="Handle"
+          required
+          description="The old URL will return 404 immediately after a rename. The old handle may be reclaimable for a limited time."
+          render={({ id, field, fieldState }) => (
+            <HandleField
+              id={id}
+              field={field}
+              fieldState={fieldState}
+              nameValue={watchedName}
+              currentHandle={currentHandle}
+              ownerType="COMMUNITY"
+              ownerId={community?.id}
+            />
+          )}
+        />
 
         <FormField<CommunitySettingsValues, "name">
           name="name"
@@ -504,20 +565,20 @@ function ProfileSection({
             />
           )}
         />
-      </div>
-    </section>
+      </CardContent>
+    </Card>
   )
 }
 
 function PrivacySection({ form }: { form: ReturnType<typeof useForm<CommunitySettingsValues>> }) {
   return (
-    <section className="rounded-xl border border-border p-4">
-      <h2 className="text-sm font-medium text-foreground/80">Privacy & access</h2>
-      <p className="mt-1 text-xs text-muted-foreground">
-        Control what non-members can see and whether applications are allowed.
-      </p>
+    <Card>
+      <CardHeader>
+        <CardTitle>Privacy & access</CardTitle>
+        <CardDescription>Control what non-members can see and whether applications are allowed.</CardDescription>
+      </CardHeader>
 
-      <div className="mt-4 flex flex-col gap-4">
+      <CardContent className="flex flex-col gap-4 px-5">
         <FormField<CommunitySettingsValues, "isPublicDirectory">
           name="isPublicDirectory"
           label="Public directory"
@@ -549,8 +610,8 @@ function PrivacySection({ form }: { form: ReturnType<typeof useForm<CommunitySet
             </div>
           )}
         />
-      </div>
-    </section>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -564,13 +625,13 @@ function ApplicationQuestionsSection({
   onAddQuestion: () => void
 }) {
   return (
-    <section className="rounded-xl border border-border p-4">
-      <h2 className="text-sm font-medium text-foreground/80">Application questions</h2>
-      <p className="mt-1 text-xs text-muted-foreground">
-        These questions appear on the apply page when applications are open. Keep them short and focused.
-      </p>
+    <Card>
+      <CardHeader>
+        <CardTitle>Application questions</CardTitle>
+        <CardDescription>These questions appear on the apply page when applications are open. Keep them short and focused.</CardDescription>
+      </CardHeader>
 
-      <div className="mt-4 flex flex-col gap-4">
+      <CardContent className="flex flex-col gap-4 px-5">
         {questions.fields.length > 0 ? (
           <div className="flex flex-col gap-3">
             {questions.fields.map((q, index) => (
@@ -583,9 +644,9 @@ function ApplicationQuestionsSection({
             ))}
           </div>
         ) : (
-          <div className="rounded-2xl border border-border/60 p-4 text-sm text-muted-foreground">
-            No application questions yet.
-          </div>
+          <Alert>
+            <AlertDescription>No application questions yet.</AlertDescription>
+          </Alert>
         )}
 
         <div>
@@ -593,8 +654,8 @@ function ApplicationQuestionsSection({
             + Add question
           </Button>
         </div>
-      </div>
-    </section>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -609,7 +670,6 @@ function QuestionField({
 }) {
   const base = `applicationQuestions.${index}` as const
   const errors = form.formState.errors.applicationQuestions?.[index]
-  const currentType = String(form.watch(`${base}.type` as const) || "text")
 
   return (
     <div className="rounded-2xl border border-border/60 p-4">
@@ -658,40 +718,43 @@ function QuestionField({
         </Field>
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field name={`${base}.type`} invalid={false}>
-            <FieldLabel>Answer type</FieldLabel>
-            <FieldDescription>Short or long answer.</FieldDescription>
-            <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                variant={currentType === "text" ? "default" : "secondary"}
-                className="h-9"
-                onClick={() => form.setValue(`${base}.type` as const, "text", { shouldDirty: true })}
-              >
-                Short
-              </Button>
-              <Button
-                type="button"
-                variant={currentType === "textarea" ? "default" : "secondary"}
-                className="h-9"
-                onClick={() => form.setValue(`${base}.type` as const, "textarea", { shouldDirty: true })}
-              >
-                Long
-              </Button>
-            </div>
-          </Field>
+          <FormField<CommunitySettingsValues, `applicationQuestions.${number}.type`>
+            name={`applicationQuestions.${index}.type`}
+            label="Answer type"
+            description="Short or long answer."
+            render={({ field }) => (
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant={field.value === "text" ? "default" : "secondary"}
+                  className="h-9"
+                  onClick={() => field.onChange("text")}
+                >
+                  Short
+                </Button>
+                <Button
+                  type="button"
+                  variant={field.value === "textarea" ? "default" : "secondary"}
+                  className="h-9"
+                  onClick={() => field.onChange("textarea")}
+                >
+                  Long
+                </Button>
+              </div>
+            )}
+          />
 
-          <Field name={`${base}.required`} invalid={false}>
-            <FieldLabel>Required</FieldLabel>
-            <FieldDescription>If on, applicants can't submit without answering.</FieldDescription>
-            <div className="flex items-center justify-between gap-3 rounded-2xl border border-border/60 p-4">
-              <div className="text-sm font-medium">Required</div>
-              <Switch
-                checked={!!form.watch(`${base}.required` as const)}
-                onCheckedChange={(v) => form.setValue(`${base}.required` as const, !!v, { shouldDirty: true })}
-              />
-            </div>
-          </Field>
+          <FormField<CommunitySettingsValues, `applicationQuestions.${number}.required`>
+            name={`applicationQuestions.${index}.required`}
+            label="Required"
+            description="If on, applicants can't submit without answering."
+            render={({ id, field }) => (
+              <div className="flex items-center justify-between gap-3 rounded-2xl border border-border/60 p-4">
+                <div className="text-sm font-medium">Required</div>
+                <Switch id={id} checked={!!field.value} onCheckedChange={field.onChange} />
+              </div>
+            )}
+          />
         </div>
 
         <Field name={`${base}.placeholder`} invalid={!!errors?.placeholder}>
@@ -726,41 +789,45 @@ function DangerZoneSection({
   onDeleteClick: () => void
 }) {
   return (
-    <section className="rounded-xl border border-border p-4">
-      <h2 className="text-sm font-medium text-foreground/80">Danger zone</h2>
-      <p className="mt-1 text-xs text-muted-foreground">Destructive actions. More actions can be wired later.</p>
+    <Card>
+      <CardHeader>
+        <CardTitle>Danger zone</CardTitle>
+        <CardDescription>Destructive actions. More actions can be wired later.</CardDescription>
+      </CardHeader>
 
-      <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-destructive/30 bg-destructive/5 p-4">
-        <div className="flex flex-col gap-1">
-          <div className="text-sm font-medium">Delete community</div>
-          <div className="text-xs text-muted-foreground">
-            This is permanent. Type <span className="font-medium">DELETE</span> to enable the button.
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-2">
-          <Input
-            placeholder="Type DELETE"
-            value={deleteConfirm}
-            onChange={(e) => onDeleteConfirmChange(e.target.value)}
-            aria-invalid={false}
-          />
-
-          <div className="flex items-center justify-between gap-3">
+      <CardContent className="px-5">
+        <div className="flex flex-col gap-3 rounded-2xl border border-destructive/30 bg-destructive/5 p-4">
+          <div className="flex flex-col gap-1">
+            <div className="text-sm font-medium">Delete community</div>
             <div className="text-xs text-muted-foreground">
-              Delete isn't wired yet — this will be hooked to an API route with an extra confirmation step.
+              This is permanent. Type <span className="font-medium">DELETE</span> to enable the button.
             </div>
-            <Button
-              type="button"
-              variant="destructive"
-              disabled={deleteConfirm.trim() !== "DELETE"}
-              onClick={onDeleteClick}
-            >
-              Delete
-            </Button>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <Input
+              placeholder="Type DELETE"
+              value={deleteConfirm}
+              onChange={(e) => onDeleteConfirmChange(e.target.value)}
+              aria-invalid={false}
+            />
+
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-xs text-muted-foreground">
+                Delete isn&apos;t wired yet — this will be hooked to an API route with an extra confirmation step.
+              </div>
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={deleteConfirm.trim() !== "DELETE"}
+                onClick={onDeleteClick}
+              >
+                Delete
+              </Button>
+            </div>
           </div>
         </div>
-      </div>
-    </section>
+      </CardContent>
+    </Card>
   )
 }

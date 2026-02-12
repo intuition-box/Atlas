@@ -15,6 +15,7 @@ import {
 
 import { UsersIcon, PlusIcon, FileTextIcon, CogIcon } from "@/components/ui/icons";
 import { apiGet } from "@/lib/api/client";
+import { communityMembersPath, communityApplyPath, communityApplicationsPath, communitySettingsPath } from "@/lib/routes";
 import { sounds } from "@/lib/sounds";
 import { useNavigation, useNavigationContext, type NavigationControls } from "@/components/navigation/navigation-provider";
 import {
@@ -473,14 +474,14 @@ export function OrbitScene({
     const { handle, isAdmin } = activeCommunity;
 
     const bottomLeft = [
-      { icon: UsersIcon, label: "Members", href: `/c/${handle}/members` },
-      { icon: PlusIcon, label: "Apply", href: `/c/${handle}/apply` },
+      { icon: UsersIcon, label: "Members", href: communityMembersPath(handle) },
+      { icon: PlusIcon, label: "Apply", href: communityApplyPath(handle) },
     ];
 
     const bottomRight = isAdmin
       ? [
-          { icon: FileTextIcon, label: "Applications", href: `/c/${handle}/applications` },
-          { icon: CogIcon, label: "Settings", href: `/c/${handle}/settings` },
+          { icon: FileTextIcon, label: "Applications", href: communityApplicationsPath(handle) },
+          { icon: CogIcon, label: "Settings", href: communitySettingsPath(handle) },
         ]
       : [];
 

@@ -5,7 +5,7 @@ import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 
 import { apiGet } from "@/lib/api/client"
-import { ROUTES, userPath } from "@/lib/routes"
+import { ROUTES, userPath, communityPath } from "@/lib/routes"
 import { COUNTRIES } from "@/config/countries"
 import { SKILL_LIST as SKILLS, TOOL_LIST as TOOLS } from "@/lib/attestations/definitions"
 
@@ -894,7 +894,7 @@ export default function CommunityMembersPage() {
           </Avatar>
         }
         title="Members"
-        description={`/c/${communityHandle}`}
+        description={communityPath(communityHandle)}
         actions={
           <div className="flex items-center gap-2">
             <Tabs className="gap-0" value={view} onValueChange={(v) => setView(v === "list" ? "list" : "cards")}>

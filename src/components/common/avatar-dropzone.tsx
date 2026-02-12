@@ -205,11 +205,24 @@ function AvatarDropzone({
   const [isHovering, setIsHovering] = React.useState(false)
   const [isUploading, setIsUploading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
+  // Instant local preview via object URL — shown while the remote URL may still be loading/propagating.
+  const [localPreview, setLocalPreview] = React.useState<string | null>(null)
+  const localPreviewRef = React.useRef<string | null>(null)
+  localPreviewRef.current = localPreview
+
+  // Revoke the object URL on unmount.
+  React.useEffect(() => {
+    return () => {
+      if (localPreviewRef.current) URL.revokeObjectURL(localPreviewRef.current)
+    }
+  }, [])
 
   const normalizedSrc = React.useMemo(() => {
+    // Prefer the instant local preview when available.
+    if (localPreview) return localPreview
     const s = typeof value === "string" ? value.trim() : ""
     return s.length > 0 ? s : undefined
-  }, [value])
+  }, [value, localPreview])
 
   // Clear error when value changes (successful upload)
   React.useEffect(() => {
@@ -240,6 +253,14 @@ function AvatarDropzone({
       return
     }
 
+    // Show an instant local preview so the user sees their image right away,
+    // regardless of how long the upload or CDN propagation takes.
+    const objectUrl = URL.createObjectURL(file)
+    setLocalPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev)
+      return objectUrl
+    })
+
     setIsUploading(true)
     try {
       if (uploadMode === "proxy") {
@@ -258,6 +279,11 @@ function AvatarDropzone({
       await putFile(signed.uploadUrl, file, signed.headers)
       onChange(signed.publicUrl)
     } catch (e) {
+      // Upload failed — remove the preview.
+      setLocalPreview((prev) => {
+        if (prev) URL.revokeObjectURL(prev)
+        return null
+      })
       reportError(e instanceof Error ? e.message : "Upload failed.")
     } finally {
       setIsUploading(false)
@@ -352,7 +378,6 @@ function AvatarDropzone({
             alt={alt}
             // Some OAuth avatar hosts (e.g. Google) can be finicky with referrers.
             referrerPolicy="no-referrer"
-            crossOrigin="anonymous"
           />
           <AvatarFallback>
             {fallback ? <span className="text-sm font-medium">{fallback}</span> : <UserIcon />}

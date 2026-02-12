@@ -7,27 +7,28 @@ import { zodResolver } from "@hookform/resolvers/zod"
 
 import { apiGet, apiPost } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
+import { communityPath } from "@/lib/routes"
 
 import { PageHeader } from "@/components/common/page-header"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
-import { Form, FormActions, FormField, FormMessage, fieldControlProps, useForm } from "@/components/ui/form"
-import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
+import { Card, CardContent } from "@/components/ui/card"
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
+import { Form, FormActions, FormField, fieldControlProps, useForm } from "@/components/ui/form"
 import { UsersIcon } from "@/components/ui/icons"
-import { Spinner } from "@/components/ui/spinner"
+import { Input } from "@/components/ui/input"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Textarea } from "@/components/ui/textarea"
 
 // === TYPES ===
-
-type MembershipStatus = "PENDING" | "APPROVED" | "REJECTED" | "WITHDRAWN" | "BANNED"
 
 type CommunityApplicationQuestion = {
   id: string
   label: string
-  description: string | null
+  help: string | null
   required: boolean
-  kind: "input" | "textarea" | null
+  type: "text" | "textarea" | null
   placeholder: string | null
 }
 
@@ -36,10 +37,10 @@ type CommunityInfo = {
   handle: string
   name: string
   description?: string | null
-  image?: string | null
+  avatarUrl?: string | null
   isPublicDirectory: boolean
   isMembershipOpen: boolean
-  config?: unknown
+  membershipConfig?: unknown
 }
 
 type CommunityGetResponse = {
@@ -100,13 +101,13 @@ function parseQuestions(config: unknown): CommunityApplicationQuestion[] {
 
       if (!id || !label) return null
 
-      const description = typeof q.description === "string" ? q.description : null
+      const help = typeof q.help === "string" ? q.help : null
       const placeholder = typeof q.placeholder === "string" ? q.placeholder : null
       const required = q.required === true
-      const kind: CommunityApplicationQuestion["kind"] =
-        q.kind === "input" || q.kind === "textarea" ? q.kind : null
+      const type: CommunityApplicationQuestion["type"] =
+        q.type === "text" || q.type === "textarea" ? q.type : null
 
-      return { id, label, description, placeholder, required, kind }
+      return { id, label, help, placeholder, required, type }
     })
     .filter((q): q is CommunityApplicationQuestion => q !== null)
 }
@@ -248,7 +249,7 @@ function useCommunityData(handle: string) {
         const communityData = communityRes.value.community
         setCommunity(communityData)
 
-        const parsedQuestions = parseQuestions(communityData.config)
+        const parsedQuestions = parseQuestions(communityData.membershipConfig)
         setQuestions(parsedQuestions)
 
         const statusRes = await apiGet<MembershipStatusResponse>(
@@ -291,29 +292,12 @@ function useCommunityData(handle: string) {
 
 // === SUB-COMPONENTS ===
 
-function StatusBannerComponent({ banner }: { banner: StatusBanner }) {
-  const className =
-    banner.tone === "danger"
-      ? "rounded-2xl border border-destructive/30 bg-destructive/5 p-4"
-      : banner.tone === "success"
-        ? "rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4"
-        : "rounded-2xl border border-border/60 bg-muted/30 p-4"
-
+function StatusBannerAlert({ banner }: { banner: StatusBanner }) {
   return (
-    <div className={className}>
-      <div className="flex flex-col gap-1">
-        <div className="text-sm font-medium">{banner.title}</div>
-        <div className="text-sm text-muted-foreground">{banner.body}</div>
-      </div>
-    </div>
-  )
-}
-
-function InfoBox({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="rounded-2xl border border-border/60 bg-muted/20 p-6 text-sm text-muted-foreground">
-      {children}
-    </div>
+    <Alert variant={banner.tone === "danger" ? "destructive" : "default"}>
+      <AlertTitle>{banner.title}</AlertTitle>
+      <AlertDescription>{banner.body}</AlertDescription>
+    </Alert>
   )
 }
 
@@ -328,9 +312,9 @@ function ApplicationQuestions({
 }) {
   if (questions.length === 0) {
     return (
-      <div className="rounded-2xl border border-border/60 bg-muted/20 p-4 text-sm text-muted-foreground">
-        This community doesn't have any application questions yet.
-      </div>
+      <Alert>
+        <AlertDescription>This community doesn't have any application questions yet.</AlertDescription>
+      </Alert>
     )
   }
 
@@ -342,10 +326,9 @@ function ApplicationQuestions({
           name={q.id as any}
           label={q.label}
           required={!!q.required}
-          description={q.description ? q.description : undefined}
+          description={q.help ? q.help : undefined}
           render={({ id, field, fieldState }) => {
-            const kind = q.kind || "textarea"
-            return kind === "input" ? (
+            return q.type === "text" ? (
               <Input
                 {...fieldControlProps(field, { id, invalid: fieldState.invalid })}
                 value={String(field.value ?? "")}
@@ -483,7 +466,7 @@ export default function CommunityApplyPage() {
 
     if (result.ok) {
       router.refresh()
-      router.replace(`/c/${communityHandle}`)
+      router.replace(communityPath(communityHandle))
       return
     }
 
@@ -500,7 +483,7 @@ export default function CommunityApplyPage() {
   }
 
   function handleCancel() {
-    router.replace(`/c/${communityHandle}`)
+    router.replace(communityPath(communityHandle))
   }
 
   const rootError = form.formState.errors.root?.message
@@ -511,109 +494,129 @@ export default function CommunityApplyPage() {
 
   return (
     <main className="mx-auto flex w-full max-w-lg flex-col gap-8 px-4 py-10">
-      {rootError && (
-        <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4">
-          <FormMessage className="text-destructive">{rootError}</FormMessage>
-        </div>
-      )}
-
-      {statusBanner && <StatusBannerComponent banner={statusBanner} />}
-
       {loading ? (
-        <>
-          <PageHeader
-            title="Apply"
-            description={`/c/${communityHandle}`}
-            actions={
-              <Button type="button" variant="secondary" onClick={handleCancel}>
-                Back
-              </Button>
-            }
-          />
-          <InfoBox><Spinner /></InfoBox>
-        </>
+        <div className="flex flex-col gap-8">
+          {/* Header skeleton */}
+          <Card>
+            <CardContent className="flex items-center gap-4 px-5">
+              <Skeleton className="size-12 rounded-full" />
+              <div className="flex flex-col gap-2">
+                <Skeleton className="h-5 w-24" />
+                <Skeleton className="h-4 w-36" />
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Question skeletons */}
+          <Card>
+            <CardContent className="flex flex-col gap-4 px-5">
+              <div className="flex flex-col gap-1">
+                <Skeleton className="h-4 w-32" />
+                <Skeleton className="h-3 w-56" />
+              </div>
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+            </CardContent>
+          </Card>
+        </div>
       ) : !community ? (
         <>
           <PageHeader
             title="Apply"
-            description={`/c/${communityHandle}`}
+            description={communityPath(communityHandle)}
             actions={
               <Button type="button" variant="secondary" onClick={handleCancel}>
                 Back
               </Button>
             }
           />
-          <InfoBox>This community doesn't exist or is not available.</InfoBox>
+          <Alert>
+            <AlertDescription>This community doesn't exist or is not available.</AlertDescription>
+          </Alert>
         </>
       ) : !community.isPublicDirectory ? (
         <>
           <PageHeader
             leading={
               <Avatar className="h-12 w-12">
-                <AvatarImage src={community.image ?? undefined} alt={communityName} />
+                <AvatarImage src={community.avatarUrl ?? undefined} alt={communityName} />
                 <AvatarFallback>
                   <UsersIcon />
                 </AvatarFallback>
               </Avatar>
             }
             title="Apply"
-            description={`/c/${communityHandle}`}
+            description={communityPath(communityHandle)}
             actions={
               <Button type="button" variant="secondary" onClick={handleCancel}>
                 Back
               </Button>
             }
           />
-          <InfoBox>Applications are only available for communities listed publicly.</InfoBox>
+          <Alert>
+            <AlertDescription>Applications are only available for communities listed publicly.</AlertDescription>
+          </Alert>
         </>
       ) : !community.isMembershipOpen ? (
         <>
           <PageHeader
             leading={
               <Avatar className="h-12 w-12">
-                <AvatarImage src={community.image ?? undefined} alt={communityName} />
+                <AvatarImage src={community.avatarUrl ?? undefined} alt={communityName} />
                 <AvatarFallback>
                   <UsersIcon />
                 </AvatarFallback>
               </Avatar>
             }
             title="Apply"
-            description={`/c/${communityHandle}`}
+            description={communityPath(communityHandle)}
             actions={
               <Button type="button" variant="secondary" onClick={handleCancel}>
                 Back
               </Button>
             }
           />
-          <InfoBox>This community is not accepting applications right now.</InfoBox>
+          <Alert>
+            <AlertDescription>This community is not accepting applications right now.</AlertDescription>
+          </Alert>
         </>
       ) : (
         <Form form={form} onSubmit={handleSubmit} className="flex flex-col gap-10">
           <PageHeader
             leading={
               <Avatar className="h-12 w-12">
-                <AvatarImage src={community.image ?? undefined} alt={communityName} />
+                <AvatarImage src={community.avatarUrl ?? undefined} alt={communityName} />
                 <AvatarFallback><UsersIcon /></AvatarFallback>
               </Avatar>
             }
             title="Apply"
-            description={`/c/${communityHandle}`}
+            description={communityPath(communityHandle)}
             actions={
               <FormActions className="flex items-center gap-3">
-                <Button type="submit" disabled={!canApply || form.formState.isSubmitting}>
-                  {form.formState.isSubmitting ? "Submitting…" : "Submit"}
-                </Button>
                 <Button type="button" variant="secondary" onClick={handleCancel}>
                   Back
+                </Button>
+                <Button type="submit" disabled={!canApply || form.formState.isSubmitting}>
+                  {form.formState.isSubmitting ? "Submitting…" : "Submit"}
                 </Button>
               </FormActions>
             }
           />
 
-          <div className="flex flex-col gap-8">
-            <ApplicationQuestions questions={questions} canApply={canApply} form={form} />
-            <OptionalNoteField canApply={canApply} form={form} />
-          </div>
+          {statusBanner && <StatusBannerAlert banner={statusBanner} />}
+
+          {rootError && (
+            <Alert variant="destructive">
+              <AlertDescription>{rootError}</AlertDescription>
+            </Alert>
+          )}
+
+          <Card>
+            <CardContent className="flex flex-col gap-8 px-5">
+              <ApplicationQuestions questions={questions} canApply={canApply} form={form} />
+              <OptionalNoteField canApply={canApply} form={form} />
+            </CardContent>
+          </Card>
         </Form>
       )}
     </main>

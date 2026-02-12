@@ -88,6 +88,16 @@ export function communityDashboardPath(handle: string): string {
   return `/c/${encodeURIComponent(handle)}/dashboard`;
 }
 
+/** `/c/:handle/members` */
+export function communityMembersPath(handle: string): string {
+  return `/c/${encodeURIComponent(handle)}/members`;
+}
+
+/** `/c/:handle/applications` */
+export function communityApplicationsPath(handle: string): string {
+  return `/c/${encodeURIComponent(handle)}/applications`;
+}
+
 /** `/c/:handle/settings` */
 export function communitySettingsPath(handle: string): string {
   return `/c/${encodeURIComponent(handle)}/settings`;

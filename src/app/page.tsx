@@ -72,7 +72,7 @@ export default function Home() {
       ) : null}
 
       {loading ? (
-        <div className="pointer-events-none rounded-full border border-border bg-background/80 p-3 text-sm text-foreground/70 backdrop-blur">
+        <div className="pointer-events-none rounded-full w-4 h-4 border border-border bg-background/80 p-3 text-sm text-foreground/70 backdrop-blur">
           <Spinner />
         </div>
       ) : null}

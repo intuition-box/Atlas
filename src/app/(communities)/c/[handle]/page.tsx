@@ -13,7 +13,7 @@ import { CogIcon, FileTextIcon, PlusIcon, UsersIcon } from "@/components/ui/icon
 import { OrbitView } from "@/components/orbit/view";
 import type { OrbitMember, MemberLink } from "@/components/orbit/types";
 import { useNavigation, type NavigationControls } from "@/components/navigation/navigation-provider";
-import { userPath } from "@/lib/routes";
+import { userPath, communityMembersPath, communityApplyPath, communityApplicationsPath, communitySettingsPath, communityPath } from "@/lib/routes";
 import { Spinner } from "@/components/ui/spinner";
 
 /* ────────────────────────────
@@ -81,6 +81,7 @@ function parseMembers(raw: unknown[]): OrbitMember[] {
       location: (m?.location ?? null) as string | null,
       tags: Array.isArray(m?.tags) ? m.tags : [],
       lastActiveAt: (m?.lastActiveAt ?? null) as string | null,
+      joinedAt: (m?.joinedAt ?? null) as string | null,
     });
   }
 
@@ -258,14 +259,14 @@ function CommunityReadyState({
   // Build navigation controls based on context
   const navigationControls = React.useMemo<NavigationControls>(() => {
     const bottomLeft = [
-      { icon: UsersIcon, label: "Members", href: `/c/${communityHandle}/members` },
-      { icon: PlusIcon, label: "Apply", href: `/c/${communityHandle}/apply` },
+      { icon: UsersIcon, label: "Members", href: communityMembersPath(communityHandle) },
+      { icon: PlusIcon, label: "Apply", href: communityApplyPath(communityHandle) },
     ];
 
     const bottomRight = isAdmin
       ? [
-          { icon: FileTextIcon, label: "Applications", href: `/c/${communityHandle}/applications` },
-          { icon: CogIcon, label: "Settings", href: `/c/${communityHandle}/settings` },
+          { icon: FileTextIcon, label: "Applications", href: communityApplicationsPath(communityHandle) },
+          { icon: CogIcon, label: "Settings", href: communitySettingsPath(communityHandle) },
         ]
       : [];
 
@@ -315,7 +316,7 @@ function CommunityReadyState({
               <Button
                 type="button"
                 variant="secondary"
-                onClick={() => router.push(`/c/${communityHandle}/apply`)}
+                onClick={() => router.push(communityApplyPath(communityHandle))}
               >
                 Apply to join
               </Button>

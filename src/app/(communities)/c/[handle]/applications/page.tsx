@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation"
 
 import { apiGet, apiPost } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
-import { ROUTES, userPath } from "@/lib/routes"
+import { ROUTES, userPath, communityPath } from "@/lib/routes"
 import { PageHeader } from "@/components/common/page-header"
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -157,7 +157,7 @@ function useApplicationsData(handle: string) {
           }
 
           if (parsed.status === 403) {
-            router.replace(`/c/${handle}`)
+            router.replace(communityPath(handle))
             router.refresh()
             return
           }
@@ -713,7 +713,7 @@ export default function CommunityApplicationsPage() {
     }
 
     if (parsed.status === 403) {
-      router.replace(`/c/${handle}`)
+      router.replace(communityPath(handle))
       router.refresh()
       return
     }
@@ -758,7 +758,7 @@ export default function CommunityApplicationsPage() {
           </Avatar>
         }
         title="Applications"
-        description={`/c/${handle}`}
+        description={communityPath(handle)}
         actions={
           <div className="flex flex-wrap items-center justify-end gap-2">
             <Button
