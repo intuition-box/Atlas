@@ -8,10 +8,11 @@ import { z } from "zod"
 import { apiPost } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
 import { err, ok } from "@/lib/api/shapes"
-import { makeHandleCandidate, normalizeHandle, validateHandle } from "@/lib/handle"
-import { ROUTES } from "@/lib/routes"
+import { normalizeHandle, validateHandle } from "@/lib/handle"
+import { ROUTES, communityPath } from "@/lib/routes"
 
 import { AvatarDropzone } from "@/components/common/avatar-dropzone"
+import { HandleField } from "@/components/common/handle-field"
 import { PageHeader } from "@/components/common/page-header"
 import { Button } from "@/components/ui/button"
 import { Form, FormActions, FormField, FormMessage, fieldControlProps, useForm } from "@/components/ui/form"
@@ -299,24 +300,7 @@ export default function NewCommunityPage() {
     setStep((s) => (s === 1 ? 1 : ((s - 1) as 1 | 2 | 3)))
   }
 
-  const normalizedHandle = watchedHandle && watchedHandle.trim() ? normalizeHandle(watchedHandle) : ""
-
-  function applySuggestion() {
-    if (String(form.getValues("handle") || "").trim()) return
-
-    const suggested = makeHandleCandidate(watchedName || "")
-    if (suggested) {
-      form.setValue("handle", suggested, { shouldDirty: true, shouldTouch: true })
-      form.clearErrors("handle")
-    }
-  }
-
   const handlePreview = React.useMemo(() => normalizeHandle(watchedHandle || ""), [watchedHandle])
-
-  const showHandleNormalizationHint =
-    Boolean(watchedHandle.trim()) && Boolean(normalizedHandle) && normalizedHandle !== watchedHandle.trim()
-
-  const showSuggestFromName = !String(form.getValues("handle") || "").trim() && Boolean(String(watchedName || "").trim())
 
   async function onSubmit(values: FormValues) {
     form.clearErrors("root")
@@ -329,7 +313,7 @@ export default function NewCommunityPage() {
         return
       }
 
-      router.push(`/c/${created.handle}`)
+      router.push(communityPath(created.handle))
       return
     }
 
@@ -366,7 +350,7 @@ export default function NewCommunityPage() {
     const result = await apiPost<CreateCommunityResponse>("/api/community/create", payload)
 
     if (result.ok) {
-      router.push(`/c/${result.value.community.handle}`)
+      router.push(communityPath(result.value.community.handle))
       return
     }
 
@@ -455,33 +439,15 @@ export default function NewCommunityPage() {
                 name="handle"
                 label="Handle"
                 required
-                description={
-                  <>
-                    <span>A short, URL-friendly identifier for your community.</span>
-                    {showHandleNormalizationHint ? (
-                      <span className="block">Will be saved as {normalizedHandle}</span>
-                    ) : null}
-                  </>
-                }
+                description="A short, URL-friendly identifier for your community."
                 render={({ id, field, fieldState }) => (
-                  <div className="flex flex-col gap-2">
-                    <Input
-                      autoCapitalize="none"
-                      autoCorrect="off"
-                      spellCheck={false}
-                      {...fieldControlProps(field, { id, invalid: fieldState.invalid })}
-                      value={field.value ?? ""}
-                    />
-                    {showSuggestFromName ? (
-                      <button
-                        type="button"
-                        className="text-xs text-muted-foreground underline underline-offset-4 self-start"
-                        onClick={applySuggestion}
-                      >
-                        Suggest from name
-                      </button>
-                    ) : null}
-                  </div>
+                  <HandleField
+                    id={id}
+                    field={field}
+                    fieldState={fieldState}
+                    nameValue={watchedName}
+                    ownerType="COMMUNITY"
+                  />
                 )}
               />
 

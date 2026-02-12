@@ -10,7 +10,8 @@ import type { NextRequest } from "next/server";
 import { auth } from "@/lib/auth/session";
 import { errJson, okJson } from "@/lib/api/server";
 import { db } from "@/lib/db/client";
-import { resolveHandleNameForOwner } from "@/lib/handle-registry";
+import { claimHandle, resolveHandleNameForOwner } from "@/lib/handle-registry";
+import type { HandleProblem } from "@/lib/handle-registry";
 import { requireCsrf } from "@/lib/security/csrf";
 import { CommunityUpdateSchema } from "@/lib/validations";
 
@@ -32,6 +33,7 @@ type UpdateCommunityOk = {
 
 const UpdateSchema = CommunityUpdateSchema.refine(
   (v) =>
+    v.handle !== undefined ||
     v.name !== undefined ||
     v.description !== undefined ||
     v.avatarUrl !== undefined ||
@@ -114,6 +116,18 @@ export async function POST(req: NextRequest) {
         return { kind: "forbidden" } as const;
       }
 
+      // Claim handle before updating other fields — if this fails, the whole tx rolls back.
+      if (input.handle !== undefined) {
+        const claim = await claimHandle(tx, {
+          ownerType: HandleOwnerType.COMMUNITY,
+          ownerId: input.communityId,
+          handle: input.handle,
+        });
+        if (!claim.ok) {
+          return { kind: "handle_error", error: claim.error } as const;
+        }
+      }
+
       const community = await tx.community.update({
         where: { id: input.communityId },
         data,
@@ -174,6 +188,17 @@ export async function POST(req: NextRequest) {
 
     if (txResult.kind === "forbidden") {
       return errJson({ code: "FORBIDDEN", message: "Insufficient permissions", status: 403 });
+    }
+
+    if (txResult.kind === "handle_error") {
+      const he = txResult.error;
+      return errJson({
+        code: he.code,
+        message: he.message,
+        status: he.status,
+        issues: [{ path: ["handle"], message: he.message }],
+        ...(he.meta ? { meta: he.meta } : {}),
+      });
     }
 
     const updated = txResult.community;

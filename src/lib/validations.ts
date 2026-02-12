@@ -201,6 +201,7 @@ export const CommunityCreateSchema = z.object({
 
 export const CommunityUpdateSchema = z.object({
   communityId: Id,
+  handle: HandleSchema.optional(),
   name: NonEmptyString.max(120).optional(),
   description: z.string().trim().max(1000).nullable().optional(),
   avatarUrl: OptionalUrl.nullable().optional(),

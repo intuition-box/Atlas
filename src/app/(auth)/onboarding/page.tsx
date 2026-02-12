@@ -9,17 +9,18 @@ import { getSession, signOut } from "next-auth/react"
 
 import { apiGet, apiPost } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
-import { makeHandleCandidate, normalizeHandle, validateHandle } from "@/lib/handle"
+import { validateHandle } from "@/lib/handle"
 import { ROUTES, userPath } from "@/lib/routes"
 import { COUNTRIES } from "@/config/countries"
 import { SKILL_LIST as SKILLS, TOOL_LIST as TOOLS } from "@/lib/attestations/definitions"
 
+import { AvatarDropzone } from "@/components/common/avatar-dropzone"
+import { HandleField } from "@/components/common/handle-field"
+import { PageHeader } from "@/components/common/page-header"
 import { Button } from "@/components/ui/button"
 import { Form, FormActions, FormField, FormMessage, fieldControlProps, useForm } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { AvatarDropzone } from "@/components/common/avatar-dropzone"
-import { PageHeader } from "@/components/common/page-header"
 import {
   Combobox,
   ComboboxCollection,
@@ -117,9 +118,7 @@ export default function OnboardingPage() {
     mode: "onBlur",
   })
 
-  const watchedHandle = form.watch("handle")
   const watchedName = form.watch("name")
-  const normalizedHandle = watchedHandle.trim() ? normalizeHandle(watchedHandle) : ""
 
   const links = useFieldArray({ control: form.control, name: "links" })
 
@@ -252,16 +251,6 @@ export default function OnboardingPage() {
       document.removeEventListener("visibilitychange", onFocusOrVisible)
     }
   }, [form])
-
-  function applySuggestion() {
-    if (String(form.getValues("handle") || "").trim()) return
-
-    const suggested = makeHandleCandidate(watchedName || "")
-    if (suggested) {
-      form.setValue("handle", suggested, { shouldDirty: true, shouldTouch: true })
-      form.clearErrors("handle")
-    }
-  }
 
   function opt(value: string | undefined | null): string | undefined {
     const v = String(value ?? "").trim()
@@ -429,33 +418,15 @@ export default function OnboardingPage() {
             name="handle"
             label="Handle"
             required
-            description={
-              <>
-                <span>Your username often used in social networks.</span>
-                {watchedHandle.trim() && normalizedHandle && normalizedHandle !== watchedHandle.trim() ? (
-                  <span className="block">Will be saved as {normalizedHandle}</span>
-                ) : null}
-              </>
-            }
+            description="Your username often used in social networks."
             render={({ id, field, fieldState }) => (
-              <div className="flex flex-col gap-2">
-                <Input
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  {...fieldControlProps(field, { id, invalid: fieldState.invalid })}
-                  value={field.value ?? ""}
-                />
-                {!String(field.value || "").trim() && String(watchedName || "").trim() ? (
-                  <button
-                    type="button"
-                    className="text-xs text-muted-foreground underline underline-offset-4 self-start"
-                    onClick={applySuggestion}
-                  >
-                    Suggest from name
-                  </button>
-                ) : null}
-              </div>
+              <HandleField
+                id={id}
+                field={field}
+                fieldState={fieldState}
+                nameValue={watchedName}
+                ownerType="USER"
+              />
             )}
           />
 

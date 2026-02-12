@@ -5,7 +5,9 @@ import { z } from "zod";
 import { auth } from "@/lib/auth/session";
 import { errJson, okJson } from "@/lib/api/server";
 import { db } from "@/lib/db/client";
-import { resolveHandleNameForOwner } from "@/lib/handle-registry";
+import { HandleSchema } from "@/lib/handle";
+import { claimHandle, resolveHandleNameForOwner } from "@/lib/handle-registry";
+import type { HandleProblem } from "@/lib/handle-registry";
 import { requireCsrf } from "@/lib/security/csrf";
 
 export const runtime = "nodejs";
@@ -40,6 +42,7 @@ function uniqStrings(values: string[]): string[] {
 
 const UpdateUserSchema = z
   .object({
+    handle: HandleSchema.optional(),
     name: z.string().trim().min(1, "Name is required").max(80, "Name is too long").optional(),
     image: z.string().url("Invalid image url").nullable().optional(),
     headline: z.string().trim().min(1, "Headline is required").max(120, "Headline is too long").nullable().optional(),
@@ -66,6 +69,7 @@ const UpdateUserSchema = z
   })
   .refine(
     (v) =>
+      v.handle !== undefined ||
       v.name !== undefined ||
       v.image !== undefined ||
       v.headline !== undefined ||
@@ -110,6 +114,16 @@ export async function POST(req: NextRequest) {
     const input = parsed.data;
 
     const { updated, handleName } = await db.$transaction(async (tx) => {
+      // Claim handle before updating other fields — if this fails, the whole tx rolls back.
+      if (input.handle !== undefined) {
+        const claim = await claimHandle(tx, {
+          ownerType: HandleOwnerType.USER,
+          ownerId: userId,
+          handle: input.handle,
+        });
+        if (!claim.ok) throw claim.error;
+      }
+
       const [updated, handleName] = await Promise.all([
         tx.user.update({
           where: { id: userId },
@@ -159,6 +173,20 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (e) {
+    // Handle claim errors (thrown as HandleProblem objects).
+    if (e && typeof e === "object" && "code" in e && "status" in e && "message" in e) {
+      const he = e as HandleProblem;
+      if (he.code.startsWith("HANDLE_")) {
+        return errJson({
+          code: he.code,
+          message: he.message,
+          status: he.status,
+          issues: [{ path: ["handle"], message: he.message }],
+          ...(he.meta ? { meta: he.meta } : {}),
+        });
+      }
+    }
+
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2025") {
       return errJson({ code: "NOT_FOUND", message: "User not found", status: 404 });
     }
