@@ -430,7 +430,7 @@ export default function CommunitySettingsPage() {
             </Avatar>
           }
           title="Settings"
-          description={communityPath(communityHandle)}
+          description={`@${communityHandle}`}
           actions={
             <FormActions className="flex items-center gap-3">
               <Button type="button" variant="secondary" onClick={() => router.replace(communityPath(communityHandle))}>

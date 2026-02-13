@@ -8,7 +8,7 @@ import { apiGet } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
 import { normalizeHandle, validateHandle } from "@/lib/handle"
 
-import { userPath, userSettingsPath } from "@/lib/routes"
+import { userSettingsPath } from "@/lib/routes"
 
 import { PageHeader } from "@/components/common/page-header"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -228,7 +228,7 @@ export default function UserProfilePage() {
           </Avatar>
         }
         title={displayName}
-        description={userPath(handleLabel)}
+        description={`@${handleLabel}`}
         sticky={false}
         actions={
           isSelf ? (

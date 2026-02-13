@@ -251,6 +251,7 @@ function createOrbitNodes(members: OrbitMember[]): SimulatedNode[] {
         loveScore: m.loveScore,
         reachScore: m.reachScore,
         lastActiveAt: m.lastActiveAt ?? null,
+        joinedAt: m.joinedAt ?? null,
         radius: computeOrbitNodeRadius(m.reachScore),
         color,
         baseT: tValues[i],
@@ -314,6 +315,7 @@ function parseMembers(raw: unknown[]): OrbitMember[] {
       location: (m?.location ?? null) as string | null,
       tags: Array.isArray(m?.tags) ? m.tags : [],
       lastActiveAt: (m?.lastActiveAt ?? null) as string | null,
+      joinedAt: (m?.joinedAt ?? null) as string | null,
     });
   }
   return result;

@@ -842,7 +842,7 @@ export default function UserSettingsPage() {
             </Avatar>
           }
           title="Account settings"
-          description={userPath(handle)}
+          description={`@${handle}`}
           actions={
             <FormActions className="flex items-center gap-3">
               <Button type="button" variant="secondary" onClick={handleCancel}>
