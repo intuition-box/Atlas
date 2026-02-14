@@ -123,14 +123,6 @@ export function NavigationController({
               </TooltipContent>
             </Tooltip>
 
-            {breadcrumb && (
-              <>
-                <span className="text-muted-foreground/50 text-sm select-none">›</span>
-                <span className="text-sm font-medium text-foreground/80 backdrop-blur-sm">
-                  {breadcrumb.label}
-                </span>
-              </>
-            )}
           </div>
         )}
       </div>
