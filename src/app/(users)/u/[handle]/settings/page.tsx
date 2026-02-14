@@ -1018,7 +1018,7 @@ export default function UserSettingsPage() {
               <Button type="button" variant="secondary" onClick={handleCancel}>
                 View
               </Button>
-              <Button type="submit" disabled={loading || form.formState.isSubmitting}>
+              <Button type="submit" disabled={!form.formState.isDirty || form.formState.isSubmitting}>
                 {form.formState.isSubmitting ? "Saving…" : "Save"}
               </Button>
             </FormActions>
