@@ -243,10 +243,10 @@ export function WalletLinkSection() {
                 key={wallet.address}
                 className="rounded-lg border border-border/60 p-3 text-sm"
               >
-                <div className="text-xs font-medium text-muted-foreground mb-1">Linked</div>
+                <h2 className="text-xs font-medium text-muted-foreground mb-1">Linked</h2>
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0">
-                    <WalletIcon className="size-4 shrink-0 text-muted-foreground" />
+                    <WalletIcon className="size-4 shrink-0" />
                     <EncryptedText
                       text={truncateAddress(wallet.address)}
                       revealDelayMs={40}
@@ -293,14 +293,13 @@ export function WalletLinkSection() {
               </div>
             ))}
 
-            {/* Connected (not yet linked) card */}
             {isConnected && connectedAddress && !connectedIsLinked ? (
-              <div className="rounded-lg border border-border/60 p-3 text-sm">
-                <div className="text-xs font-medium text-muted-foreground mb-1">Connected</div>
+              <div className="rounded-lg border border-border p-3 text-sm">
+                <h2 className="text-xs font-medium text-muted-foreground mb-1">Connected</h2>
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0">
                     <WalletIcon className="size-4 shrink-0 text-muted-foreground" />
-                    <span className="font-mono text-sm text-foreground/80">
+                    <span className="font-mono text-sm">
                       {truncateAddress(connectedAddress)}
                     </span>
                   </div>
@@ -320,22 +319,22 @@ export function WalletLinkSection() {
               </div>
             ) : null}
 
-            {/* Add new wallet card */}
-            <div className="rounded-lg border border-dashed border-border/60 p-3 text-sm">
-              <div className="text-xs font-medium text-muted-foreground mb-1">Connect</div>
+            <div className="rounded-lg border border-dashed p-3 text-sm">
+              <h2 className="text-xs font-medium text-amber-400/70 mb-1">Connect</h2>
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
-                  <WalletIcon className="size-4 shrink-0 text-muted-foreground" />
+                  <WalletIcon className="size-4 shrink-0 text-amber-400" />
                   <EncryptedText
                     text="0x0000…0000"
                     scrambleOnly
                     scrambleOneChar
-                    className="font-mono text-sm text-muted-foreground"
+                    className="font-mono text-sm text-amber-400"
                   />
                 </div>
                 <Button
-                  variant="outline"
+                  variant="destructive"
                   size="sm"
+                  className="bg-amber-400/10 text-amber-400 hover:bg-amber-400/20 dark:bg-amber-400/20 dark:hover:bg-amber-400/30"
                   onClick={handleConnectAndLink}
                   disabled={isWorking}
                 >

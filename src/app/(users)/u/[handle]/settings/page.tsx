@@ -49,7 +49,7 @@ import { Form, FormActions, FormField, fieldControlProps, useForm } from "@/comp
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
-import { WalletLinkSection } from "@/components/wallet/wallet-link-section"
+import { WalletLinkSection } from "@/components/users/wallet-link-section"
 
 // === SCHEMAS ===
 
