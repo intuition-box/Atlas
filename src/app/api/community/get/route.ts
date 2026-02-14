@@ -20,11 +20,13 @@ type CommunityGetOk = {
     name: string;
     description: string | null;
     avatarUrl: string | null;
+    createdAt: string;
     isMembershipOpen: boolean;
     isPublicDirectory: boolean;
     membershipConfig: unknown | null;
     orbitConfig: unknown | null;
   };
+  memberCount: number;
   canViewDirectory: boolean;
   isAdmin: boolean;
   viewerMembership: {
@@ -86,10 +88,16 @@ export async function GET(req: NextRequest) {
         name: true,
         description: true,
         avatarUrl: true,
+        createdAt: true,
         isMembershipOpen: true,
         isPublicDirectory: true,
         membershipConfig: true,
         orbitConfig: true,
+        _count: {
+          select: {
+            memberships: { where: { status: MembershipStatus.APPROVED } },
+          },
+        },
       },
     });
 
@@ -152,11 +160,13 @@ export async function GET(req: NextRequest) {
           name: row.name,
           description: row.description,
           avatarUrl: row.avatarUrl,
+          createdAt: row.createdAt.toISOString(),
           isMembershipOpen: row.isMembershipOpen,
           isPublicDirectory: row.isPublicDirectory,
           membershipConfig: null,
           orbitConfig: null,
         },
+        memberCount: row._count.memberships,
         canViewDirectory: false,
         isAdmin: false,
         viewerMembership,
@@ -224,11 +234,13 @@ export async function GET(req: NextRequest) {
         name: row.name,
         description: row.description,
         avatarUrl: row.avatarUrl,
+        createdAt: row.createdAt.toISOString(),
         isMembershipOpen: row.isMembershipOpen,
         isPublicDirectory: row.isPublicDirectory,
         membershipConfig: (row.membershipConfig as unknown) ?? null,
         orbitConfig: (row.orbitConfig as unknown) ?? null,
       },
+      memberCount: row._count.memberships,
       canViewDirectory,
       isAdmin,
       viewerMembership,

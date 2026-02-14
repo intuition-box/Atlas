@@ -1,334 +1,361 @@
-"use client";
+"use client"
 
-import * as React from "react";
-import { useParams, useRouter } from "next/navigation";
+import * as React from "react"
+import Link from "next/link"
+import { useParams } from "next/navigation"
 
-import { apiGet } from "@/lib/api/client";
-import { parseApiError } from "@/lib/api/errors";
-import { normalizeHandle, validateHandle } from "@/lib/handle";
+import { apiGet } from "@/lib/api/client"
+import { parseApiError } from "@/lib/api/errors"
+import { normalizeHandle, validateHandle } from "@/lib/handle"
+import {
+  communityApplyPath,
+  communityMembersPath,
+  communitySettingsPath,
+} from "@/lib/routes"
 
-import { Button } from "@/components/ui/button";
-import { CogIcon, FileTextIcon, PlusIcon, UsersIcon } from "@/components/ui/icons";
+import { PageHeader } from "@/components/common/page-header"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Skeleton } from "@/components/ui/skeleton"
 
-import { OrbitView } from "@/components/orbit/view";
-import type { OrbitMember, MemberLink } from "@/components/orbit/types";
-import { useNavigation, type NavigationControls } from "@/components/navigation/navigation-provider";
-import { userPath, communityMembersPath, communityApplyPath, communityApplicationsPath, communitySettingsPath, communityPath } from "@/lib/routes";
-import { Spinner } from "@/components/ui/spinner";
-
-/* ────────────────────────────
-   Types
-──────────────────────────── */
+// === TYPES ===
 
 type CommunityGetResponse = {
-  mode: "full" | "splash";
+  mode: "full" | "splash"
   community: {
-    id: string;
-    handle: string | null;
-    name: string;
-    description: string | null;
-    avatarUrl: string | null;
-    isMembershipOpen: boolean;
-    isPublicDirectory: boolean;
-    membershipConfig: unknown | null;
-    orbitConfig: unknown | null;
-  };
-  canViewDirectory: boolean;
-  isAdmin: boolean;
+    id: string
+    handle: string
+    name: string
+    description: string | null
+    avatarUrl: string | null
+    createdAt: string
+    isMembershipOpen: boolean
+    isPublicDirectory: boolean
+  }
+  memberCount: number
+  canViewDirectory: boolean
+  isAdmin: boolean
   viewerMembership: {
-    status: string;
-    role: string;
-  } | null;
-  orbitMembers: unknown[];
-  memberLinks?: unknown[]; // connections between members
-};
+    status: string
+    role: string
+  } | null
+  orbitMembers: Array<{
+    id: string
+    handle: string | null
+    name: string | null
+    avatarUrl: string | null
+    image: string | null
+    orbitLevel: string
+    headline: string | null
+  }>
+}
 
 type LoadState =
-  | { status: "idle" }
-  | { status: "loading" }
+  | { status: "idle" | "loading" }
   | { status: "error"; message: string }
   | { status: "not-found" }
-  | { status: "ready"; data: CommunityGetResponse };
+  | { status: "ready"; data: CommunityGetResponse }
 
-/* ────────────────────────────
-   Helpers
-──────────────────────────── */
+// === HELPERS ===
 
-function parseMembers(raw: unknown[]): OrbitMember[] {
-  const result: OrbitMember[] = [];
-
-  for (const m of raw as any[]) {
-    const id = String(m?.id ?? "");
-    const name = String(m?.name ?? "");
-    const handle = (m?.handle ?? null) as string | null;
-    const orbitLevel = m?.orbitLevel as OrbitMember["orbitLevel"];
-    const reachScore = Number(m?.reachScore ?? 0);
-
-    // Validate orbit level
-    const validLevels = ["ADVOCATE", "CONTRIBUTOR", "PARTICIPANT", "EXPLORER"];
-    if (!validLevels.includes(orbitLevel)) continue;
-    if (!id || !name) continue;
-
-    result.push({
-      id,
-      handle,
-      name,
-      avatarUrl: (m?.avatarUrl ?? m?.image ?? null) as string | null,
-      orbitLevel,
-      loveScore: Number(m?.loveScore ?? 0),
-      reachScore,
-      headline: (m?.headline ?? null) as string | null,
-      location: (m?.location ?? null) as string | null,
-      tags: Array.isArray(m?.tags) ? m.tags : [],
-      lastActiveAt: (m?.lastActiveAt ?? null) as string | null,
-      joinedAt: (m?.joinedAt ?? null) as string | null,
-    });
+function initials(name: string) {
+  const s = name.trim()
+  if (!s) return "?"
+  const parts = s.split(/\s+/g).filter(Boolean)
+  if (parts.length >= 2) {
+    return `${parts[0].slice(0, 1)}${parts[1].slice(0, 1)}`.toUpperCase()
   }
-
-  return result;
+  return s.slice(0, 2).toUpperCase()
 }
 
-function parseLinks(raw: unknown[] | undefined): MemberLink[] {
-  if (!raw || !Array.isArray(raw)) return [];
-
-  const result: MemberLink[] = [];
-
-  for (const l of raw as any[]) {
-    const source = String(l?.source ?? "");
-    const target = String(l?.target ?? "");
-    const weight = Number(l?.weight ?? 1);
-
-    if (!source || !target) continue;
-
-    result.push({ source, target, weight });
-  }
-
-  return result;
+function fmtDate(iso: string) {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ""
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
 }
 
-/* ────────────────────────────
-   Component
-──────────────────────────── */
+function roleLabel(role: string): string {
+  switch (role) {
+    case "OWNER": return "Owner"
+    case "ADMIN": return "Admin"
+    case "MOD": return "Moderator"
+    case "MEMBER": return "Member"
+    default: return role
+  }
+}
 
-export default function CommunityPage() {
-  const params = useParams<{ handle: string }>();
-  const router = useRouter();
-  const rawHandle = String(params?.handle ?? "");
-  const handle = React.useMemo(() => normalizeHandle(rawHandle), [rawHandle]);
+function statusLabel(status: string): string {
+  switch (status) {
+    case "APPROVED": return "Active"
+    case "PENDING": return "Pending"
+    case "REJECTED": return "Rejected"
+    case "BANNED": return "Banned"
+    default: return status
+  }
+}
 
-  const [state, setState] = React.useState<LoadState>({ status: "idle" });
+// === PAGE ===
+
+export default function CommunityProfilePage() {
+  const params = useParams<{ handle: string }>()
+  const rawHandle = String(params?.handle ?? "")
+  const handle = React.useMemo(() => normalizeHandle(rawHandle), [rawHandle])
+
+  const [state, setState] = React.useState<LoadState>({ status: "idle" })
 
   React.useEffect(() => {
-    const parsed = validateHandle(handle);
+    const parsed = validateHandle(handle)
     if (!parsed.ok) {
-      setState({ status: "not-found" });
-      return;
+      setState({ status: "not-found" })
+      return
     }
 
-    const controller = new AbortController();
-    setState({ status: "loading" });
+    const controller = new AbortController()
+    setState({ status: "loading" })
 
     void (async () => {
       const result = await apiGet<CommunityGetResponse>(
         "/api/community/get",
         { handle },
-        { signal: controller.signal }
-      );
+        { signal: controller.signal },
+      )
 
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) return
 
       if (result.ok) {
-        setState({ status: "ready", data: result.value });
-        return;
+        setState({ status: "ready", data: result.value })
+        return
       }
 
       if (result.error && typeof result.error === "object" && "status" in result.error) {
-        const parsedErr = parseApiError(result.error);
+        const parsedErr = parseApiError(result.error)
         if (parsedErr.status === 404) {
-          setState({ status: "not-found" });
-          return;
+          setState({ status: "not-found" })
+          return
         }
-        setState({ status: "error", message: parsedErr.formError || "Something went wrong." });
-        return;
+        setState({ status: "error", message: parsedErr.formError || "Something went wrong." })
+        return
       }
 
-      const parsedErr = parseApiError(result.error);
-      setState({ status: "error", message: parsedErr.formError || "Something went wrong." });
-    })();
+      const parsedErr = parseApiError(result.error)
+      setState({ status: "error", message: parsedErr.formError || "Something went wrong." })
+    })()
 
-    return () => controller.abort();
-  }, [handle]);
+    return () => controller.abort()
+  }, [handle])
 
-  /* ────────────────────────────
-     Loading State
-  ──────────────────────────── */
+  // --- SKELETON ---
 
   if (state.status === "loading" || state.status === "idle") {
     return (
-      <Spinner />
-    );
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-10 pb-40">
+        <Card>
+          <CardContent className="flex items-center gap-4 px-5">
+            <Skeleton className="size-12 rounded-full" />
+            <div className="flex flex-col gap-2">
+              <Skeleton className="h-5 w-40" />
+              <Skeleton className="h-4 w-28" />
+            </div>
+          </CardContent>
+        </Card>
+
+        {[1, 2, 3].map((i) => (
+          <Card key={i}>
+            <CardContent className="flex flex-col gap-4 px-5">
+              <div className="flex flex-col gap-1">
+                <Skeleton className="h-4 w-24" />
+                <Skeleton className="h-3 w-56" />
+              </div>
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    )
   }
 
-  /* ────────────────────────────
-     Not Found State
-  ──────────────────────────── */
+  // --- NOT FOUND ---
 
   if (state.status === "not-found") {
     return (
-      <main className="mx-auto w-full max-w-5xl px-4 py-10">
-        <h1 className="text-lg font-semibold">Community not found</h1>
-        <p className="mt-1 text-sm text-muted-foreground">We couldn't find c/{handle}.</p>
-      </main>
-    );
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-10 pb-40">
+        <Alert>
+          <AlertDescription>We couldn&apos;t find @{handle}.</AlertDescription>
+        </Alert>
+      </div>
+    )
   }
 
-  /* ────────────────────────────
-     Error State
-  ──────────────────────────── */
+  // --- ERROR ---
 
   if (state.status === "error") {
     return (
-      <main className="mx-auto w-full max-w-5xl px-4 py-10">
-        <h1 className="text-lg font-semibold">Couldn't load community</h1>
-        <p className="mt-1 text-sm text-muted-foreground">{state.message}</p>
-        <div className="mt-4">
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-10 pb-40">
+        <Alert variant="destructive">
+          <AlertDescription>{state.message}</AlertDescription>
+        </Alert>
+        <div>
           <Button type="button" variant="secondary" onClick={() => setState({ status: "idle" })}>
             Retry
           </Button>
         </div>
-      </main>
-    );
+      </div>
+    )
   }
 
-  /* ────────────────────────────
-     Ready State
-  ──────────────────────────── */
+  if (state.status !== "ready") return null
 
-  const { community } = state.data;
-  const communityHandle = community.handle ?? handle;
+  // --- READY ---
 
-  const members = parseMembers(state.data.orbitMembers ?? []);
-  const links = parseLinks(state.data.memberLinks);
+  const { community, memberCount, canViewDirectory, isAdmin, viewerMembership, orbitMembers } =
+    state.data
+
+  const handleLabel = community.handle ?? handle
+  const avatarSrc = community.avatarUrl ?? ""
+  const previewMembers = orbitMembers.slice(0, 5)
 
   return (
-    <CommunityReadyState
-      community={community}
-      communityHandle={communityHandle}
-      members={members}
-      links={links}
-      canViewDirectory={state.data.canViewDirectory}
-      isAdmin={state.data.isAdmin}
-      mode={state.data.mode}
-      isMembershipOpen={community.isMembershipOpen}
-      isPublicDirectory={community.isPublicDirectory}
-      router={router}
-    />
-  );
-}
-
-/* ────────────────────────────
-   Ready State Component
-   (Separate component to use hooks)
-──────────────────────────── */
-
-type CommunityReadyStateProps = {
-  community: CommunityGetResponse["community"];
-  communityHandle: string;
-  members: OrbitMember[];
-  links: MemberLink[];
-  canViewDirectory: boolean;
-  isAdmin: boolean;
-  mode: "full" | "splash";
-  isMembershipOpen: boolean;
-  isPublicDirectory: boolean;
-  router: ReturnType<typeof useRouter>;
-};
-
-function CommunityReadyState({
-  community,
-  communityHandle,
-  members,
-  links,
-  canViewDirectory,
-  isAdmin,
-  mode,
-  isMembershipOpen,
-  isPublicDirectory,
-  router,
-}: CommunityReadyStateProps) {
-  // Build navigation controls based on context
-  const navigationControls = React.useMemo<NavigationControls>(() => {
-    const bottomLeft = [
-      { icon: UsersIcon, label: "Members", href: communityMembersPath(communityHandle) },
-      { icon: PlusIcon, label: "Apply", href: communityApplyPath(communityHandle) },
-    ];
-
-    const bottomRight = isAdmin
-      ? [
-          { icon: FileTextIcon, label: "Applications", href: communityApplicationsPath(communityHandle) },
-          { icon: CogIcon, label: "Settings", href: communitySettingsPath(communityHandle) },
-        ]
-      : [];
-
-    return { bottomLeft, bottomRight };
-  }, [communityHandle, isAdmin]);
-
-  // Register navigation controls
-  useNavigation(navigationControls);
-
-  // Handle member click - navigate to their profile
-  const handleMemberClick = React.useCallback(
-    (memberId: string) => {
-      const member = members.find((m) => m.id === memberId);
-      if (member) {
-        // Use handle if available, otherwise fall back to ID
-        const identifier = member.handle ?? memberId;
-        router.push(userPath(identifier));
-      }
-    },
-    [members, router]
-  );
-
-  if (canViewDirectory) {
-    return (
-      <OrbitView
-        members={members}
-        links={links}
-        centerLogoUrl={community.avatarUrl}
-        centerName={community.name}
-        isMembershipOpen={isMembershipOpen}
-        isPublicDirectory={isPublicDirectory}
-        onMemberClick={handleMemberClick}
-      />
-    );
-  }
-
-  if (mode === "splash") {
-    return (
-      <main className="mx-auto w-full max-w-5xl px-4 py-10">
-        <div className="rounded-2xl border border-border p-6">
-          <h2 className="text-base font-semibold">Members-only</h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            This community is private. Apply to join to view the directory.
-          </p>
-          <div className="mt-4 flex flex-wrap gap-2">
-            {isMembershipOpen && (
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => router.push(communityApplyPath(communityHandle))}
-              >
-                Apply to join
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-10 pb-40">
+      <PageHeader
+        leading={
+          <Avatar className="h-12 w-12">
+            <AvatarImage src={avatarSrc} alt={community.name} />
+            <AvatarFallback>{initials(community.name)}</AvatarFallback>
+          </Avatar>
+        }
+        title={community.name}
+        description={`@${handleLabel}`}
+        sticky={false}
+        actions={
+          <div className="flex items-center gap-2">
+            {isAdmin ? (
+              <Button type="button" variant="secondary">
+                <Link href={communitySettingsPath(handleLabel)}>Settings</Link>
               </Button>
-            )}
-            <Button type="button" variant="ghost" onClick={() => router.back()}>
-              Back
-            </Button>
+            ) : null}
+            {!viewerMembership && community.isMembershipOpen ? (
+              <Button type="button" variant="secondary">
+                <Link href={communityApplyPath(handleLabel)}>Apply</Link>
+              </Button>
+            ) : null}
           </div>
-        </div>
-      </main>
-    );
-  }
+        }
+        actionsAsFormActions={false}
+      />
 
-  return null;
+      {/* About */}
+      <Card>
+        <CardHeader>
+          <CardTitle>About</CardTitle>
+        </CardHeader>
+        <CardContent className="px-5">
+          <div className="flex flex-col gap-3">
+            {/* Row 1: Created + Members */}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-lg border border-border/60 p-3">
+                <div className="text-xs font-medium text-foreground/70">Created</div>
+                <div className="mt-1 text-sm text-foreground/80">{fmtDate(community.createdAt)}</div>
+              </div>
+              <div className="rounded-lg border border-border/60 p-3">
+                <div className="text-xs font-medium text-foreground/70">Members</div>
+                <div className="mt-1 text-sm text-foreground/80">{memberCount}</div>
+              </div>
+            </div>
+
+            {/* Row 2: Visibility + Membership */}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-lg border border-border/60 p-3">
+                <div className="text-xs font-medium text-foreground/70">Visibility</div>
+                <div className="mt-1">
+                  <Badge variant="secondary">
+                    {community.isPublicDirectory ? "Public" : "Private"}
+                  </Badge>
+                </div>
+              </div>
+              <div className="rounded-lg border border-border/60 p-3">
+                <div className="text-xs font-medium text-foreground/70">Membership</div>
+                <div className="mt-1">
+                  <Badge variant="secondary">
+                    {community.isMembershipOpen ? "Open" : "Closed"}
+                  </Badge>
+                </div>
+              </div>
+            </div>
+
+            {/* Description */}
+            {community.description ? (
+              <div className="rounded-lg border border-border/60 p-3">
+                <div className="text-xs font-medium text-foreground/70">Description</div>
+                <div className="mt-1 whitespace-pre-wrap text-sm text-foreground/80">
+                  {community.description}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Members preview */}
+      {canViewDirectory && previewMembers.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Members</CardTitle>
+          </CardHeader>
+          <CardContent className="px-5">
+            <div className="flex flex-col gap-3">
+              {previewMembers.map((m) => {
+                const memberName = m.name?.trim() || m.handle || "Unknown"
+                const memberAvatar = m.avatarUrl || m.image || ""
+
+                return (
+                  <div key={m.id} className="flex items-center gap-3">
+                    <Avatar className="size-8">
+                      <AvatarImage src={memberAvatar} alt={memberName} />
+                      <AvatarFallback>{initials(memberName)}</AvatarFallback>
+                    </Avatar>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium text-foreground">{memberName}</div>
+                      {m.handle ? (
+                        <div className="truncate text-xs text-muted-foreground">@{m.handle}</div>
+                      ) : null}
+                    </div>
+                    {m.headline ? (
+                      <div className="hidden truncate text-xs text-muted-foreground sm:block">
+                        {m.headline}
+                      </div>
+                    ) : null}
+                  </div>
+                )
+              })}
+
+              <Button type="button" variant="ghost" size="sm" className="w-fit">
+                <Link href={communityMembersPath(handleLabel)}>
+                  View all members →
+                </Link>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {/* Viewer membership */}
+      {viewerMembership ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Your membership</CardTitle>
+          </CardHeader>
+          <CardContent className="px-5">
+            <div className="flex items-center gap-3">
+              <Badge variant="secondary">{roleLabel(viewerMembership.role)}</Badge>
+              <Badge variant="outline">{statusLabel(viewerMembership.status)}</Badge>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+    </div>
+  )
 }

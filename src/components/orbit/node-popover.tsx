@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 
 import { ProfileAvatar } from "@/components/common/profile-avatar";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,7 @@ import {
 import { Tooltip, TooltipContent } from "@/components/ui/tooltip";
 import { Popover, PopoverContent } from "@/components/ui/popover";
 import { AttestationButtons } from "@/components/attestation/buttons";
+import { communityPath } from "@/lib/routes";
 import { LEVEL_COLORS } from "./constants";
 import type { SimulatedNode } from "./types";
 
@@ -371,6 +373,11 @@ export function CommunityPopoverContent({
           ) : null}
         </div>
       )}
+
+      {/* View Profile */}
+      <Button size="sm" variant="outline" className="w-full">
+        <Link href={communityPath(community.handle)}>View Profile</Link>
+      </Button>
     </>
   );
 }
