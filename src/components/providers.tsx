@@ -9,6 +9,7 @@ import { apiPost, resetCsrf, initCsrfVisibilityRefresh } from "@/lib/api/client"
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { NavigationProvider } from "@/components/navigation/navigation-provider";
 import { AttestationQueueProvider } from "@/components/attestation/queue-provider";
+import { WalletProvider } from "@/components/wallet-provider";
 import { useGlobalSound } from "@/hooks/use-global-sound";
 
 /**
@@ -184,6 +185,7 @@ function GlobalListeners({ children }: { children: React.ReactNode }) {
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <SessionProvider refetchOnWindowFocus={true} refetchInterval={0}>
+      <WalletProvider>
       <CsrfManager>
         <HeartbeatManager>
           <GlobalListeners>
@@ -197,6 +199,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
           </GlobalListeners>
         </HeartbeatManager>
       </CsrfManager>
+      </WalletProvider>
     </SessionProvider>
   );
 }

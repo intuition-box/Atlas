@@ -3,6 +3,7 @@ import "server-only";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import NextAuth from "next-auth";
 import Discord from "next-auth/providers/discord";
+import Twitter from "next-auth/providers/twitter";
 import { HandleOwnerType } from "@prisma/client";
 
 import { db } from "@/lib/db/client";
@@ -47,6 +48,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       clientId: requiredEnv("AUTH_DISCORD_ID"),
       clientSecret: requiredEnv("AUTH_DISCORD_SECRET"),
     }),
+    ...(process.env.AUTH_X_ID
+      ? [
+          Twitter({
+            clientId: process.env.AUTH_X_ID,
+            clientSecret: process.env.AUTH_X_SECRET!,
+          }),
+        ]
+      : []),
   ],
   session: { strategy: "database", maxAge: SESSION_MAX_AGE_SEC },
   secret: requiredEnv("AUTH_SECRET"),
@@ -57,26 +66,46 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   debug: isDev,
   callbacks: {
     async signIn({ user, account, profile }) {
-      if (account?.provider !== "discord") return true;
+      if (account?.provider === "discord") {
+        const discordId = account.providerAccountId;
+        const imageUrl = discordImageUrl(profile, user.image);
+        const discordHandle = readString(profile as Record<string, unknown>, "username") ?? null;
 
-      const discordId = account.providerAccountId;
-      const imageUrl = discordImageUrl(profile, user.image);
+        try {
+          await db.user.update({
+            where: { id: user.id },
+            data: {
+              discordId,
+              discordHandle,
+              // For now store provider image URL; later we can mirror to R2 and overwrite.
+              avatarUrl: imageUrl,
+              image: imageUrl,
+              lastActiveAt: new Date(),
+            },
+            select: { id: true },
+          });
+        } catch (err) {
+          // Don't block sign-in if this write fails.
+          if (isDev) console.warn("[auth] failed to persist discord profile fields", err);
+        }
+      }
 
-      try {
-        await db.user.update({
-          where: { id: user.id },
-          data: {
-            discordId,
-            // For now store provider image URL; later we can mirror to R2 and overwrite.
-            avatarUrl: imageUrl,
-            image: imageUrl,
-            lastActiveAt: new Date(),
-          },
-          select: { id: true },
-        });
-      } catch (err) {
-        // Don't block sign-in if this write fails.
-        if (isDev) console.warn("[auth] failed to persist discord profile fields", err);
+      if (account?.provider === "twitter") {
+        const twitterId = account.providerAccountId;
+        const twitterHandle =
+          readString(profile as Record<string, unknown>, "username") ??
+          readString((profile as Record<string, unknown>)?.data as Record<string, unknown> ?? {}, "username") ??
+          null;
+
+        try {
+          await db.user.update({
+            where: { id: user.id },
+            data: { twitterId, twitterHandle, lastActiveAt: new Date() },
+            select: { id: true },
+          });
+        } catch (err) {
+          if (isDev) console.warn("[auth] failed to persist twitter profile fields", err);
+        }
       }
 
       return true;
@@ -94,6 +123,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             avatarUrl: true,
             image: true,
             onboardedAt: true,
+            walletAddress: true,
+            discordHandle: true,
+            twitterHandle: true,
           },
         }),
         db.handleOwner.findUnique({
@@ -111,6 +143,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       session.user.handle = owner?.handle.name ?? null;
       // Use onboardedAt from DB as the source of truth
       session.user.onboarded = Boolean(dbUser?.onboardedAt);
+      session.user.walletAddress = dbUser?.walletAddress ?? null;
+      session.user.discordHandle = dbUser?.discordHandle ?? null;
+      session.user.twitterHandle = dbUser?.twitterHandle ?? null;
 
       return session;
     },

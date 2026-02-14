@@ -23,6 +23,10 @@ type GetUserOk = {
     links: string[] | null;
     skills: string[] | null;
     tags: string[] | null;
+    discordId: string | null;
+    discordHandle: string | null;
+    twitterHandle: string | null;
+    walletAddresses: string[];
     createdAt: Date;
     lastActiveAt: Date | null;
   };
@@ -109,6 +113,10 @@ export async function GET(req: NextRequest) {
         links: true,
         skills: true,
         tags: true,
+        discordId: true,
+        discordHandle: true,
+        twitterHandle: true,
+        wallets: { select: { address: true }, orderBy: { createdAt: "desc" as const } },
         createdAt: true,
         lastActiveAt: true,
       },
@@ -181,6 +189,10 @@ export async function GET(req: NextRequest) {
         links: user.links,
         skills: user.skills,
         tags: user.tags,
+        discordId: user.discordId,
+        discordHandle: user.discordHandle,
+        twitterHandle: user.twitterHandle,
+        walletAddresses: user.wallets.map((w) => w.address),
         createdAt: user.createdAt,
         lastActiveAt: user.lastActiveAt,
       },

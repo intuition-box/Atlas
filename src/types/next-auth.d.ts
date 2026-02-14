@@ -15,6 +15,9 @@ declare module "next-auth" {
       // Canonical handle name (derived server-side via HandleOwner -> Handle).
       handle: string | null;
       onboarded: boolean;
+      walletAddress: string | null;
+      discordHandle: string | null;
+      twitterHandle: string | null;
       authAt?: string | null;
     };
   }
