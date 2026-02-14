@@ -6,7 +6,7 @@ import { db } from "@/lib/db/client";
 
 import { Button } from "@/components/ui/button";
 import Logo from "@/components/brand/logo";
-import OrbitAnimation from "../../../components/users/orbit-animation";
+import OrbitAnimation from "../../../components/users/signin-animation";
 
 export const dynamic = "force-dynamic";
 
