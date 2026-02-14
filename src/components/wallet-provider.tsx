@@ -5,7 +5,7 @@ import { WagmiProvider } from "wagmi";
 import { RainbowKitProvider, darkTheme } from "@rainbow-me/rainbowkit";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-import { walletConfig } from "@/lib/wallet/config";
+import { walletConfig } from "@/lib/intuition/wallet";
 
 import "@rainbow-me/rainbowkit/styles.css";
 
