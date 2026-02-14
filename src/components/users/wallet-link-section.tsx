@@ -293,32 +293,6 @@ export function WalletLinkSection() {
               </div>
             ))}
 
-            {isConnected && connectedAddress && !connectedIsLinked ? (
-              <div className="rounded-lg border border-border p-3 text-sm">
-                <h2 className="text-xs font-medium text-muted-foreground mb-1">Connected</h2>
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <WalletIcon className="size-4 shrink-0 text-muted-foreground" />
-                    <span className="font-mono text-sm">
-                      {truncateAddress(connectedAddress)}
-                    </span>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => linkWallet(connectedAddress)}
-                    disabled={isWorking}
-                  >
-                    {isWorking ? (
-                      <Loader2 className="size-4 animate-spin" />
-                    ) : (
-                      "Link"
-                    )}
-                  </Button>
-                </div>
-              </div>
-            ) : null}
-
             <div className="rounded-lg border border-dashed p-3 text-sm">
               <h2 className="text-xs font-medium text-amber-400/70 mb-1">Connect</h2>
               <div className="flex items-center justify-between gap-2">
