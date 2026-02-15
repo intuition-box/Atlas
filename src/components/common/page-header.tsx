@@ -46,43 +46,40 @@ function PageHeader({
   contentClassName,
 }: PageHeaderProps) {
   const ActionsWrap = actionsAsFormActions ? FormActions : "div";
-  const sentinelRef = React.useRef<HTMLDivElement>(null);
+  const headerRef = React.useRef<HTMLDivElement>(null);
   const [isSticky, setIsSticky] = React.useState(false);
 
   React.useEffect(() => {
     if (!sticky) return;
 
-    const sentinel = sentinelRef.current;
-    if (!sentinel) return;
+    const el = headerRef.current;
+    if (!el) return;
 
     const observer = new IntersectionObserver(
-      ([entry]) => setIsSticky(!entry.isIntersecting),
-      { threshold: 1 },
+      ([entry]) => setIsSticky(entry.intersectionRatio < 1),
+      { threshold: 1, rootMargin: "-1px 0px 0px 0px" },
     );
 
-    observer.observe(sentinel);
+    observer.observe(el);
     return () => observer.disconnect();
   }, [sticky]);
 
   return (
-    <>
-      {sticky ? <div ref={sentinelRef} className="h-0 w-full" /> : null}
-      <div
-        data-slot="page-header"
-        data-stuck={isSticky || undefined}
-        className={cn(
-          "w-full transition-colors duration-200",
-          sticky ? "sticky top-0 z-40 rounded-2xl" : null,
-          sticky && isSticky
-            ? "border border-border bg-card/80 backdrop-blur-md"
-            : "border border-transparent",
-          className,
-        )}
-      >
+    <div
+      ref={headerRef}
+      data-slot="page-header"
+      data-stuck={isSticky || undefined}
+      className={cn(
+        "w-full transition-colors duration-200",
+        sticky ? "sticky top-0 z-40 rounded-2xl border border-transparent" : null,
+        sticky && isSticky ? "border-border bg-card/80 backdrop-blur-md shadow-lg" : null,
+        className,
+      )}
+    >
       <div
         data-slot="page-header-content"
         className={cn(
-          "mx-auto w-full px-4 py-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between", 
+          "mx-auto w-full p-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between", 
           contentClassName
         )}
       >
@@ -121,7 +118,6 @@ function PageHeader({
         ) : null}
       </div>
     </div>
-    </>
   );
 }
 
