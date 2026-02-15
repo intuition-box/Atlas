@@ -46,59 +46,82 @@ function PageHeader({
   contentClassName,
 }: PageHeaderProps) {
   const ActionsWrap = actionsAsFormActions ? FormActions : "div";
+  const sentinelRef = React.useRef<HTMLDivElement>(null);
+  const [isSticky, setIsSticky] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!sticky) return;
+
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => setIsSticky(!entry.isIntersecting),
+      { threshold: 1 },
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [sticky]);
 
   return (
-    <div
-      data-slot="page-header"
-      className={cn(
-        "w-full",
-        sticky
-          ? "sticky top-0 z-40 "
-          : null,
-        className,
-      )}
-    >
+    <>
+      {sticky ? <div ref={sentinelRef} className="h-0 w-full" /> : null}
+      <div
+        data-slot="page-header"
+        data-stuck={isSticky || undefined}
+        className={cn(
+          "w-full transition-colors duration-200",
+          sticky ? "sticky top-0 z-40 rounded-2xl" : null,
+          sticky && isSticky
+            ? "border border-border bg-card/80 backdrop-blur-md"
+            : "border border-transparent",
+          className,
+        )}
+      >
       <div
         data-slot="page-header-content"
-        className={cn("mx-auto w-full max-w-5xl px-4 py-4", contentClassName)}
+        className={cn(
+          "mx-auto w-full px-4 py-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between", 
+          contentClassName
+        )}
       >
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <header
-            data-slot="page-header-title"
-            className="flex min-w-0 items-start gap-3"
-          >
-            {leading ? (
-              <div
-                data-slot="page-header-leading"
-                className={cn("shrink-0", leadingClassName)}
-              >
-                {leading}
-              </div>
-            ) : null}
-
-            <div data-slot="page-header-text" className="min-w-0 flex flex-col gap-1">
-              <h1 className="text-2xl font-semibold leading-tight">{title}</h1>
-              {description ? (
-                <p className="text-sm text-muted-foreground">{description}</p>
-              ) : null}
-            </div>
-          </header>
-
-          {actions ? (
-            <ActionsWrap
-              data-slot="page-header-actions"
-              className={cn(
-                actionsAsFormActions
-                  ? "sm:justify-end"
-                  : "flex flex-wrap items-center justify-start gap-2 sm:justify-end",
-              )}
+        <header
+          data-slot="page-header-title"
+          className="flex min-w-0 items-start gap-3"
+        >
+          {leading ? (
+            <div
+              data-slot="page-header-leading"
+              className={cn("shrink-0", leadingClassName)}
             >
-              {actions}
-            </ActionsWrap>
+              {leading}
+            </div>
           ) : null}
-        </div>
+
+          <div data-slot="page-header-text" className="min-w-0 flex flex-col">
+            <h1 className="text-2xl font-semibold leading-tight">{title}</h1>
+            {description ? (
+              <p className="text-sm text-muted-foreground">{description}</p>
+            ) : null}
+          </div>
+        </header>
+
+        {actions ? (
+          <ActionsWrap
+            data-slot="page-header-actions"
+            className={cn(
+              actionsAsFormActions
+                ? "sm:align-center sm:justify-end"
+                : "flex flex-wrap items-center justify-center",
+            )}
+          >
+            {actions}
+          </ActionsWrap>
+        ) : null}
       </div>
     </div>
+    </>
   );
 }
 
