@@ -1,16 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSession } from "next-auth/react";
 import { useAccount, useSignMessage, useDisconnect } from "wagmi";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
-import { Loader2 } from "lucide-react";
+import { Loader2, Wallet } from "lucide-react";
 
 import { apiGet, apiPost } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { EncryptedText } from "@/components/ui/encrypted-text";
-import { WalletIcon } from "@/components/ui/icons";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -51,6 +50,8 @@ type LinkResponse = {
 type Status = {
   type: "idle" | "linking" | "unlinking" | "success" | "error";
   message?: string;
+  /** The wallet address this status relates to. */
+  address?: string;
 };
 
 /* ────────────────────────────
@@ -73,15 +74,20 @@ function truncateAddress(address: string): string {
  * plus a card to connect and link a new wallet.
  */
 export function WalletLinkSection() {
+  const { data: session } = useSession();
   const { address: connectedAddress, isConnected } = useAccount();
-  const { signMessageAsync } = useSignMessage();
-  const { disconnect } = useDisconnect();
+  const signMessage = useSignMessage();
+  const disconnectWallet = useDisconnect();
   const { openConnectModal } = useConnectModal();
 
-  const [wallets, setWallets] = useState<WalletRow[]>([]);
+  const sessionWallet = session?.user?.walletAddress;
+  const [wallets, setWallets] = useState<WalletRow[]>(
+    sessionWallet ? [{ address: sessionWallet, linkedAt: "" }] : []
+  );
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<Status>({ type: "idle" });
   const [pendingLink, setPendingLink] = useState(false);
+  const [unlinkDialogOpen, setUnlinkDialogOpen] = useState<string | null>(null);
 
   const mountedRef = useRef(true);
   useEffect(() => {
@@ -109,7 +115,7 @@ export function WalletLinkSection() {
 
   const linkWallet = useCallback(async (addr: string) => {
     if (!mountedRef.current) return;
-    setStatus({ type: "linking", message: "Requesting message…" });
+    setStatus({ type: "linking", message: "Requesting message…", address: addr });
 
     // 1. Request message
     const msgResult = await apiPost<RequestMessageResponse>(
@@ -118,29 +124,29 @@ export function WalletLinkSection() {
     );
     if (!msgResult.ok) {
       if (mountedRef.current) {
-        setStatus({ type: "error", message: "Failed to request message" });
+        setStatus({ type: "error", message: "Failed to request message", address: addr });
       }
       return;
     }
 
     // 2. Sign message
     if (mountedRef.current) {
-      setStatus({ type: "linking", message: "Please sign the message in your wallet…" });
+      setStatus({ type: "linking", message: "Please sign the message in your wallet…", address: addr });
     }
 
     let signature: string;
     try {
-      signature = await signMessageAsync({ message: msgResult.value.message });
+      signature = await signMessage.mutateAsync({ message: msgResult.value.message });
     } catch {
       if (mountedRef.current) {
-        setStatus({ type: "error", message: "Signing cancelled" });
+        setStatus({ type: "error", message: "Signing cancelled", address: addr });
       }
       return;
     }
 
     // 3. Submit to link endpoint
     if (mountedRef.current) {
-      setStatus({ type: "linking", message: "Verifying…" });
+      setStatus({ type: "linking", message: "Verifying…", address: addr });
     }
 
     const linkResult = await apiPost<LinkResponse>("/api/wallet/link", {
@@ -153,14 +159,14 @@ export function WalletLinkSection() {
 
     if (linkResult.ok) {
       await fetchWallets();
-      setStatus({ type: "success", message: "Wallet linked!" });
+      setStatus({ type: "success", message: "Wallet linked!", address: addr });
       setTimeout(() => {
         if (mountedRef.current) setStatus({ type: "idle" });
       }, 3_000);
     } else {
-      setStatus({ type: "error", message: "Failed to link wallet" });
+      setStatus({ type: "error", message: "Failed to link wallet", address: addr });
     }
-  }, [signMessageAsync, fetchWallets]);
+  }, [signMessage, fetchWallets]);
 
   /* ────────── Auto-link after connect ────────── */
 
@@ -185,7 +191,7 @@ export function WalletLinkSection() {
   /* ────────── Unlink flow ────────── */
 
   const handleUnlink = useCallback(async (address: string) => {
-    setStatus({ type: "unlinking", message: "Unlinking…" });
+    setStatus({ type: "unlinking", message: "Unlinking…", address });
 
     const result = await apiPost<{ unlinked: boolean }>("/api/wallet/unlink", {
       address,
@@ -194,18 +200,19 @@ export function WalletLinkSection() {
     if (!mountedRef.current) return;
 
     if (result.ok) {
-      await fetchWallets();
       if (connectedAddress?.toLowerCase() === address.toLowerCase()) {
-        disconnect();
+        disconnectWallet.mutate();
       }
-      setStatus({ type: "success", message: "Wallet unlinked" });
-      setTimeout(() => {
-        if (mountedRef.current) setStatus({ type: "idle" });
+      setStatus({ type: "success", message: "Wallet unlinked", address });
+      setTimeout(async () => {
+        if (!mountedRef.current) return;
+        await fetchWallets();
+        setStatus({ type: "idle" });
       }, 3_000);
     } else {
-      setStatus({ type: "error", message: "Failed to unlink wallet" });
+      setStatus({ type: "error", message: "Failed to unlink wallet", address });
     }
-  }, [connectedAddress, disconnect, fetchWallets]);
+  }, [connectedAddress, disconnectWallet, fetchWallets]);
 
   /* ────────── Render ────────── */
 
@@ -223,48 +230,48 @@ export function WalletLinkSection() {
         <CardDescription>Link wallets for attestation minting and identity verification.</CardDescription>
       </CardHeader>
 
-      <CardContent className="px-5">
-        {loading ? (
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-lg border border-border/60 p-3">
-              <Skeleton className="mb-2 h-3 w-16" />
-              <Skeleton className="h-5 w-32" />
-            </div>
-            <div className="rounded-lg border border-border/60 p-3">
-              <Skeleton className="mb-2 h-3 w-16" />
-              <Skeleton className="h-5 w-32" />
-            </div>
-          </div>
-        ) : (
-          <div className="grid gap-3 sm:grid-cols-2">
-            {/* Linked wallet cards */}
-            {wallets.map((wallet) => (
+      <CardContent>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {/* Linked wallet cards */}
+          {wallets.map((wallet) => {
+            const walletStatus =
+              status.address?.toLowerCase() === wallet.address.toLowerCase() &&
+              status.type !== "idle" && status.type !== "linking"
+                ? status
+                : null;
+
+            return (
               <div
                 key={wallet.address}
-                className="rounded-lg border border-border/60 p-3 text-sm"
+                className="relative overflow-hidden rounded-lg border border-border/60 p-3 text-sm"
               >
                 <h2 className="text-xs font-medium text-muted-foreground mb-1">Linked</h2>
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0">
-                    <WalletIcon className="size-4 shrink-0" />
+                    <Wallet className="size-4 shrink-0" />
                     <EncryptedText
                       text={truncateAddress(wallet.address)}
+                      scrambleOnly={loading}
+                      scrambleOneChar={loading}
                       revealDelayMs={40}
                       flipDelayMs={30}
                       className="font-mono text-sm text-foreground/80"
                     />
                   </div>
-                  <AlertDialog>
+                  <AlertDialog
+                    open={unlinkDialogOpen === wallet.address}
+                    onOpenChange={(open) => setUnlinkDialogOpen(open ? wallet.address : null)}
+                  >
                     <AlertDialogTrigger
                       render={
                         <Button
                           variant="destructive"
                           size="sm"
-                          disabled={isWorking}
+                          disabled={status.type === "unlinking"}
                         />
                       }
                     >
-                      {isWorking ? (
+                      {status.type === "unlinking" && status.address?.toLowerCase() === wallet.address.toLowerCase() ? (
                         <Loader2 className="size-4 animate-spin" />
                       ) : (
                         "Unlink"
@@ -282,7 +289,10 @@ export function WalletLinkSection() {
                         <AlertDialogCancel>Cancel</AlertDialogCancel>
                         <AlertDialogAction
                           variant="destructive"
-                          onClick={() => handleUnlink(wallet.address)}
+                          onClick={() => {
+                            setUnlinkDialogOpen(null);
+                            handleUnlink(wallet.address);
+                          }}
                         >
                           Unlink
                         </AlertDialogAction>
@@ -290,56 +300,73 @@ export function WalletLinkSection() {
                     </AlertDialogContent>
                   </AlertDialog>
                 </div>
-              </div>
-            ))}
 
-            <div className="rounded-lg border border-dashed p-3 text-sm">
-              <h2 className="text-xs font-medium text-amber-400/70 mb-1">Connect</h2>
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 min-w-0">
-                  <WalletIcon className="size-4 shrink-0 text-amber-400" />
-                  <EncryptedText
-                    text="0x0000…0000"
-                    scrambleOnly
-                    scrambleOneChar
-                    className="font-mono text-sm text-amber-400"
-                  />
-                </div>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  className="bg-amber-400/10 text-amber-400 hover:bg-amber-400/20 dark:bg-amber-400/20 dark:hover:bg-amber-400/30"
-                  onClick={handleConnectAndLink}
-                  disabled={isWorking}
-                >
-                  {isWorking && status.type === "linking" ? (
-                    <>
-                      <Loader2 className="size-4 animate-spin" />
-                      Linking…
-                    </>
-                  ) : (
-                    "Add wallet"
-                  )}
-                </Button>
+                {/* Status overlay scoped to this wallet */}
+                {walletStatus?.message ? (
+                  <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-card/80 backdrop-blur-sm">
+                    <p
+                      className={`text-xs font-medium ${
+                        walletStatus.type === "error"
+                          ? "text-destructive"
+                          : walletStatus.type === "success"
+                            ? "text-emerald-500"
+                            : "text-muted-foreground"
+                      }`}
+                    >
+                      {walletStatus.message}
+                    </p>
+                  </div>
+                ) : null}
               </div>
+            );
+          })}
+
+          {/* Add wallet card */}
+          <div className="relative overflow-hidden rounded-lg border border-dashed border-amber-400/40 p-3 text-sm">
+            <h2 className="text-xs font-medium text-amber-400/70 mb-1">Connect</h2>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <Wallet className="size-4 shrink-0 text-amber-400" />
+                <EncryptedText
+                  text="0x0000…0000"
+                  scrambleOnly
+                  scrambleOneChar
+                  className="font-mono text-sm text-amber-400"
+                />
+              </div>
+              <Button
+                size="sm"
+                onClick={handleConnectAndLink}
+                disabled={isWorking || loading}
+                className="bg-amber-400/15 text-amber-400 hover:bg-amber-400/25"
+              >
+                {status.type === "linking" ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" />
+                    Linking…
+                  </>
+                ) : (
+                  "Add wallet"
+                )}
+              </Button>
             </div>
-          </div>
-        )}
 
-        {/* Status message */}
-        {status.message && status.type !== "idle" && (
-          <p
-            className={`mt-3 text-xs ${
-              status.type === "error"
-                ? "text-destructive"
-                : status.type === "success"
-                  ? "text-emerald-500"
-                  : "text-muted-foreground"
-            }`}
-          >
-            {status.message}
-          </p>
-        )}
+            {/* Overlay: linking progress + errors for wallets not yet in the list */}
+            {status.message &&
+              (status.type === "linking" ||
+                (status.type === "error" && status.address && !wallets.some((w) => w.address.toLowerCase() === status.address!.toLowerCase()))) ? (
+              <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-card/80 backdrop-blur-sm">
+                <p
+                  className={`text-xs font-medium ${
+                    status.type === "error" ? "text-destructive" : "text-muted-foreground"
+                  }`}
+                >
+                  {status.message}
+                </p>
+              </div>
+            ) : null}
+          </div>
+        </div>
       </CardContent>
     </Card>
   );
