@@ -256,28 +256,50 @@ function useToolsState() {
 
 function SettingsSkeleton() {
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-10 pb-40">
-      {/* Header skeleton */}
-      <Card>
-        <CardContent className="flex items-center gap-4 px-5">
-          <Skeleton className="size-12 rounded-full" />
-          <div className="flex flex-col gap-2">
-            <Skeleton className="h-5 w-40" />
-            <Skeleton className="h-4 w-28" />
-          </div>
-        </CardContent>
-      </Card>
+    <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-7 pb-40">
+      <div className="w-full flex flex-wrap gap-3 p-5">
+        <Skeleton className="size-12 rounded-full" />
+        <div className="flex flex-col gap-2">
+          <Skeleton className="h-7 w-48" />
+          <Skeleton className="h-3 w-24" />
+        </div>
+        <div className="flex gap-3 ml-auto sm:align-center sm:justify-end">
+          <Skeleton className="h-9 w-14" />
+          <Skeleton className="h-9 w-14" />
+        </div>
+      </div>
 
-      {/* Section skeletons */}
+      {[1, 2].map((i) => (
+        <Card key={i}>
+          <CardHeader className="gap-4">
+            <CardTitle>
+              <Skeleton className="h-5 w-24" />
+            </CardTitle>
+            <CardDescription>
+              <Skeleton className="h-4 w-86" />
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-row gap-4">
+            <Skeleton className="h-19 w-full" />
+            <Skeleton className="h-19 w-full" />
+          </CardContent>
+        </Card>
+      ))}
+
       {[1, 2, 3, 4].map((i) => (
         <Card key={i}>
-          <CardContent className="flex flex-col gap-4 px-5">
-            <div className="flex flex-col gap-1">
-              <Skeleton className="h-4 w-24" />
-              <Skeleton className="h-3 w-56" />
-            </div>
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
+          <CardHeader className="gap-4">
+            <CardTitle>
+              <Skeleton className="h-5 w-24" />
+            </CardTitle>
+            <CardDescription>
+              <Skeleton className="h-4 w-86" />
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-8 w-full" />
+            <Skeleton className="h-8 w-48" />
           </CardContent>
         </Card>
       ))}
@@ -1031,8 +1053,8 @@ export default function UserSettingsPage() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col mt-20 gap-6 pb-40">
-      <Form form={form} onSubmit={handleSubmit} className="flex flex-col gap-6">
+    <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
+      <Form form={form} onSubmit={handleSubmit}>
         <PageHeader
           leading={
             <Avatar className="h-12 w-12">
