@@ -107,6 +107,54 @@ export const ATTRIBUTES = {
     category: "skill",
     predicate: "atlas:attr:community",
   },
+  research: {
+    id: "research",
+    label: "Research",
+    category: "skill",
+    predicate: "atlas:attr:research",
+  },
+  writing: {
+    id: "writing",
+    label: "Writing",
+    category: "skill",
+    predicate: "atlas:attr:writing",
+  },
+  dataScience: {
+    id: "dataScience",
+    label: "Data Science",
+    category: "skill",
+    predicate: "atlas:attr:data_science",
+  },
+  security: {
+    id: "security",
+    label: "Security",
+    category: "skill",
+    predicate: "atlas:attr:security",
+  },
+  devrel: {
+    id: "devrel",
+    label: "DevRel",
+    category: "skill",
+    predicate: "atlas:attr:devrel",
+  },
+  projectManagement: {
+    id: "projectManagement",
+    label: "Project Management",
+    category: "skill",
+    predicate: "atlas:attr:project_management",
+  },
+  smartContracts: {
+    id: "smartContracts",
+    label: "Smart Contracts",
+    category: "skill",
+    predicate: "atlas:attr:smart_contracts",
+  },
+  trading: {
+    id: "trading",
+    label: "Trading",
+    category: "skill",
+    predicate: "atlas:attr:trading",
+  },
 
   // Tools
   vscode: {
@@ -114,6 +162,18 @@ export const ATTRIBUTES = {
     label: "VS Code",
     category: "tool",
     predicate: "atlas:attr:vscode",
+  },
+  cursor: {
+    id: "cursor",
+    label: "Cursor",
+    category: "tool",
+    predicate: "atlas:attr:cursor",
+  },
+  claude: {
+    id: "claude",
+    label: "Claude",
+    category: "tool",
+    predicate: "atlas:attr:claude",
   },
   notion: {
     id: "notion",
@@ -144,6 +204,96 @@ export const ATTRIBUTES = {
     label: "DaVinci Resolve",
     category: "tool",
     predicate: "atlas:attr:davinci",
+  },
+  linear: {
+    id: "linear",
+    label: "Linear",
+    category: "tool",
+    predicate: "atlas:attr:linear",
+  },
+  discord: {
+    id: "discord",
+    label: "Discord",
+    category: "tool",
+    predicate: "atlas:attr:discord",
+  },
+  telegram: {
+    id: "telegram",
+    label: "Telegram",
+    category: "tool",
+    predicate: "atlas:attr:telegram",
+  },
+  dune: {
+    id: "dune",
+    label: "Dune",
+    category: "tool",
+    predicate: "atlas:attr:dune",
+  },
+  remix: {
+    id: "remix",
+    label: "Remix IDE",
+    category: "tool",
+    predicate: "atlas:attr:remix",
+  },
+  hardhat: {
+    id: "hardhat",
+    label: "Hardhat",
+    category: "tool",
+    predicate: "atlas:attr:hardhat",
+  },
+  foundry: {
+    id: "foundry",
+    label: "Foundry",
+    category: "tool",
+    predicate: "atlas:attr:foundry",
+  },
+  vercel: {
+    id: "vercel",
+    label: "Vercel",
+    category: "tool",
+    predicate: "atlas:attr:vercel",
+  },
+  arc: {
+    id: "arc",
+    label: "Arc",
+    category: "tool",
+    predicate: "atlas:attr:arc",
+  },
+  obsidian: {
+    id: "obsidian",
+    label: "Obsidian",
+    category: "tool",
+    predicate: "atlas:attr:obsidian",
+  },
+  blender: {
+    id: "blender",
+    label: "Blender",
+    category: "tool",
+    predicate: "atlas:attr:blender",
+  },
+  photoshop: {
+    id: "photoshop",
+    label: "Photoshop",
+    category: "tool",
+    predicate: "atlas:attr:photoshop",
+  },
+  canva: {
+    id: "canva",
+    label: "Canva",
+    category: "tool",
+    predicate: "atlas:attr:canva",
+  },
+  slack: {
+    id: "slack",
+    label: "Slack",
+    category: "tool",
+    predicate: "atlas:attr:slack",
+  },
+  miro: {
+    id: "miro",
+    label: "Miro",
+    category: "tool",
+    predicate: "atlas:attr:miro",
   },
 } as const;
 
