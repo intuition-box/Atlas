@@ -40,7 +40,7 @@ function Form<TFieldValues extends FieldValues>({ form, onSubmit, ...props }: Fo
  */
 function FormRoot({ className, ...props }: React.ComponentProps<typeof FormPrimitive>) {
   return (
-    <FormPrimitive data-slot="form" className={cn("space-y-6", className)} {...props} />
+    <FormPrimitive data-slot="form" className={cn("flex flex-col gap-6", className)} {...props} />
   );
 }
 
