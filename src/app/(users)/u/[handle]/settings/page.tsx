@@ -7,8 +7,6 @@ import { Controller, useFieldArray } from "react-hook-form"
 import { useParams, useRouter } from "next/navigation"
 import { getSession, signIn, useSession } from "next-auth/react"
 import { Loader2, X } from "lucide-react"
-import { HugeiconsIcon } from "@hugeicons/react"
-import { Cancel01Icon } from "@hugeicons/core-free-icons"
 
 import { apiGet, apiPost } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
@@ -47,6 +45,7 @@ import {
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
 import { Form, FormActions, FormField, fieldControlProps, useForm } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
+import { EncryptedText } from "@/components/ui/encrypted-text"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { WalletLinkSection } from "@/components/users/wallet-link-section"
@@ -307,9 +306,10 @@ function ProfileSection({
         <CardDescription>Your public identity across communities.</CardDescription>
       </CardHeader>
 
-      <CardContent className="flex flex-col gap-6 px-5">
+      <CardContent className="flex flex-col gap-6">
         <Field data-slot="settings-avatar" name="image" invalid={!!form.formState.errors.image}>
           <FieldLabel>Avatar</FieldLabel>
+          <FieldDescription>A photo that represents you across the platform.</FieldDescription>
 
           <div className="flex justify-center rounded-xl border border-dashed border-border p-6">
             <AvatarDropzone
@@ -351,6 +351,7 @@ function ProfileSection({
           name="name"
           label="Name"
           required
+          description="The name people know you by."
           render={({ id, field, fieldState }) => (
             <Input {...fieldControlProps(field, { id, invalid: fieldState.invalid })} value={field.value ?? ""} />
           )}
@@ -359,7 +360,7 @@ function ProfileSection({
         <FormField<SettingsValues, "headline">
           name="headline"
           label="Headline"
-          description="Short description shown under your name"
+          description="Short description shown under your name."
           render={({ id, field, fieldState }) => (
             <Input {...fieldControlProps(field, { id, invalid: fieldState.invalid })} value={field.value ?? ""} />
           )}
@@ -383,10 +384,11 @@ function AboutSection({
         <CardDescription>Tell people a bit about yourself.</CardDescription>
       </CardHeader>
 
-      <CardContent className="flex flex-col gap-6 px-5">
+      <CardContent className="flex flex-col gap-6">
         <FormField<SettingsValues, "bio">
           name="bio"
           label="Bio"
+          description="Share your background, experience, and what drives you."
           render={({ id, field, fieldState }) => (
             <Textarea
               {...fieldControlProps(field, { id, invalid: fieldState.invalid })}
@@ -399,39 +401,48 @@ function AboutSection({
         <FormField<SettingsValues, "location">
           name="location"
           label="Location"
-          description="Where you're based"
+          description="Where you're based."
           render={({ id, field, fieldState }) => (
-            <Combobox
-              items={countryItems}
-              value={field.value ? field.value : null}
-              onValueChange={(value) => field.onChange(typeof value === "string" ? value : "")}
-            >
-              <ComboboxInput
-                id={id}
-                placeholder="Select a country"
-                aria-invalid={fieldState.invalid}
-                className="w-full"
-                showClear
-                showTrigger
-              />
+            <div className="relative">
+              <Combobox
+                items={countryItems}
+                value={field.value ? field.value : null}
+                onValueChange={(value) => field.onChange(typeof value === "string" ? value : "")}
+              >
+                <ComboboxInput
+                  id={id}
+                  placeholder="Select a country"
+                  aria-invalid={fieldState.invalid}
+                  className="w-full"
+                  showTrigger={!field.value}
+                />
 
-              <ComboboxContent className="bg-popover text-popover-foreground border border-border/60 shadow-lg rounded-2xl p-1">
-                <ComboboxEmpty className="px-3 py-2 text-sm text-muted-foreground">No countries found.</ComboboxEmpty>
-                <ComboboxList className="max-h-64 overflow-auto">
-                  <ComboboxCollection>
-                    {(item: string) => (
-                      <ComboboxItem
-                        key={item}
-                        value={item}
-                        className="data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground flex items-center gap-2 rounded-xl px-3 py-2 text-sm"
-                      >
-                        <span className="flex-1">{item}</span>
-                      </ComboboxItem>
-                    )}
-                  </ComboboxCollection>
-                </ComboboxList>
-              </ComboboxContent>
-            </Combobox>
+                <ComboboxContent className="bg-popover text-popover-foreground border border-border/60 shadow-lg rounded-2xl p-1">
+                  <ComboboxEmpty className="px-3 py-2 text-sm text-muted-foreground">No countries found.</ComboboxEmpty>
+                  <ComboboxList className="max-h-64 overflow-auto">
+                    <ComboboxCollection>
+                      {(item: string) => (
+                        <ComboboxItem
+                          key={item}
+                          value={item}
+                          className="data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground flex items-center gap-2 rounded-xl px-3 py-2 text-sm"
+                        >
+                          <span className="flex-1">{item}</span>
+                        </ComboboxItem>
+                      )}
+                    </ComboboxCollection>
+                  </ComboboxList>
+                </ComboboxContent>
+              </Combobox>
+              {field.value ? (
+                <Button
+                  className="absolute top-1/2 right-3 -translate-y-1/2 cursor-pointer bg-destructive/10 text-destructive hover:bg-destructive/20 h-5 px-2 py-0.5 text-xs font-medium"
+                  onClick={() => field.onChange("")}
+                >
+                  Remove
+                </Button>
+              ) : null}
+            </div>
           )}
         />
       </CardContent>
@@ -453,7 +464,7 @@ function LinksSection({
         <CardDescription>Add your website or social profiles.</CardDescription>
       </CardHeader>
 
-      <CardContent className="flex flex-col gap-6 px-5">
+      <CardContent className="flex flex-col gap-6">
         <Field data-slot="settings-links" name="links" invalid={!!form.formState.errors.links}>
           <div className="flex flex-col gap-2">
             {links.fields.map((item, index) => (
@@ -467,32 +478,29 @@ function LinksSection({
                         value={field.value ?? ""}
                         placeholder="https://..."
                         aria-invalid={fieldState.invalid || undefined}
-                        className="w-full pr-9"
+                        className="w-full pr-18"
                       />
                     )}
                   />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-xs"
-                    onClick={() => {
-                      if (links.fields.length <= 1) {
-                        links.replace([{ url: "" }])
-                      } else {
-                        links.remove(index)
-                      }
-                    }}
-                    className="absolute top-1/2 right-2 -translate-y-1/2 text-destructive"
-                    aria-label="Remove link"
-                  >
-                    <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} className="pointer-events-none" />
-                  </Button>
+                  {(index > 0 || form.watch(`links.${index}.url`)) ? (
+                    <Button
+                      className="absolute top-1/2 right-3 -translate-y-1/2 cursor-pointer bg-destructive/10 text-destructive hover:bg-destructive/20 h-5 px-2 py-0.5 text-xs font-medium"
+                      onClick={() => {
+                        if (links.fields.length <= 1) {
+                          links.replace([{ url: "" }])
+                        } else {
+                          links.remove(index)
+                        }
+                      }}
+                    >
+                      Remove
+                    </Button>
+                  ) : null}
                 </div>
             ))}
 
             <Button
               type="button"
-              variant="secondary"
               onClick={() => links.append({ url: "" }, { shouldFocus: false })}
               className="self-start"
             >
@@ -537,7 +545,7 @@ function SkillsAndToolsSection({
         <CardDescription>What you&apos;re good at and what you work with.</CardDescription>
       </CardHeader>
 
-      <CardContent className="flex flex-col gap-6 px-5">
+      <CardContent className="flex flex-col gap-6">
         {/* Skills */}
         <Field data-slot="settings-skills" name="skills" invalid={!!form.formState.errors.skills}>
           <FieldLabel>Skills</FieldLabel>
@@ -754,8 +762,6 @@ function TwitterAccountRow() {
   const isLinked = !!twitterHandle
 
   async function handleConnect() {
-    // signIn("twitter") redirects to Twitter OAuth;
-    // after auth, the signIn callback persists twitterId/twitterHandle.
     await signIn("twitter", { callbackUrl: window.location.href })
   }
 
@@ -768,7 +774,6 @@ function TwitterAccountRow() {
     )
 
     if (result.ok) {
-      // Refresh session to clear twitterHandle
       await updateSession()
     }
 
@@ -776,58 +781,72 @@ function TwitterAccountRow() {
   }
 
   return (
-    <div className="flex items-center justify-between rounded-lg border border-border/60 p-4">
-      <div className="flex items-center gap-3">
-        <XIcon className="size-5 text-muted-foreground" />
-        <div>
-          <p className="text-sm font-medium">X / Twitter</p>
-          <p className="text-xs text-muted-foreground">
-            {isLinked ? `@${twitterHandle}` : "Not connected"}
-          </p>
+    <div className={isLinked ? "rounded-lg border border-border/60 p-3 text-sm" : "rounded-lg border border-dashed border-amber-400/40 p-3 text-sm"}>
+      <h2 className={isLinked ? "text-xs font-medium text-muted-foreground mb-1" : "text-xs font-medium text-amber-400/70 mb-1"}>
+        X
+      </h2>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <XIcon className={isLinked ? "size-4 shrink-0" : "size-4 shrink-0 text-amber-400"} />
+          {isLinked ? (
+            <span className="text-sm font-medium text-foreground/80">@{twitterHandle}</span>
+          ) : (
+            <EncryptedText
+              text="@username"
+              scrambleOnly
+              scrambleOneChar
+              className="text-sm text-amber-400"
+            />
+          )}
         </div>
-      </div>
 
-      {isLinked ? (
-        <AlertDialog>
-          <AlertDialogTrigger
-            render={
-              <Button
-                variant="destructive"
-                size="sm"
-                disabled={disconnecting}
-              />
-            }
+        {isLinked ? (
+          <AlertDialog>
+            <AlertDialogTrigger
+              render={
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  disabled={disconnecting}
+                />
+              }
+            >
+              {disconnecting ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                "Disconnect"
+              )}
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Disconnect X / Twitter?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will unlink your X account (@{twitterHandle}) from your profile.
+                  You can always reconnect later.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  type="button"
+                  variant="destructive"
+                  onClick={handleDisconnect}
+                >
+                  Disconnect
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        ) : (
+          <Button
+            size="sm"
+            onClick={handleConnect}
+            className="bg-amber-400/15 text-amber-400 hover:bg-amber-400/25"
           >
-            {disconnecting ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              "Disconnect"
-            )}
-          </AlertDialogTrigger>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Disconnect X / Twitter?</AlertDialogTitle>
-              <AlertDialogDescription>
-                This will unlink your X account (@{twitterHandle}) from your profile.
-                You can always reconnect later.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                variant="destructive"
-                onClick={handleDisconnect}
-              >
-                Disconnect
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      ) : (
-        <Button variant="outline" size="sm" onClick={handleConnect}>
-          Connect
-        </Button>
-      )}
+            Connect
+          </Button>
+        )}
+      </div>
     </div>
   )
 }
@@ -842,36 +861,47 @@ function ConnectedAccountsSection() {
         <CardDescription>Manage your linked social accounts.</CardDescription>
       </CardHeader>
 
-      <CardContent className="flex flex-col gap-3 px-5">
-        {/* Discord — always connected (read-only) */}
-        <div className="flex items-center justify-between rounded-lg border border-border/60 p-4">
-          <div className="flex items-center gap-3">
-            <DiscordIcon className="size-5 text-muted-foreground" />
-            <div>
-              <p className="text-sm font-medium">Discord</p>
-              <p className="text-xs text-muted-foreground">
-                {session?.user?.discordHandle ?? session?.user?.name ?? "Connected"}
-              </p>
+      <CardContent className="px-5">
+        <div className="grid gap-3 sm:grid-cols-2">
+          {/* Discord — always connected (read-only) */}
+          <div className="rounded-lg border border-border/60 p-3 text-sm">
+            <h2 className="text-xs font-medium text-muted-foreground mb-1">Discord</h2>
+            <div className="flex min-h-8 items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <DiscordIcon className="size-4 shrink-0" />
+                <span className="text-sm font-medium text-foreground/80">
+                  {session?.user?.discordHandle ?? session?.user?.name ?? "Connected"}
+                </span>
+              </div>
+              <Badge variant="secondary" className="bg-emerald-500/10 text-emerald-500">Primary</Badge>
             </div>
           </div>
-          <Badge variant="secondary">Connected</Badge>
-        </div>
 
-        {/* X/Twitter — connect/disconnect */}
-        <TwitterAccountRow />
+          {/* X/Twitter — connect/disconnect */}
+          <TwitterAccountRow />
 
-        {/* GitHub — coming soon */}
-        <div className="flex items-center justify-between rounded-lg border border-border/60 p-4">
-          <div className="flex items-center gap-3">
-            <GitHubIcon className="size-5 text-muted-foreground" />
-            <div>
-              <p className="text-sm font-medium">GitHub</p>
-              <p className="text-xs text-muted-foreground">Not connected</p>
+          {/* GitHub — coming soon */}
+          <div className="rounded-lg border border-dashed border-amber-400/40 p-3 text-sm">
+            <h2 className="text-xs font-medium text-amber-400/70 mb-1">GitHub</h2>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <GitHubIcon className="size-4 shrink-0 text-amber-400" />
+                <EncryptedText
+                  text="@username"
+                  scrambleOnly
+                  scrambleOneChar
+                  className="text-sm text-amber-400"
+                />
+              </div>
+              <Button
+                size="sm"
+                disabled
+                className="bg-amber-400/15 text-amber-400 hover:bg-amber-400/25"
+              >
+                Coming soon
+              </Button>
             </div>
           </div>
-          <Button variant="outline" size="sm" disabled>
-            Coming soon
-          </Button>
         </div>
       </CardContent>
     </Card>
@@ -996,13 +1026,12 @@ export default function UserSettingsPage() {
 
   if (!handle) return null
 
-  // Show skeleton while loading
   if (isOwner === null || loading) {
     return <SettingsSkeleton />
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-10 pb-40">
+    <div className="mx-auto flex w-full max-w-3xl flex-col mt-20 gap-6 pb-40">
       <Form form={form} onSubmit={handleSubmit} className="flex flex-col gap-6">
         <PageHeader
           leading={
