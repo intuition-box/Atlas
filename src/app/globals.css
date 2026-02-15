@@ -75,7 +75,7 @@
 /* Theme surfaces ---------------------------------------------------------- */
 
 @theme inline {
-  --color-background-radial-gradient: radial-gradient(45% 65% at center, rgb(9, 16, 39) 0%, rgb(4, 4, 11) 100%);
+  --color-background-radial-gradient: radial-gradient(45% 65% at center, rgb(9 16 39/40%) 0%, rgb(4 4 11/40%) 100%);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-display: var(--font-display);
@@ -171,7 +171,7 @@
   /* Typography */
 
   h1,h2,h3,h4,h5,h6 {
-    @apply font-sans font-semibold uppercase;
+    @apply font-sans font-semibold;
   }
 
   /* Shapes */
