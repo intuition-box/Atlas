@@ -31,7 +31,9 @@ import {
 } from "@/components/ui/combobox"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { UsersIcon } from "@/components/ui/icons"
-import { Spinner } from "@/components/ui/spinner"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Card, CardContent } from "@/components/ui/card"
+import { Skeleton } from "@/components/ui/skeleton"
 
 // === TYPES ===
 
@@ -137,46 +139,43 @@ function useApplicationsData(handle: string) {
     async (signal?: AbortSignal) => {
       setError(null)
 
-      try {
-        const res = await apiGet<ReviewListResponse>(
-          "/api/membership/review",
-          { communityHandle: handle },
-          { signal }
-        )
+      const res = await apiGet<ReviewListResponse>(
+        "/api/membership/review",
+        { communityHandle: handle },
+        { signal },
+      )
 
-        if (!mountedRef.current) return
+      if (!mountedRef.current || signal?.aborted) return
 
-        if (!res.ok) {
-          const err = res.error
-          const parsed = parseApiError(err)
+      if (!res.ok) {
+        // Ignore abort errors silently
+        if (res.error && "code" in res.error && res.error.code === "CLIENT_REQUEST_ABORTED") return
 
-          if (parsed.status === 401) {
-            router.replace(ROUTES.signIn)
-            router.refresh()
-            return
-          }
+        const parsed = parseApiError(res.error)
 
-          if (parsed.status === 403) {
-            router.replace(communityPath(handle))
-            router.refresh()
-            return
-          }
-
-          setError(parsed.formError || "Couldn't load applications.")
+        if (parsed.status === 401) {
+          router.replace(ROUTES.signIn)
+          router.refresh()
           return
         }
 
-        const applications = Array.isArray(res.value.applications) ? res.value.applications : []
-        const sorted = sortApplicationsByDate(applications)
+        if (parsed.status === 403) {
+          router.replace(communityPath(handle))
+          router.refresh()
+          return
+        }
 
-        setData(res.value)
-        setItems(sorted)
-      } catch (err) {
-        if (!mountedRef.current) return
-        setError("An unexpected error occurred while loading applications.")
+        setError(parsed.formError || "Couldn't load applications.")
+        return
       }
+
+      const applications = Array.isArray(res.value.applications) ? res.value.applications : []
+      const sorted = sortApplicationsByDate(applications)
+
+      setData(res.value)
+      setItems(sorted)
     },
-    [handle, router]
+    [handle, router],
   )
 
   React.useEffect(() => {
@@ -333,7 +332,6 @@ function FilterBar({
 
 function ApplicationsTable({
   applications,
-  loading,
   actingId,
   acting,
   onRowClick,
@@ -342,7 +340,6 @@ function ApplicationsTable({
   onViewProfile,
 }: {
   applications: ApplicationItem[]
-  loading: boolean
   actingId: string | null
   acting: DecisionAction | null
   onRowClick: (app: ApplicationItem) => void
@@ -350,9 +347,8 @@ function ApplicationsTable({
   onDecide: (app: ApplicationItem, decision: DecisionAction) => void
   onViewProfile: (handle: string) => void
 }) {
-
   return (
-    <div className="rounded-2xl border border-border/60 overflow-hidden">
+    <Card>
       <Table>
         <TableHeader>
           <TableRow>
@@ -365,13 +361,7 @@ function ApplicationsTable({
         </TableHeader>
 
         <TableBody>
-          {loading ? (
-            <TableRow>
-              <TableCell colSpan={5} className="py-10 text-center text-sm text-muted-foreground">
-                <Spinner />
-              </TableCell>
-            </TableRow>
-          ) : applications.length > 0 ? (
+          {applications.length > 0 ? (
             applications.map((app) => {
               const user = app.user
               const display = getDisplayName(user)
@@ -460,7 +450,7 @@ function ApplicationsTable({
           )}
         </TableBody>
       </Table>
-    </div>
+    </Card>
   )
 }
 
@@ -516,7 +506,8 @@ function ApplicationDialog({
               </div>
             </div>
 
-            <div className="rounded-2xl border border-border/60 p-4">
+            <Card>
+              <CardContent className="px-5">
               <div className="text-sm font-medium">Answers</div>
               <div className="mt-3 flex flex-col gap-3">
                 {parseAnswers(active.answers).length > 0 ? (
@@ -530,24 +521,21 @@ function ApplicationDialog({
                   <div className="text-sm text-muted-foreground">No answers provided.</div>
                 )}
               </div>
-            </div>
+              </CardContent>
+            </Card>
 
             {dialogError && (
-              <div
-                className="rounded-2xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"
-                role="alert"
-              >
-                {dialogError}
-              </div>
+              <Alert variant="destructive">
+                <AlertDescription>{dialogError}</AlertDescription>
+              </Alert>
             )}
 
             {confirmReject && (
-              <div
-                className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-700 dark:text-amber-400"
-                role="alert"
-              >
-                Are you sure you want to reject this application? Click "Reject" again to confirm.
-              </div>
+              <Alert>
+                <AlertDescription>
+                  Are you sure you want to reject this application? Click &quot;Reject&quot; again to confirm.
+                </AlertDescription>
+              </Alert>
             )}
           </div>
         )}
@@ -748,6 +736,40 @@ export default function CommunityApplicationsPage() {
 
   if (!handle) return null
 
+  if (loading) {
+    return (
+      <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-10">
+        {/* Header skeleton */}
+        <Card>
+          <CardContent className="flex items-center gap-4 px-5">
+            <Skeleton className="size-12 rounded-full" />
+            <div className="flex flex-col gap-2">
+              <Skeleton className="h-5 w-32" />
+              <Skeleton className="h-4 w-24" />
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Table skeleton */}
+        <Card>
+          <CardContent className="flex flex-col gap-4 px-5">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-4">
+                <Skeleton className="size-9 rounded-full" />
+                <div className="flex flex-1 flex-col gap-1.5">
+                  <Skeleton className="h-4 w-28" />
+                  <Skeleton className="h-3 w-20" />
+                </div>
+                <Skeleton className="h-4 w-24" />
+                <Skeleton className="h-5 w-16 rounded-full" />
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      </main>
+    )
+  }
+
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-10">
       <PageHeader
@@ -758,7 +780,7 @@ export default function CommunityApplicationsPage() {
           </Avatar>
         }
         title="Applications"
-        description={communityPath(handle)}
+        description={`@${handle}`}
         actions={
           <div className="flex flex-wrap items-center justify-end gap-2">
             <Button
@@ -816,17 +838,13 @@ export default function CommunityApplicationsPage() {
       )}
 
       {error && (
-        <div
-          className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive"
-          role="alert"
-        >
-          {error}
-        </div>
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
 
       <ApplicationsTable
         applications={filtered}
-        loading={loading}
         actingId={actingId}
         acting={acting}
         onRowClick={openDialog}
