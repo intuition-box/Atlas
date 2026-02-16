@@ -25,6 +25,7 @@ import { InfiniteScroll } from "@/components/ui/infinite-scroll"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { PageHeader } from "@/components/common/page-header"
+import { RefreshButton } from "@/components/common/refresh-button"
 import { UsersIcon } from "@/components/ui/icons"
 import { Spinner } from "@/components/ui/spinner"
 
@@ -910,9 +911,7 @@ export default function CommunityMembersPage() {
               {isFiltersOpen ? "Hide filters" : "Show filters"}
             </Button>
 
-            <Button type="button" variant="ghost" onClick={() => router.refresh()}>
-              Refresh
-            </Button>
+            <RefreshButton />
 
             {activeFilters && (
               <Button type="button" variant="ghost" onClick={handleClearAll}>
