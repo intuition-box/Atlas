@@ -130,7 +130,7 @@ function ProfileSkeleton() {
           <Skeleton className="h-3 w-24" />
         </div>
         <div className="flex gap-3 ml-auto sm:align-center sm:justify-end">
-            <Skeleton className="h-9 w-24" />
+          <Skeleton className="h-9 w-24" />
         </div>
       </div>
 
@@ -139,6 +139,9 @@ function ProfileSkeleton() {
           <CardTitle>
             <Skeleton className="h-5 w-24" />
           </CardTitle>
+          <CardDescription>
+            <Skeleton className="h-4 w-86" />
+          </CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-2 gap-3">
           <Skeleton className="h-19 w-full" />
@@ -153,6 +156,9 @@ function ProfileSkeleton() {
           <CardTitle>
             <Skeleton className="h-5 w-24" />
           </CardTitle>
+          <CardDescription>
+            <Skeleton className="h-4 w-86" />
+          </CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-2 gap-3">
           <Skeleton className="h-19 w-full" />
@@ -163,12 +169,15 @@ function ProfileSkeleton() {
         </CardContent>
       </Card>
 
-      {[1, 2, 3, 4].map((i) => (
+      {[1, 2, 3].map((i) => (
         <Card key={i}>
           <CardHeader className="gap-4">
             <CardTitle>
               <Skeleton className="h-5 w-24" />
             </CardTitle>
+            <CardDescription>
+              <Skeleton className="h-4 w-86" />
+            </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
             <Skeleton className="h-4 w-full" />
@@ -195,6 +204,7 @@ function SocialsCard({ user }: { user: UserGetResponse["user"] }) {
     <Card>
       <CardHeader>
         <CardTitle>Socials</CardTitle>
+        <CardDescription>Linked accounts and wallets.</CardDescription>
       </CardHeader>
       <CardContent>
         <div className="grid gap-3 sm:grid-cols-2">
@@ -353,8 +363,8 @@ export default function UserProfilePage() {
         description={`@${handleLabel}`}
         actions={
           isSelf ? (
-            <Button>
-              <Link href={userSettingsPath(handleLabel)}>Edit profile</Link>
+            <Button render={<Link href={userSettingsPath(handleLabel)} />}>
+              Edit profile
             </Button>
           ) : null
         }
@@ -366,6 +376,7 @@ export default function UserProfilePage() {
       <Card>
         <CardHeader>
           <CardTitle>About</CardTitle>
+          <CardDescription>Background, experience, and location.</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex flex-col gap-3">
@@ -413,6 +424,7 @@ export default function UserProfilePage() {
         <Card>
           <CardHeader>
             <CardTitle>Portfolio</CardTitle>
+            <CardDescription>Website and public portfolio links.</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-2">
             {links.map((l) => {
@@ -441,6 +453,7 @@ export default function UserProfilePage() {
         <Card>
           <CardHeader>
             <CardTitle>Skills</CardTitle>
+            <CardDescription>What they&apos;re good at.</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="flex flex-wrap gap-2">
@@ -456,6 +469,7 @@ export default function UserProfilePage() {
         <Card>
           <CardHeader>
             <CardTitle>Tools</CardTitle>
+            <CardDescription>What they work with.</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="flex flex-wrap gap-2">
@@ -471,15 +485,13 @@ export default function UserProfilePage() {
       <Card>
         <CardHeader>
           <CardTitle>Attestations</CardTitle>
-          {attestations.length > 0 && (
-            <CardDescription>
-              {attestations.filter((a) => a.direction === "received").length} received · {attestations.filter((a) => a.direction === "given").length} given
-            </CardDescription>
-          )}
+          <CardDescription>
+            {attestations.length > 0
+              ? `${attestations.filter((a) => a.direction === "received").length} received · ${attestations.filter((a) => a.direction === "given").length} given`
+              : "Reputation and trust signals."}
+          </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-
-
           {/* Attest — only visible to other users */}
           {!isSelf && (
             <Card>
