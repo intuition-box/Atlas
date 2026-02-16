@@ -10,7 +10,7 @@ import { ATTESTATION_TYPES, type AttestationType } from "@/lib/attestations/defi
 export const runtime = "nodejs";
 
 const QuerySchema = z.object({
-  take: z.coerce.number().int().min(1).max(50).default(20),
+  take: z.coerce.number().int().min(1).max(100).default(20),
   cursor: z.string().trim().min(1).optional(),
 });
 
