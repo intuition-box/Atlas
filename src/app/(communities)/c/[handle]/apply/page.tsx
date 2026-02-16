@@ -581,7 +581,7 @@ export default function CommunityApplyPage() {
           </Alert>
         </>
       ) : (
-        <Form form={form} onSubmit={handleSubmit} className="flex flex-col gap-10">
+        <Form form={form} onSubmit={handleSubmit} className="gap-10">
           <PageHeader
             leading={
               <Avatar className="h-12 w-12">

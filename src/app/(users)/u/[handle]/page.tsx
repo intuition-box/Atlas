@@ -3,21 +3,25 @@
 import * as React from "react"
 import Link from "next/link"
 import { useParams } from "next/navigation"
+import { Wallet } from "lucide-react"
 
 import { apiGet } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
 import { normalizeHandle, validateHandle } from "@/lib/handle"
-
 import { userSettingsPath } from "@/lib/routes"
 
 import { PageHeader } from "@/components/common/page-header"
+import { ProfileAvatar } from "@/components/common/profile-avatar"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { EncryptedText } from "@/components/ui/encrypted-text"
+import { DiscordIcon, XIcon } from "@/components/ui/icons"
 import { Skeleton } from "@/components/ui/skeleton"
+
+// === TYPES ===
 
 type UserGetResponse = {
   user: {
@@ -44,8 +48,9 @@ type UserGetResponse = {
     id: string
     type: string
     confidence: number | null
+    direction: "given" | "received"
     createdAt: string
-    fromUser: {
+    peer: {
       id: string
       name: string | null
       handle: string | null
@@ -60,6 +65,8 @@ type LoadState =
   | { status: "error"; message: string }
   | { status: "not-found" }
   | { status: "ready"; data: UserGetResponse }
+
+// === HELPERS ===
 
 function initials(nameOrHandle: string) {
   const s = nameOrHandle.trim()
@@ -105,37 +112,75 @@ function safeUrl(input: string) {
   }
 }
 
-// === SOCIAL ICONS ===
-
-function DiscordIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" {...props}>
-      <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.42 0 1.333-.947 2.418-2.157 2.418z" />
-    </svg>
-  )
-}
-
-function XIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" {...props}>
-      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
-    </svg>
-  )
-}
-
-function WalletIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
-      <path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1" />
-      <path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4" />
-    </svg>
-  )
-}
-
 function truncateAddress(address: string) {
   if (address.length <= 12) return address
   return `${address.slice(0, 6)}…${address.slice(-4)}`
 }
+
+// === LOADING SKELETON ===
+
+function ProfileSkeleton() {
+  return (
+    <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-7 pb-40">
+      <div className="w-full flex flex-wrap gap-3 p-5">
+        <Skeleton className="size-12 rounded-full" />
+        <div className="flex flex-col gap-2">
+          <Skeleton className="h-7 w-48" />
+          <Skeleton className="h-3 w-24" />
+        </div>
+        <div className="flex gap-3 ml-auto sm:align-center sm:justify-end">
+            <Skeleton className="h-9 w-24" />
+        </div>
+      </div>
+
+      <Card>
+        <CardHeader className="gap-4">
+          <CardTitle>
+            <Skeleton className="h-5 w-24" />
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="grid grid-cols-2 gap-3">
+          <Skeleton className="h-19 w-full" />
+          <Skeleton className="h-19 w-full" />
+          <Skeleton className="h-19 w-full" />
+          <Skeleton className="h-19 w-full" />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="gap-4">
+          <CardTitle>
+            <Skeleton className="h-5 w-24" />
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="grid grid-cols-2 gap-3">
+          <Skeleton className="h-19 w-full" />
+          <Skeleton className="h-19 w-full" />
+          <Skeleton className="h-19 w-full" />
+          <Skeleton className="h-19 w-full" />
+          <Skeleton className="h-19 w-full col-span-2" />
+        </CardContent>
+      </Card>
+
+      {[1, 2, 3, 4].map((i) => (
+        <Card key={i}>
+          <CardHeader className="gap-4">
+            <CardTitle>
+              <Skeleton className="h-5 w-24" />
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-8 w-full" />
+            <Skeleton className="h-8 w-48" />
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  )
+}
+
+// === SUB-COMPONENTS ===
 
 function SocialsCard({ user }: { user: UserGetResponse["user"] }) {
   const hasDiscord = !!user.discordId
@@ -150,16 +195,16 @@ function SocialsCard({ user }: { user: UserGetResponse["user"] }) {
       <CardHeader>
         <CardTitle>Socials</CardTitle>
       </CardHeader>
-      <CardContent className="px-5">
+      <CardContent>
         <div className="grid gap-3 sm:grid-cols-2">
           {hasDiscord && (
-            <div className="flex items-center gap-3 rounded-lg border border-border/60 p-4">
-              <DiscordIcon className="size-5 text-muted-foreground" />
-              <div>
-                <p className="text-sm font-medium">Discord</p>
-                <p className="text-xs text-muted-foreground">
+            <div className="rounded-lg border border-border/60 p-3 text-sm">
+              <h2 className="text-xs font-medium text-muted-foreground mb-3">Discord</h2>
+              <div className="flex items-center gap-2">
+                <DiscordIcon className="size-4 shrink-0 text-muted-foreground" />
+                <span className="text-sm font-medium">
                   {user.discordHandle ?? user.name ?? "Connected"}
-                </p>
+                </span>
               </div>
             </div>
           )}
@@ -169,29 +214,29 @@ function SocialsCard({ user }: { user: UserGetResponse["user"] }) {
               href={`https://x.com/${user.twitterHandle}`}
               target="_blank"
               rel="noreferrer"
-              className="flex items-center gap-3 rounded-lg border border-border/60 p-4 transition-colors hover:border-foreground/20 hover:bg-accent"
+              className="rounded-lg border border-border/60 p-3 text-sm transition-colors hover:border-accent/20 hover:text-accent group"
             >
-              <XIcon className="size-5 text-muted-foreground" />
-              <div>
-                <p className="text-sm font-medium">X / Twitter</p>
-                <p className="text-xs text-muted-foreground">@{user.twitterHandle}</p>
+              <h2 className="text-xs font-medium text-muted-foreground mb-3 group-hover:transition-colors group-hover:text-accent">X</h2>
+              <div className="flex items-center gap-2">
+                <XIcon className="size-4 shrink-0 text-muted-foreground group-hover:transition-colors group-hover:text-accent" />
+                <span className="text-sm font-medium">@{user.twitterHandle}</span>
               </div>
             </a>
           )}
 
           {wallets.map((addr) => (
-            <div key={addr} className="flex items-center gap-3 rounded-lg border border-border/60 p-4">
-              <WalletIcon className="size-5 text-muted-foreground" />
-              <div>
-                <p className="text-sm font-medium">Ethereum Wallet</p>
-                <p className="text-xs font-mono text-muted-foreground">
+            <div key={addr} className="rounded-lg border border-border/60 p-3 text-sm">
+              <h2 className="text-xs font-medium text-muted-foreground mb-3">Wallet</h2>
+              <div className="flex items-center gap-2">
+                <Wallet className="size-4 shrink-0 text-muted-foreground" />
+                <span className="font-mono text-sm">
                   <EncryptedText
                     text={truncateAddress(addr)}
                     revealDelayMs={40}
                     flipDelayMs={30}
                     className="inline"
                   />
-                </p>
+                </span>
               </div>
             </div>
           ))}
@@ -200,6 +245,8 @@ function SocialsCard({ user }: { user: UserGetResponse["user"] }) {
     </Card>
   )
 }
+
+// === PAGE ===
 
 export default function UserProfilePage() {
   const params = useParams<{ handle: string }>()
@@ -250,39 +297,12 @@ export default function UserProfilePage() {
   }, [handle])
 
   if (state.status === "loading" || state.status === "idle") {
-    return (
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-10 pb-40">
-        {/* Header skeleton */}
-        <Card>
-          <CardContent className="flex items-center gap-4 px-5">
-            <Skeleton className="size-12 rounded-full" />
-            <div className="flex flex-col gap-2">
-              <Skeleton className="h-5 w-40" />
-              <Skeleton className="h-4 w-28" />
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Section skeletons */}
-        {[1, 2, 3].map((i) => (
-          <Card key={i}>
-            <CardContent className="flex flex-col gap-4 px-5">
-              <div className="flex flex-col gap-1">
-                <Skeleton className="h-4 w-24" />
-                <Skeleton className="h-3 w-56" />
-              </div>
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-    )
+    return <ProfileSkeleton />
   }
 
   if (state.status === "not-found") {
     return (
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-10 pb-40">
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 mt-24 pb-40">
         <Alert>
           <AlertDescription>We couldn&apos;t find @{handle}.</AlertDescription>
         </Alert>
@@ -292,7 +312,7 @@ export default function UserProfilePage() {
 
   if (state.status === "error") {
     return (
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-10 pb-40">
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 mt-24 pb-40">
         <Alert variant="destructive">
           <AlertDescription>{state.message}</AlertDescription>
         </Alert>
@@ -320,7 +340,7 @@ export default function UserProfilePage() {
   const links = (user.links ?? []).map((l) => String(l || "").trim()).filter(Boolean)
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-10 pb-40">
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 mt-24 pb-40">
       <PageHeader
         leading={
           <Avatar className="h-12 w-12">
@@ -333,7 +353,7 @@ export default function UserProfilePage() {
         sticky={false}
         actions={
           isSelf ? (
-            <Button type="button" variant="secondary">
+            <Button>
               <Link href={userSettingsPath(handleLabel)}>Edit profile</Link>
             </Button>
           ) : null
@@ -347,47 +367,42 @@ export default function UserProfilePage() {
         <CardHeader>
           <CardTitle>About</CardTitle>
         </CardHeader>
-        <CardContent className="px-5">
+        <CardContent>
           <div className="flex flex-col gap-3">
-            {/* Row 1: Joined + Last Active */}
             <div className="grid gap-3 sm:grid-cols-2">
-              <div className="rounded-lg border border-border/60 p-3">
-                <div className="text-xs font-medium text-foreground/70">Joined</div>
-                <div className="mt-1 text-sm text-foreground/80">{fmtDate(user.createdAt)}</div>
+              <div className="rounded-lg border border-border/60 p-3 text-sm">
+                <h2 className="text-xs font-medium text-muted-foreground mb-3">Joined</h2>
+                <p className="text-sm font-medium">{fmtDate(user.createdAt)}</p>
               </div>
 
-              <div className="rounded-lg border border-border/60 p-3">
-                <div className="text-xs font-medium text-foreground/70">Last seen</div>
-                <div className="mt-1 text-sm text-foreground/80">
-                  {formatRelativeTime(user.lastActiveAt) ?? "Never"}
-                </div>
+              <div className="rounded-lg border border-border/60 p-3 text-sm">
+                <h2 className="text-xs font-medium text-muted-foreground mb-3">Last seen</h2>
+                <p className="text-sm font-medium">{formatRelativeTime(user.lastActiveAt) ?? "Never"}</p>
               </div>
             </div>
 
-            {/* Row 2: Headline + Location (conditional) */}
             {(user.headline || user.location) ? (
               <div className="grid gap-3 sm:grid-cols-2">
                 {user.headline ? (
-                  <div className="rounded-lg border border-border/60 p-3">
-                    <div className="text-xs font-medium text-foreground/70">Headline</div>
-                    <div className="mt-1 text-sm text-foreground/80">{user.headline}</div>
+                  <div className="rounded-lg border border-border/60 p-3 text-sm">
+                    <h2 className="text-xs font-medium text-muted-foreground mb-3">Headline</h2>
+                    <p className="text-sm font-medium">{user.headline}</p>
                   </div>
                 ) : null}
 
                 {user.location ? (
-                  <div className="rounded-lg border border-border/60 p-3">
-                    <div className="text-xs font-medium text-foreground/70">Location</div>
-                    <div className="mt-1 text-sm text-foreground/80">{user.location}</div>
+                  <div className="rounded-lg border border-border/60 p-3 text-sm">
+                    <h2 className="text-xs font-medium text-muted-foreground mb-3">Location</h2>
+                    <p className="text-sm font-medium">{user.location}</p>
                   </div>
                 ) : null}
               </div>
             ) : null}
 
-            {/* Row 3: Bio (full width) */}
             {user.bio ? (
               <div className="rounded-lg border border-border/60 p-3">
-                <div className="text-xs font-medium text-foreground/70">Bio</div>
-                <div className="mt-1 whitespace-pre-wrap text-sm text-foreground/80">{user.bio}</div>
+                <h2 className="text-xs font-medium text-muted-foreground mb-3">Bio</h2>
+                <p className="text-sm font-medium">{user.bio}</p>
               </div>
             ) : null}
           </div>
@@ -397,9 +412,9 @@ export default function UserProfilePage() {
       {links.length ? (
         <Card>
           <CardHeader>
-            <CardTitle>Links</CardTitle>
+            <CardTitle>Portfolio</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2 px-5">
+          <CardContent className="flex flex-col gap-2">
             {links.map((l) => {
               const href = safeUrl(l)
               return href ? (
@@ -427,7 +442,7 @@ export default function UserProfilePage() {
           <CardHeader>
             <CardTitle>Skills</CardTitle>
           </CardHeader>
-          <CardContent className="px-5">
+          <CardContent>
             <div className="flex flex-wrap gap-2">
               {skills.map((s) => (
                 <Badge key={s} variant="secondary">{s}</Badge>
@@ -440,9 +455,9 @@ export default function UserProfilePage() {
       {tags.length ? (
         <Card>
           <CardHeader>
-            <CardTitle>Tools of the trade</CardTitle>
+            <CardTitle>Tools</CardTitle>
           </CardHeader>
-          <CardContent className="px-5">
+          <CardContent>
             <div className="flex flex-wrap gap-2">
               {tags.map((t) => (
                 <Badge key={t} variant="secondary">{t}</Badge>
@@ -455,34 +470,48 @@ export default function UserProfilePage() {
       <Card>
         <CardHeader>
           <CardTitle>Attestations</CardTitle>
+          {attestations.length > 0 && (
+            <CardDescription>
+              {attestations.filter((a) => a.direction === "received").length} received · {attestations.filter((a) => a.direction === "given").length} given
+            </CardDescription>
+          )}
         </CardHeader>
-        <CardContent className="px-5">
+        <CardContent>
           {attestations.length === 0 ? (
             <Alert>
               <AlertDescription>No attestations yet.</AlertDescription>
             </Alert>
           ) : (
-            <div className="space-y-3">
+            <div className="flex flex-col gap-3">
               {attestations.map((a) => {
-                const fromName = a.fromUser.name?.trim() || a.fromUser.handle || "Unknown"
-                const fromAvatar = a.fromUser.avatarUrl || a.fromUser.image || ""
+                const peerName = a.peer.name?.trim() || a.peer.handle || "Unknown"
+                const peerAvatar = a.peer.avatarUrl || a.peer.image || ""
+                const isReceived = a.direction === "received"
 
                 return (
                   <div key={a.id} className="rounded-lg border border-border/60 p-3">
                     <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <Avatar className="size-7">
-                          <AvatarImage src={fromAvatar} alt={fromName} />
-                          <AvatarFallback>{initials(fromName)}</AvatarFallback>
-                        </Avatar>
+                      <div className="flex items-center gap-3 min-w-0">
+                        <ProfileAvatar type="user" src={peerAvatar} name={peerName} size="sm" />
 
                         <div className="min-w-0 text-sm">
-                          <span className="font-medium text-foreground">{fromName}</span>
-                          <span className="text-foreground/60"> · {a.type}</span>
+                          <span className="font-medium truncate">{peerName}</span>
+                          <span className="text-muted-foreground"> · {a.type}</span>
                         </div>
                       </div>
 
-                      <div className="shrink-0 text-xs text-foreground/60">{fmtDate(a.createdAt)}</div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <Badge
+                          variant="secondary"
+                          className={isReceived
+                            ? "bg-emerald-500/10 text-emerald-500"
+                            : "bg-amber-500/10 text-amber-500"
+                          }
+                        >
+                          {isReceived ? "Received" : "Given"}
+                        </Badge>
+                        <span className="text-xs text-muted-foreground">{fmtDate(a.createdAt)}</span>
+                      </div>
                     </div>
                   </div>
                 )

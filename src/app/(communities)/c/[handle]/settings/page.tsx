@@ -421,7 +421,7 @@ export default function CommunitySettingsPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-10 pb-40">
-      <Form form={form} onSubmit={handleSubmit} className="flex flex-col gap-6">
+      <Form form={form} onSubmit={handleSubmit}>
         <PageHeader
           leading={
             <Avatar className="h-12 w-12">

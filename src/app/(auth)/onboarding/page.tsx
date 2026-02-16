@@ -337,7 +337,7 @@ export default function OnboardingPage() {
 
   return (
     <main className="mx-auto flex w-full max-w-lg flex-col gap-8 px-4 py-10">
-      <Form form={form} onSubmit={onSubmit} className="flex flex-col gap-12">
+      <Form form={form} onSubmit={onSubmit} className="gap-12">
         <PageHeader
           title="Finish setup"
           description="Pick a handle and a few profile details. You can change these later."
