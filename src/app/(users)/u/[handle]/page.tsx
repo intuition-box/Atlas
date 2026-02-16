@@ -8,8 +8,9 @@ import { Wallet } from "lucide-react"
 import { apiGet } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
 import { normalizeHandle, validateHandle } from "@/lib/handle"
-import { userSettingsPath } from "@/lib/routes"
+import { userPath, userSettingsPath, userAttestationsPath } from "@/lib/routes"
 
+import { AttestationButtons } from "@/components/attestation/buttons"
 import { PageHeader } from "@/components/common/page-header"
 import { ProfileAvatar } from "@/components/common/profile-avatar"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -219,7 +220,7 @@ function SocialsCard({ user }: { user: UserGetResponse["user"] }) {
               <h2 className="text-xs font-medium text-muted-foreground mb-3 group-hover:transition-colors group-hover:text-accent">X</h2>
               <div className="flex items-center gap-2">
                 <XIcon className="size-4 shrink-0 text-muted-foreground group-hover:transition-colors group-hover:text-accent" />
-                <span className="text-sm font-medium">@{user.twitterHandle}</span>
+                <span className="text-sm font-medium">{user.twitterHandle}</span>
               </div>
             </a>
           )}
@@ -350,7 +351,6 @@ export default function UserProfilePage() {
         }
         title={displayName}
         description={`@${handleLabel}`}
-        sticky={false}
         actions={
           isSelf ? (
             <Button>
@@ -467,6 +467,7 @@ export default function UserProfilePage() {
         </Card>
       ) : null}
 
+      {/* Recent Attestations */}
       <Card>
         <CardHeader>
           <CardTitle>Attestations</CardTitle>
@@ -476,28 +477,59 @@ export default function UserProfilePage() {
             </CardDescription>
           )}
         </CardHeader>
-        <CardContent>
+        <CardContent className="flex flex-col gap-4">
+
+
+          {/* Attest — only visible to other users */}
+          {!isSelf && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Attest</CardTitle>
+                <CardDescription>Vouch for {user.name?.split(" ")[0] || `@${handleLabel}`}&apos;s skills and contributions</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <AttestationButtons
+                  toUserId={user.id}
+                  toName={displayName}
+                  toHandle={handleLabel}
+                  toAvatarUrl={avatarSrc}
+                  size="sm"
+                />
+              </CardContent>
+            </Card>
+          )}
+
           {attestations.length === 0 ? (
             <Alert>
               <AlertDescription>No attestations yet.</AlertDescription>
             </Alert>
           ) : (
             <div className="flex flex-col gap-3">
-              {attestations.map((a) => {
+              {attestations.slice(0, 10).map((a) => {
                 const peerName = a.peer.name?.trim() || a.peer.handle || "Unknown"
                 const peerAvatar = a.peer.avatarUrl || a.peer.image || ""
                 const isReceived = a.direction === "received"
 
                 return (
-                  <div key={a.id} className="rounded-lg border border-border/60 p-3">
-                    <div className="flex items-center justify-between gap-2">
+                  <div key={a.id} className="flex items-center justify-between gap-2 rounded-lg border border-border/60 p-3">
                       <div className="flex items-center gap-3 min-w-0">
-                        <ProfileAvatar type="user" src={peerAvatar} name={peerName} size="sm" />
-
-                        <div className="min-w-0 text-sm">
-                          <span className="font-medium truncate">{peerName}</span>
-                          <span className="text-muted-foreground"> · {a.type}</span>
-                        </div>
+                        {a.peer.handle ? (
+                          <Link href={userPath(a.peer.handle)} className="flex items-center gap-3 min-w-0 hover:opacity-80 transition-opacity">
+                            <ProfileAvatar type="user" src={peerAvatar} name={peerName} size="sm" />
+                            <div className="min-w-0 text-sm">
+                              <span className="font-medium truncate">{peerName}</span>
+                              <span className="text-muted-foreground"> · {a.type}</span>
+                            </div>
+                          </Link>
+                        ) : (
+                          <>
+                            <ProfileAvatar type="user" src={peerAvatar} name={peerName} size="sm" />
+                            <div className="min-w-0 text-sm">
+                              <span className="font-medium truncate">{peerName}</span>
+                              <span className="text-muted-foreground"> · {a.type}</span>
+                            </div>
+                          </>
+                        )}
                       </div>
 
                       <div className="flex items-center gap-2 shrink-0">
@@ -512,10 +544,18 @@ export default function UserProfilePage() {
                         </Badge>
                         <span className="text-xs text-muted-foreground">{fmtDate(a.createdAt)}</span>
                       </div>
-                    </div>
                   </div>
                 )
               })}
+
+              <Link
+                href={userAttestationsPath(handleLabel)}
+                className="flex items-center justify-center rounded-lg border border-border/60 py-2.5 text-sm text-muted-foreground transition-colors hover:border-accent/30 hover:text-accent"
+              >
+                {attestations.length > 10
+                  ? `View all ${attestations.length} attestations`
+                  : "View all attestations"}
+              </Link>
             </div>
           )}
         </CardContent>

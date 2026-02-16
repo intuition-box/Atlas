@@ -803,7 +803,7 @@ function TwitterAccountRow() {
         <div className="flex items-center gap-2 min-w-0">
           <XIcon className={isLinked ? "size-4 shrink-0 text-muted-foreground" : "size-4 shrink-0 text-amber-400"} />
           {isLinked ? (
-            <span className="text-sm font-medium">@{twitterHandle}</span>
+            <span className="text-sm font-medium">{twitterHandle}</span>
           ) : (
             <EncryptedText
               text="@username"
