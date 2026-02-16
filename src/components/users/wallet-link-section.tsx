@@ -245,17 +245,17 @@ export function WalletLinkSection() {
                 key={wallet.address}
                 className="relative overflow-hidden rounded-lg border border-border/60 p-3 text-sm"
               >
-                <h2 className="text-xs font-medium text-muted-foreground mb-1">Linked</h2>
+                <h2 className="text-xs font-medium text-muted-foreground mb-3">Linked</h2>
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0">
-                    <Wallet className="size-4 shrink-0" />
+                    <Wallet className="size-4 shrink-0 text-muted-foreground" />
                     <EncryptedText
                       text={truncateAddress(wallet.address)}
                       scrambleOnly={loading}
                       scrambleOneChar={loading}
                       revealDelayMs={40}
                       flipDelayMs={30}
-                      className="font-mono text-sm text-foreground/80"
+                      className="font-mono text-sm"
                     />
                   </div>
                   <AlertDialog
@@ -266,7 +266,7 @@ export function WalletLinkSection() {
                       render={
                         <Button
                           variant="destructive"
-                          size="sm"
+                          size="xs"
                           disabled={status.type === "unlinking"}
                         />
                       }
@@ -301,7 +301,6 @@ export function WalletLinkSection() {
                   </AlertDialog>
                 </div>
 
-                {/* Status overlay scoped to this wallet */}
                 {walletStatus?.message ? (
                   <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-card/80 backdrop-blur-sm">
                     <p
@@ -321,9 +320,8 @@ export function WalletLinkSection() {
             );
           })}
 
-          {/* Add wallet card */}
           <div className="relative overflow-hidden rounded-lg border border-dashed border-amber-400/40 p-3 text-sm">
-            <h2 className="text-xs font-medium text-amber-400/70 mb-1">Connect</h2>
+            <h2 className="text-xs font-medium text-amber-400/70 mb-3">Connect</h2>
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 min-w-0">
                 <Wallet className="size-4 shrink-0 text-amber-400" />
@@ -335,7 +333,7 @@ export function WalletLinkSection() {
                 />
               </div>
               <Button
-                size="sm"
+                size="xs"
                 onClick={handleConnectAndLink}
                 disabled={isWorking || loading}
                 className="bg-amber-400/15 text-amber-400 hover:bg-amber-400/25"
