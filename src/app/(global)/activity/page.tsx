@@ -5,9 +5,6 @@ import Link from "next/link"
 import {
   ArrowDownLeft,
   ArrowUpRight,
-  Filter,
-  Globe,
-  Trophy,
   UserPlus,
   Users,
 } from "lucide-react"
@@ -23,6 +20,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
+import { Switch } from "@/components/ui/switch"
 
 // === TYPES ===
 
@@ -403,16 +401,15 @@ function FiltersPanel({
 
         <div className="flex flex-col gap-2">
           <div className="text-xs font-medium text-foreground/70">Leaderboard</div>
-          <Button
-            type="button"
-            variant={showLeaderboard ? "secondary" : "outline"}
-            size="sm"
-            className="w-full justify-start gap-2"
-            onClick={onToggleLeaderboard}
-          >
-            <Trophy className="size-4" />
-            {showLeaderboard ? "Showing leaderboard" : "Hidden"}
-          </Button>
+          <label className="flex h-9 items-center gap-2 cursor-pointer">
+            <Switch
+              checked={showLeaderboard}
+              onCheckedChange={onToggleLeaderboard}
+            />
+            <span className="text-sm text-foreground/70">
+              {showLeaderboard ? "Visible" : "Hidden"}
+            </span>
+          </label>
         </div>
       </div>
     </section>
@@ -445,13 +442,8 @@ function ActivityFeedSection({
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center gap-3">
-          <Globe className="size-5 text-muted-foreground" />
-          <div>
-            <CardTitle>Recent Activity</CardTitle>
-            <CardDescription>What&apos;s happening across the platform</CardDescription>
-          </div>
-        </div>
+        <CardTitle>Recent Activity</CardTitle>
+        <CardDescription>What&apos;s happening across the platform</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         {loading ? (
@@ -495,13 +487,8 @@ function LeaderboardSection() {
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center gap-3">
-          <Trophy className="size-5 text-muted-foreground" />
-          <div>
-            <CardTitle>Leaderboard</CardTitle>
-            <CardDescription>Most attested users on the platform</CardDescription>
-          </div>
-        </div>
+        <CardTitle>Leaderboard</CardTitle>
+        <CardDescription>Most attested users on the platform</CardDescription>
       </CardHeader>
       <CardContent>
         {loading ? (
@@ -611,13 +598,12 @@ export default function ActivityPage() {
         actions={
           <div className="flex items-center gap-2">
             {activeFilters && (
-              <Button type="button" variant="ghost" size="sm" onClick={handleClearAll}>
+              <Button type="button" variant="ghost" onClick={handleClearAll}>
                 Reset
               </Button>
             )}
-            <Button type="button" variant="ghost" size="sm" onClick={() => setIsFiltersOpen((v) => !v)}>
-              <Filter className="size-4 mr-1" />
-              {isFiltersOpen ? "Hide" : "Filters"}
+            <Button type="button" variant="secondary" onClick={() => setIsFiltersOpen((v) => !v)}>
+              {isFiltersOpen ? "Hide filters" : "Show filters"}
             </Button>
           </div>
         }
