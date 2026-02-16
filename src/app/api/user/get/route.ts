@@ -10,6 +10,22 @@ import type { AttestationType } from "@/lib/attestations/definitions";
 
 export const runtime = "nodejs";
 
+type AttestationEntry = {
+  id: string;
+  type: AttestationType;
+  confidence: number | null;
+  direction: "given" | "received";
+  createdAt: Date;
+  /** The other party: who gave it (received) or who it was given to (given). */
+  peer: {
+    id: string;
+    name: string | null;
+    handle: string | null;
+    image: string | null;
+    avatarUrl: string | null;
+  };
+};
+
 type GetUserOk = {
   user: {
     id: string;
@@ -31,19 +47,7 @@ type GetUserOk = {
     lastActiveAt: Date | null;
   };
   isSelf: boolean;
-  attestations: Array<{
-    id: string;
-    type: AttestationType;
-    confidence: number | null;
-    createdAt: Date;
-    fromUser: {
-      id: string;
-      name: string | null;
-      handle: string | null;
-      image: string | null;
-      avatarUrl: string | null;
-    };
-  }>;
+  attestations: AttestationEntry[];
 };
 
 const QuerySchema = z.object({
@@ -128,53 +132,77 @@ export async function GET(req: NextRequest) {
 
     const handleName = await resolveHandleNameForOwner({ ownerType: HandleOwnerType.USER, ownerId: user.id });
 
-    const rawAttestations = await db.attestation.findMany({
-      where: {
-        toUserId: user.id,
-        revokedAt: null, // Only active attestations
-      },
-      take: 50,
-      orderBy: { createdAt: "desc" },
-      select: {
-        id: true,
-        type: true,
-        confidence: true,
-        createdAt: true,
-        fromUser: {
-          select: {
-            id: true,
-            name: true,
-            image: true,
-            avatarUrl: true,
-          },
-        },
-      },
-    });
+    const attestationSelect = {
+      id: true,
+      type: true,
+      confidence: true,
+      createdAt: true,
+      fromUser: { select: { id: true, name: true, image: true, avatarUrl: true } },
+      toUser: { select: { id: true, name: true, image: true, avatarUrl: true } },
+    } as const;
 
-    const fromUserIds = Array.from(new Set(rawAttestations.map((a) => a.fromUser.id)));
+    const [receivedRaw, givenRaw] = await Promise.all([
+      db.attestation.findMany({
+        where: { toUserId: user.id, revokedAt: null },
+        take: 50,
+        orderBy: { createdAt: "desc" },
+        select: attestationSelect,
+      }),
+      db.attestation.findMany({
+        where: { fromUserId: user.id, revokedAt: null },
+        take: 50,
+        orderBy: { createdAt: "desc" },
+        select: attestationSelect,
+      }),
+    ]);
 
-    const fromUserHandlePairs = await Promise.all(
-      fromUserIds.map(async (id) => {
+    // Collect all peer user IDs to resolve handles in one batch
+    const peerIds = new Set<string>();
+    for (const a of receivedRaw) peerIds.add(a.fromUser.id);
+    for (const a of givenRaw) peerIds.add(a.toUser.id);
+
+    const peerHandlePairs = await Promise.all(
+      Array.from(peerIds).map(async (id) => {
         const h = await resolveHandleNameForOwner({ ownerType: HandleOwnerType.USER, ownerId: id });
         return [id, h] as const;
       }),
     );
 
-    const fromUserHandles = new Map(fromUserHandlePairs);
+    const peerHandles = new Map(peerHandlePairs);
 
-    const attestations: GetUserOk["attestations"] = rawAttestations.map((a) => ({
+    const received: AttestationEntry[] = receivedRaw.map((a) => ({
       id: a.id,
       type: a.type as AttestationType,
       confidence: a.confidence,
+      direction: "received",
       createdAt: a.createdAt,
-      fromUser: {
+      peer: {
         id: a.fromUser.id,
         name: a.fromUser.name,
-        handle: fromUserHandles.get(a.fromUser.id) ?? null,
+        handle: peerHandles.get(a.fromUser.id) ?? null,
         image: a.fromUser.image,
         avatarUrl: a.fromUser.avatarUrl,
       },
     }));
+
+    const given: AttestationEntry[] = givenRaw.map((a) => ({
+      id: a.id,
+      type: a.type as AttestationType,
+      confidence: a.confidence,
+      direction: "given",
+      createdAt: a.createdAt,
+      peer: {
+        id: a.toUser.id,
+        name: a.toUser.name,
+        handle: peerHandles.get(a.toUser.id) ?? null,
+        image: a.toUser.image,
+        avatarUrl: a.toUser.avatarUrl,
+      },
+    }));
+
+    // Merge and sort chronologically (newest first)
+    const attestations: AttestationEntry[] = [...received, ...given]
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
     return okJson<GetUserOk>({
       user: {
