@@ -9,7 +9,7 @@ import { resolveHandleNamesForOwners } from "@/lib/handle-registry";
 export const runtime = "nodejs";
 
 const QuerySchema = z.object({
-  take: z.coerce.number().int().min(1).max(50).default(10),
+  take: z.coerce.number().int().min(1).max(100).default(10),
 });
 
 type LeaderboardEntry = {
