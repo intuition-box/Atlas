@@ -17,6 +17,9 @@ export const ROUTES = {
   // Users
   usersIndex: "/u",
 
+  // Activity
+  activity: "/activity",
+
   // Communities
   communitiesIndex: "/c",
   communityNew: "/new",
@@ -66,6 +69,11 @@ export function userSettingsPath(handle: string): string {
 /** `/u/:handle/attestations` */
 export function userAttestationsPath(handle: string): string {
   return `/u/${encodeURIComponent(handle)}/attestations`;
+}
+
+/** `/activity` */
+export function activityPath(): string {
+  return ROUTES.activity;
 }
 
 /** `/c` */
