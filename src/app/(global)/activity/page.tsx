@@ -15,12 +15,13 @@ import { userPath, communityPath } from "@/lib/routes"
 
 import { ProfileAvatar } from "@/components/common/profile-avatar"
 import { PageHeader } from "@/components/common/page-header"
+import { RefreshButton } from "@/components/common/refresh-button"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { Spinner } from "@/components/ui/spinner"
-import { Switch } from "@/components/ui/switch"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 // === TYPES ===
 
@@ -114,7 +115,7 @@ function useActivityFeed() {
     if (isInitial) setLoading(true)
     else setLoadingMore(true)
 
-    const params: Record<string, string> = { take: "20" }
+    const params: Record<string, string> = { take: "100" }
     if (cursor) params.cursor = cursor
 
     const res = await apiGet<ActivityResponse>("/api/activity/list", params)
@@ -134,20 +135,23 @@ function useActivityFeed() {
     if (nextCursor && !loadingMore) void load(nextCursor)
   }, [nextCursor, loadingMore, load])
 
-  return { events, loading, loadingMore, hasMore: !!nextCursor, loadMore }
+  const refresh = React.useCallback(() => { void load() }, [load])
+
+  return { events, loading, loadingMore, hasMore: !!nextCursor, loadMore, refresh }
 }
 
-function useLeaderboard() {
+function useLeaderboard(refreshKey: number) {
   const [entries, setEntries] = React.useState<LeaderboardEntry[]>([])
   const [loading, setLoading] = React.useState(true)
 
   React.useEffect(() => {
+    setLoading(true)
     const ac = new AbortController()
 
     void (async () => {
       const res = await apiGet<LeaderboardResponse>(
         "/api/attestation/leaderboard",
-        { take: "10" },
+        { take: "100" },
         { signal: ac.signal },
       )
       if (ac.signal.aborted) return
@@ -156,7 +160,7 @@ function useLeaderboard() {
     })()
 
     return () => { ac.abort() }
-  }, [])
+  }, [refreshKey])
 
   return { entries, loading }
 }
@@ -246,24 +250,6 @@ function ActivityTypeBadge({ kind }: { kind: ActivityEvent["kind"] }) {
 
 // === SUB-COMPONENTS ===
 
-function Chip({ children, onRemove }: { children: React.ReactNode; onRemove?: () => void }) {
-  return (
-    <span className="inline-flex items-center gap-1 rounded-4xl bg-muted-foreground/10 px-2 py-1 text-xs font-medium">
-      <span className="truncate">{children}</span>
-      {onRemove && (
-        <button
-          type="button"
-          className="-mr-1 inline-flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
-          onClick={onRemove}
-          aria-label="Remove filter"
-        >
-          ×
-        </button>
-      )}
-    </span>
-  )
-}
-
 function UserLink({ user }: { user: ActivityUser }) {
   const name = displayName(user)
   const href = user.handle ? userPath(user.handle) : "#"
@@ -304,7 +290,6 @@ function UserJoinedEventCard({ event }: { event: UserJoinedEvent }) {
   return (
     <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 p-3">
       <div className="flex items-center gap-2 min-w-0 text-sm">
-        <UserPlus className="size-4 shrink-0 text-emerald-500" />
         <UserLink user={event.user} />
         <span className="text-muted-foreground shrink-0">joined the platform</span>
       </div>
@@ -322,18 +307,29 @@ function UserJoinedEventCard({ event }: { event: UserJoinedEvent }) {
 function CommunityCreatedEventCard({ event }: { event: CommunityCreatedEvent }) {
   const communityHref = event.community.handle
     ? communityPath(event.community.handle)
-    : "#"
+    : null
+
+  const communityContent = (
+    <>
+      <ProfileAvatar type="community" src={event.community.avatarUrl} name={event.community.name} size="sm" />
+      <span className="truncate text-sm font-medium">{event.community.icon ? `${event.community.icon} ` : ""}{event.community.name}</span>
+    </>
+  )
 
   return (
     <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 p-3">
       <div className="flex items-center gap-2 min-w-0 text-sm">
-        <Users className="size-4 shrink-0 text-accent" />
         <UserLink user={event.creator} />
         <span className="text-muted-foreground shrink-0">created</span>
-        <Link href={communityHref} className="flex items-center gap-2 min-w-0 hover:opacity-80 transition-opacity">
-          <ProfileAvatar type="community" src={event.community.avatarUrl} name={event.community.name} size="sm" />
-          <span className="truncate text-sm font-medium">{event.community.icon ? `${event.community.icon} ` : ""}{event.community.name}</span>
-        </Link>
+        {communityHref ? (
+          <Link href={communityHref} className="flex items-center gap-2 min-w-0 hover:opacity-80 transition-opacity">
+            {communityContent}
+          </Link>
+        ) : (
+          <span className="flex items-center gap-2 min-w-0">
+            {communityContent}
+          </span>
+        )}
       </div>
 
       <div className="flex items-center gap-2 shrink-0">
@@ -361,18 +357,14 @@ function ActivityEventCard({ event }: { event: ActivityEvent }) {
 
 function FiltersPanel({
   filters,
-  showLeaderboard,
   onFiltersChange,
-  onToggleLeaderboard,
 }: {
   filters: FilterState
-  showLeaderboard: boolean
   onFiltersChange: (updates: Partial<FilterState>) => void
-  onToggleLeaderboard: () => void
 }) {
   return (
     <section className="rounded-2xl border border-border/60 bg-card/30 p-4" aria-label="Activity filters">
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2">
         <div className="flex flex-col gap-2">
           <div className="text-xs font-medium text-foreground/70">Search</div>
           <Input
@@ -398,169 +390,193 @@ function FiltersPanel({
             ))}
           </select>
         </div>
-
-        <div className="flex flex-col gap-2">
-          <div className="text-xs font-medium text-foreground/70">Leaderboard</div>
-          <label className="flex h-9 items-center gap-2 cursor-pointer">
-            <Switch
-              checked={showLeaderboard}
-              onCheckedChange={onToggleLeaderboard}
-            />
-            <span className="text-sm text-foreground/70">
-              {showLeaderboard ? "Visible" : "Hidden"}
-            </span>
-          </label>
-        </div>
       </div>
     </section>
   )
 }
 
-// === SECTIONS ===
+// === SKELETON ===
 
-function SectionLoading() {
+function ActivitySkeleton() {
   return (
-    <div className="flex items-center justify-center py-10" aria-busy="true">
-      <Spinner className="size-6 text-muted-foreground" />
+    <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-7 pb-40">
+      <div className="w-full flex flex-wrap gap-3 p-5">
+        <Skeleton className="size-12 rounded-full" />
+        <div className="flex flex-col gap-2">
+          <Skeleton className="h-7 w-48" />
+          <Skeleton className="h-3 w-24" />
+        </div>
+        <div className="flex gap-3 ml-auto sm:align-center sm:justify-end">
+          <Skeleton className="h-9 w-14" />
+          <Skeleton className="h-9 w-14" />
+          <Skeleton className="h-9 w-14" />
+        </div>
+      </div>
+
+      <Card>
+        <CardHeader className="gap-4">
+          <CardTitle>
+            <Skeleton className="h-5 w-32" />
+          </CardTitle>
+          <CardDescription>
+            <Skeleton className="h-4 w-86" />
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-2">
+          {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+            <div key={i} className="flex items-center justify-between gap-3 rounded-lg border border-border/60 p-3">
+              <div className="flex items-center gap-2">
+                <Skeleton className="size-8" />
+                <Skeleton className="h-4 w-24" />
+                <Skeleton className="h-3 w-4" />
+                <Skeleton className="size-8" />
+                <Skeleton className="h-4 w-24" />
+              </div>
+              <div className="flex items-center gap-2">
+                <Skeleton className="h-5 w-20" />
+                <Skeleton className="h-5 w-20" />
+                <Skeleton className="h-4 w-12" />
+              </div>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
     </div>
   )
 }
 
-function ActivityFeedSection({
+// === SECTIONS ===
+
+function ActivityFeedContent({
   events,
-  loading,
   loadingMore,
   hasMore,
   onLoadMore,
 }: {
   events: ActivityEvent[]
-  loading: boolean
   loadingMore: boolean
   hasMore: boolean
   onLoadMore: () => void
 }) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Recent Activity</CardTitle>
-        <CardDescription>What&apos;s happening across the platform</CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        {loading ? (
-          <SectionLoading />
-        ) : events.length === 0 ? (
-          <div className="rounded-lg border border-border/60 px-4 py-10 text-center text-sm text-muted-foreground">
-            No activity found.
-          </div>
-        ) : (
-          <>
-            <div className="flex flex-col gap-2">
-              {events.map((event) => (
-                <ActivityEventCard key={event.id} event={event} />
-              ))}
-            </div>
+  if (events.length === 0) {
+    return (
+      <div className="rounded-lg border border-border/60 px-4 py-10 text-center text-sm text-muted-foreground">
+        No activity found.
+      </div>
+    )
+  }
 
-            {hasMore && (
-              <button
-                type="button"
-                onClick={onLoadMore}
-                disabled={loadingMore}
-                className="flex items-center justify-center rounded-lg border border-border/60 py-2.5 text-sm text-muted-foreground transition-colors hover:border-accent/30 hover:text-accent disabled:opacity-50"
-              >
-                {loadingMore ? (
-                  <Spinner className="size-4" />
-                ) : (
-                  "Load more"
-                )}
-              </button>
-            )}
-          </>
-        )}
-      </CardContent>
-    </Card>
+  return (
+    <div className="flex flex-col gap-2">
+      {events.map((event) => (
+        <ActivityEventCard key={event.id} event={event} />
+      ))}
+
+      {hasMore && (
+        <button
+          type="button"
+          onClick={onLoadMore}
+          disabled={loadingMore}
+          className="flex items-center justify-center rounded-lg border border-border/60 py-2.5 text-sm text-muted-foreground transition-colors hover:border-accent/30 hover:text-accent disabled:opacity-50"
+        >
+          {loadingMore ? "Loading…" : "Load more"}
+        </button>
+      )}
+    </div>
   )
 }
 
-function LeaderboardSection() {
-  const { entries, loading } = useLeaderboard()
+function LeaderboardContent({ refreshKey }: { refreshKey: number }) {
+  const { entries, loading } = useLeaderboard(refreshKey)
+
+  if (loading) {
+    return (
+      <div className="flex flex-col gap-0">
+        {[1, 2, 3, 4, 5].map((i) => (
+          <div key={i} className="flex items-center gap-4 py-3 px-2 border-b border-border/40 last:border-b-0">
+            <Skeleton className="h-4 w-6" />
+            <Skeleton className="size-8 rounded-full" />
+            <div className="flex flex-col gap-1.5 flex-1">
+              <Skeleton className="h-4 w-32" />
+              <Skeleton className="h-3 w-20" />
+            </div>
+            <Skeleton className="h-4 w-24" />
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  if (entries.length === 0) {
+    return (
+      <div className="rounded-lg border border-border/60 px-4 py-10 text-center text-sm text-muted-foreground">
+        No attestations yet.
+      </div>
+    )
+  }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Leaderboard</CardTitle>
-        <CardDescription>Most attested users on the platform</CardDescription>
-      </CardHeader>
-      <CardContent>
-        {loading ? (
-          <SectionLoading />
-        ) : entries.length === 0 ? (
-          <div className="rounded-lg border border-border/60 px-4 py-10 text-center text-sm text-muted-foreground">
-            No attestations yet.
+    <div className="flex flex-col">
+      {entries.map((entry, index) => {
+        const name = displayName(entry.user)
+        const href = entry.user.handle ? userPath(entry.user.handle) : "#"
+
+        return (
+          <div
+            key={entry.user.id}
+            className={cn(
+              "flex items-center gap-4 py-3 px-2",
+              index < entries.length - 1 && "border-b border-border/40",
+            )}
+          >
+            <span className={cn(
+              "w-6 text-center text-sm font-semibold",
+              index === 0 && "text-amber-500",
+              index === 1 && "text-muted-foreground",
+              index === 2 && "text-orange-700",
+              index > 2 && "text-muted-foreground/60",
+            )}>
+              {index + 1}
+            </span>
+
+            <Link href={href} className="flex items-center gap-3 min-w-0 flex-1 hover:opacity-80 transition-opacity">
+              <ProfileAvatar type="user" src={entry.user.avatarUrl} name={name} size="sm" />
+              <div className="min-w-0">
+                <div className="truncate text-sm font-medium">{name}</div>
+                {entry.user.handle && (
+                  <div className="truncate text-xs text-muted-foreground">@{entry.user.handle}</div>
+                )}
+              </div>
+            </Link>
+
+            <div className="flex items-center gap-4 shrink-0 text-xs">
+              <div className="flex items-center gap-1">
+                <ArrowDownLeft className="size-3 text-emerald-500" />
+                <span className="font-medium">{entry.receivedCount}</span>
+                <span className="text-muted-foreground hidden sm:inline">received</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <ArrowUpRight className="size-3 text-amber-500" />
+                <span className="font-medium">{entry.givenCount}</span>
+                <span className="text-muted-foreground hidden sm:inline">given</span>
+              </div>
+            </div>
           </div>
-        ) : (
-          <div className="flex flex-col">
-            {entries.map((entry, index) => {
-              const name = displayName(entry.user)
-              const href = entry.user.handle ? userPath(entry.user.handle) : "#"
-
-              return (
-                <div
-                  key={entry.user.id}
-                  className={cn(
-                    "flex items-center gap-4 py-3 px-2",
-                    index < entries.length - 1 && "border-b border-border/40",
-                  )}
-                >
-                  <span className={cn(
-                    "w-6 text-center text-sm font-semibold",
-                    index === 0 && "text-amber-500",
-                    index === 1 && "text-muted-foreground",
-                    index === 2 && "text-orange-700",
-                    index > 2 && "text-muted-foreground/60",
-                  )}>
-                    {index + 1}
-                  </span>
-
-                  <Link href={href} className="flex items-center gap-3 min-w-0 flex-1 hover:opacity-80 transition-opacity">
-                    <ProfileAvatar type="user" src={entry.user.avatarUrl} name={name} size="sm" />
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-medium">{name}</div>
-                      {entry.user.handle && (
-                        <div className="truncate text-xs text-muted-foreground">@{entry.user.handle}</div>
-                      )}
-                    </div>
-                  </Link>
-
-                  <div className="flex items-center gap-4 shrink-0 text-xs">
-                    <div className="flex items-center gap-1">
-                      <ArrowDownLeft className="size-3 text-emerald-500" />
-                      <span className="font-medium">{entry.receivedCount}</span>
-                      <span className="text-muted-foreground hidden sm:inline">received</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <ArrowUpRight className="size-3 text-amber-500" />
-                      <span className="font-medium">{entry.givenCount}</span>
-                      <span className="text-muted-foreground hidden sm:inline">given</span>
-                    </div>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </CardContent>
-    </Card>
+        )
+      })}
+    </div>
   )
 }
 
 // === MAIN ===
 
 export default function ActivityPage() {
+  const [tab, setTab] = React.useState<"activity" | "leaderboard">("activity")
   const [isFiltersOpen, setIsFiltersOpen] = React.useState(false)
-  const [showLeaderboard, setShowLeaderboard] = React.useState(true)
   const [filters, setFilters] = React.useState<FilterState>({ q: "", kind: "" })
+  const [refreshKey, setRefreshKey] = React.useState(0)
 
-  const { events: rawEvents, loading, loadingMore, hasMore, loadMore } = useActivityFeed()
+  const { events: rawEvents, loading, loadingMore, hasMore, loadMore, refresh } = useActivityFeed()
 
   const debouncedQ = useDebouncedValue(filters.q, 300)
   const activeFilters = hasActiveFilters(filters)
@@ -589,60 +605,115 @@ export default function ActivityPage() {
     setFilters({ q: "", kind: "" })
   }
 
+  function handleRefresh() {
+    refresh()
+    setRefreshKey((k) => k + 1)
+  }
+
+  if (loading) {
+    return <ActivitySkeleton />
+  }
+
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-10">
-      <PageHeader
-        title="Activity"
-        description="Recent activity across the platform"
-        actionsAsFormActions={false}
-        actions={
-          <div className="flex items-center gap-2">
-            {activeFilters && (
-              <Button type="button" variant="ghost" onClick={handleClearAll}>
-                Reset
-              </Button>
-            )}
-            <Button type="button" variant="secondary" onClick={() => setIsFiltersOpen((v) => !v)}>
-              {isFiltersOpen ? "Hide filters" : "Show filters"}
-            </Button>
-          </div>
-        }
-      />
-
-      {isFiltersOpen && (
-        <FiltersPanel
-          filters={filters}
-          showLeaderboard={showLeaderboard}
-          onFiltersChange={handleFiltersChange}
-          onToggleLeaderboard={() => setShowLeaderboard((v) => !v)}
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 mt-24 pb-40">
+      <Tabs className="gap-0" value={tab} onValueChange={(v) => setTab(v as "activity" | "leaderboard")}>
+        <PageHeader
+          title="Activity"
+          description="Recent activity across the platform"
+          actionsAsFormActions={false}
+          actions={
+            <div className="flex w-full items-center gap-2">
+              {tab === "activity" && (
+                <>
+                  {activeFilters && (
+                    <Button type="button" variant="ghost" onClick={handleClearAll}>
+                      Reset
+                    </Button>
+                  )}
+                  <Button type="button" variant="secondary" onClick={() => setIsFiltersOpen((v) => !v)}>
+                    {isFiltersOpen ? "Hide filters" : "Show filters"}
+                  </Button>
+                </>
+              )}
+              <div className="ml-auto flex items-center gap-2">
+                <TabsList className="bg-primary/10">
+                  <TabsTrigger value="activity" className="data-active:bg-accent data-active:text-accent-foreground">Activity</TabsTrigger>
+                  <TabsTrigger value="leaderboard" className="data-active:bg-accent data-active:text-accent-foreground">Leaderboard</TabsTrigger>
+                </TabsList>
+                <RefreshButton onRefresh={handleRefresh} />
+              </div>
+            </div>
+          }
         />
-      )}
 
-      {activeFilters && (
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="secondary">{filteredEvents.length} results</Badge>
-          {filters.kind && (
-            <Chip onRemove={() => handleFiltersChange({ kind: "" })}>
-              Type: {ACTIVITY_KIND_CONFIG[filters.kind].label}
-            </Chip>
+        <TabsContent value="activity" className="flex flex-col gap-6">
+          {isFiltersOpen && (
+            <FiltersPanel
+              filters={filters}
+              onFiltersChange={handleFiltersChange}
+            />
           )}
-          {filters.q && (
-            <Chip onRemove={() => handleFiltersChange({ q: "" })}>
-              Search: {filters.q}
-            </Chip>
+
+          {activeFilters && (
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="secondary">{filteredEvents.length} results</Badge>
+              {filters.kind && (
+                <Badge variant="outline" className="gap-1.5">
+                  Type: {ACTIVITY_KIND_CONFIG[filters.kind].label}
+                  <button
+                    type="button"
+                    className="inline-flex size-3.5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
+                    onClick={() => handleFiltersChange({ kind: "" })}
+                    aria-label="Remove type filter"
+                  >
+                    ×
+                  </button>
+                </Badge>
+              )}
+              {filters.q && (
+                <Badge variant="outline" className="gap-1.5">
+                  Search: {filters.q}
+                  <button
+                    type="button"
+                    className="inline-flex size-3.5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
+                    onClick={() => handleFiltersChange({ q: "" })}
+                    aria-label="Remove search filter"
+                  >
+                    ×
+                  </button>
+                </Badge>
+              )}
+            </div>
           )}
-        </div>
-      )}
 
-      {showLeaderboard && <LeaderboardSection />}
+          <Card>
+            <CardHeader>
+              <CardTitle>Recent Activity</CardTitle>
+              <CardDescription>What&apos;s happening across the platform</CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3">
+              <ActivityFeedContent
+                events={filteredEvents}
+                loadingMore={loadingMore}
+                hasMore={hasMore && !activeFilters}
+                onLoadMore={loadMore}
+              />
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-      <ActivityFeedSection
-        events={filteredEvents}
-        loading={loading}
-        loadingMore={loadingMore}
-        hasMore={hasMore && !activeFilters}
-        onLoadMore={loadMore}
-      />
+        <TabsContent value="leaderboard">
+          <Card>
+            <CardHeader>
+              <CardTitle>Leaderboard</CardTitle>
+              <CardDescription>Most attested users on the platform</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <LeaderboardContent refreshKey={refreshKey} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }
