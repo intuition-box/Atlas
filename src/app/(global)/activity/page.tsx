@@ -5,21 +5,26 @@ import Link from "next/link"
 import {
   ArrowDownLeft,
   ArrowUpRight,
-  UserPlus,
-  Users,
+  CalendarIcon,
+  Globe,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { apiGet } from "@/lib/api/client"
 import { userPath, communityPath } from "@/lib/routes"
+import { ATTESTATION_TYPES, ATTESTATION_TYPE_LIST, type AttestationType } from "@/lib/attestations/definitions"
+import { AttestationBadge } from "@/components/attestation/badge"
 
 import { ProfileAvatar } from "@/components/common/profile-avatar"
 import { PageHeader } from "@/components/common/page-header"
 import { RefreshButton } from "@/components/common/refresh-button"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Calendar } from "@/components/ui/calendar"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
@@ -89,6 +94,21 @@ type LeaderboardResponse = {
 type FilterState = {
   q: string
   kind: ActivityEvent["kind"] | ""
+  attestationType: AttestationType | ""
+  direction: "given" | "received" | ""
+  onchain: "onchain" | "offchain" | ""
+  dateFrom: string // ISO date string (YYYY-MM-DD) or ""
+  dateTo: string   // ISO date string (YYYY-MM-DD) or ""
+}
+
+const EMPTY_FILTERS: FilterState = {
+  q: "",
+  kind: "",
+  attestationType: "",
+  direction: "",
+  onchain: "",
+  dateFrom: "",
+  dateTo: "",
 }
 
 // === HOOKS ===
@@ -104,11 +124,14 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
   return debounced
 }
 
-function useActivityFeed() {
+function useActivityFeed(filters: FilterState) {
   const [events, setEvents] = React.useState<ActivityEvent[]>([])
   const [nextCursor, setNextCursor] = React.useState<string | null>(null)
   const [loading, setLoading] = React.useState(true)
   const [loadingMore, setLoadingMore] = React.useState(false)
+
+  // Serialize filters for dependency comparison (excludes cursor)
+  const filtersKey = JSON.stringify(filters)
 
   const load = React.useCallback(async (cursor?: string) => {
     const isInitial = !cursor
@@ -117,6 +140,13 @@ function useActivityFeed() {
 
     const params: Record<string, string> = { take: "100" }
     if (cursor) params.cursor = cursor
+    if (filters.kind) params.kind = filters.kind
+    if (filters.attestationType) params.attestationType = filters.attestationType
+    if (filters.direction) params.direction = filters.direction
+    if (filters.onchain) params.onchain = filters.onchain
+    if (filters.q) params.q = filters.q
+    if (filters.dateFrom) params.dateFrom = filters.dateFrom
+    if (filters.dateTo) params.dateTo = filters.dateTo
 
     const res = await apiGet<ActivityResponse>("/api/activity/list", params)
 
@@ -127,15 +157,25 @@ function useActivityFeed() {
 
     setLoading(false)
     setLoadingMore(false)
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtersKey])
 
-  React.useEffect(() => { void load() }, [load])
+  // Re-fetch on filter change
+  React.useEffect(() => {
+    setEvents([])
+    setNextCursor(null)
+    void load()
+  }, [load])
 
   const loadMore = React.useCallback(() => {
     if (nextCursor && !loadingMore) void load(nextCursor)
   }, [nextCursor, loadingMore, load])
 
-  const refresh = React.useCallback(() => { void load() }, [load])
+  const refresh = React.useCallback(() => {
+    setEvents([])
+    setNextCursor(null)
+    void load()
+  }, [load])
 
   return { events, loading, loadingMore, hasMore: !!nextCursor, loadMore, refresh }
 }
@@ -195,26 +235,7 @@ function displayName(user: ActivityUser): string {
 }
 
 function hasActiveFilters(filters: FilterState): boolean {
-  return Boolean(filters.q || filters.kind)
-}
-
-/** Extract searchable text from any event for client-side filtering. */
-function eventSearchText(event: ActivityEvent): string {
-  switch (event.kind) {
-    case "attestation":
-      return [
-        event.fromUser.name, event.fromUser.handle,
-        event.toUser.name, event.toUser.handle,
-        event.attestationTypeLabel,
-      ].filter(Boolean).join(" ").toLowerCase()
-    case "user_joined":
-      return [event.user.name, event.user.handle].filter(Boolean).join(" ").toLowerCase()
-    case "community_created":
-      return [
-        event.creator.name, event.creator.handle,
-        event.community.name, event.community.handle,
-      ].filter(Boolean).join(" ").toLowerCase()
-  }
+  return Boolean(filters.q || filters.kind || filters.attestationType || filters.direction || filters.onchain || filters.dateFrom || filters.dateTo)
 }
 
 // === ACTIVITY TYPE CONFIG ===
@@ -269,15 +290,13 @@ function AttestationEventCard({ event }: { event: AttestationEvent }) {
     <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 p-3">
       <div className="flex items-center gap-2 min-w-0 text-sm">
         <UserLink user={event.fromUser} />
-        <ArrowUpRight className="size-3 shrink-0 text-muted-foreground" />
+        <ArrowUpRight className="size-3 shrink-0 text-amber-500" />
         <UserLink user={event.toUser} />
       </div>
 
       <div className="flex items-center gap-2 shrink-0">
+        <AttestationBadge type={event.attestationType} />
         <ActivityTypeBadge kind="attestation" />
-        <Badge variant="outline" className="text-xs">
-          {event.attestationTypeLabel}
-        </Badge>
         <span className="text-xs text-muted-foreground">
           {formatRelativeTime(event.createdAt)}
         </span>
@@ -353,6 +372,55 @@ function ActivityEventCard({ event }: { event: ActivityEvent }) {
   }
 }
 
+// === DATE RANGE PICKER ===
+
+function formatDateLabel(date: Date): string {
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+}
+
+function DateRangePicker({
+  from,
+  to,
+  onChange,
+}: {
+  from: Date | undefined
+  to: Date | undefined
+  onChange: (from: Date | undefined, to: Date | undefined) => void
+}) {
+  const hasRange = Boolean(from || to)
+
+  const label = from && to
+    ? `${formatDateLabel(from)} – ${formatDateLabel(to)}`
+    : from
+      ? `From ${formatDateLabel(from)}`
+      : to
+        ? `Until ${formatDateLabel(to)}`
+        : "Pick a date range"
+
+  return (
+    <Popover>
+      <PopoverTrigger
+        className={cn(
+          "border-input bg-input/30 dark:hover:bg-input/50 focus-visible:border-ring focus-visible:ring-ring/50 flex h-9 w-full items-center gap-2 rounded-4xl border px-3 text-sm transition-colors focus-visible:ring-[3px] outline-none",
+          !hasRange && "text-muted-foreground",
+        )}
+      >
+        <CalendarIcon className="size-4 shrink-0 text-muted-foreground" />
+        <span className="truncate">{label}</span>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-auto p-0">
+        <Calendar
+          mode="range"
+          selected={from || to ? { from, to } : undefined}
+          onSelect={(range) => onChange(range?.from, range?.to)}
+          numberOfMonths={2}
+          disabled={{ after: new Date() }}
+        />
+      </PopoverContent>
+    </Popover>
+  )
+}
+
 // === FILTER PANEL ===
 
 function FiltersPanel({
@@ -363,8 +431,8 @@ function FiltersPanel({
   onFiltersChange: (updates: Partial<FilterState>) => void
 }) {
   return (
-    <section className="rounded-2xl border border-border/60 bg-card/30 p-4" aria-label="Activity filters">
-      <div className="grid gap-4 sm:grid-cols-2">
+    <Card aria-label="Activity filters" className="bg-card/30 border-border/30">
+      <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <div className="flex flex-col gap-2">
           <div className="text-xs font-medium text-foreground/70">Search</div>
           <Input
@@ -377,21 +445,105 @@ function FiltersPanel({
 
         <div className="flex flex-col gap-2">
           <div className="text-xs font-medium text-foreground/70">Activity type</div>
-          <select
-            value={filters.kind}
-            onChange={(e) => onFiltersChange({ kind: e.target.value as FilterState["kind"] })}
-            className="h-9 rounded-xl border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          <Select
+            value={filters.kind || null}
+            onValueChange={(v) => onFiltersChange({ kind: (v ?? "") as FilterState["kind"] })}
           >
-            <option value="">All types</option>
-            {ACTIVITY_KIND_LIST.map(([kind, config]) => (
-              <option key={kind} value={kind}>
-                {config.label}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger className="w-full">
+              <SelectValue>{(v: string | null) => v ? ACTIVITY_KIND_CONFIG[v as ActivityEvent["kind"]]?.label ?? v : "All types"}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value={null as unknown as string}>All types</SelectItem>
+                {ACTIVITY_KIND_LIST.map(([kind, config]) => (
+                  <SelectItem key={kind} value={kind}>
+                    {config.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
         </div>
-      </div>
-    </section>
+
+        <div className="flex flex-col gap-2">
+          <div className="text-xs font-medium text-foreground/70">Attestation type</div>
+          <Select
+            value={filters.attestationType || null}
+            onValueChange={(v) => onFiltersChange({ attestationType: (v ?? "") as FilterState["attestationType"] })}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue>
+                {(v: string | null) => {
+                  if (!v) return "All attestations"
+                  const def = ATTESTATION_TYPES[v as AttestationType]
+                  return def ? `${def.emoji} ${def.label}` : v
+                }}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value={null as unknown as string}>All attestations</SelectItem>
+                {ATTESTATION_TYPE_LIST.map((t) => (
+                  <SelectItem key={t.id} value={t.id}>
+                    {t.emoji} {t.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <div className="text-xs font-medium text-foreground/70">Direction</div>
+          <Select
+            value={filters.direction || null}
+            onValueChange={(v) => onFiltersChange({ direction: (v ?? "") as FilterState["direction"] })}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue>{(v: string | null) => v === "given" ? "Given" : v === "received" ? "Received" : "All"}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value={null as unknown as string}>All</SelectItem>
+                <SelectItem value="given">Given</SelectItem>
+                <SelectItem value="received">Received</SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <div className="text-xs font-medium text-foreground/70">Onchain status</div>
+          <Select
+            value={filters.onchain || null}
+            onValueChange={(v) => onFiltersChange({ onchain: (v ?? "") as FilterState["onchain"] })}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue>{(v: string | null) => v === "onchain" ? "Onchain" : v === "offchain" ? "Offchain" : "All"}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value={null as unknown as string}>All</SelectItem>
+                <SelectItem value="onchain">Onchain</SelectItem>
+                <SelectItem value="offchain">Offchain</SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <div className="text-xs font-medium text-foreground/70">Date range</div>
+          <DateRangePicker
+            from={filters.dateFrom ? new Date(filters.dateFrom) : undefined}
+            to={filters.dateTo ? new Date(filters.dateTo) : undefined}
+            onChange={(from, to) => onFiltersChange({
+              dateFrom: from ? from.toISOString().slice(0, 10) : "",
+              dateTo: to ? to.toISOString().slice(0, 10) : "",
+            })}
+          />
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -491,16 +643,21 @@ function LeaderboardContent({ refreshKey }: { refreshKey: number }) {
 
   if (loading) {
     return (
-      <div className="flex flex-col gap-0">
+      <div className="flex flex-col gap-2">
         {[1, 2, 3, 4, 5].map((i) => (
-          <div key={i} className="flex items-center gap-4 py-3 px-2 border-b border-border/40 last:border-b-0">
-            <Skeleton className="h-4 w-6" />
-            <Skeleton className="size-8 rounded-full" />
-            <div className="flex flex-col gap-1.5 flex-1">
-              <Skeleton className="h-4 w-32" />
-              <Skeleton className="h-3 w-20" />
+          <div key={i} className="flex items-center justify-between gap-3 rounded-lg border border-border/60 p-3">
+            <div className="flex items-center gap-3">
+              <Skeleton className="h-4 w-6" />
+              <Skeleton className="size-8 rounded-full" />
+              <div className="flex flex-col gap-1.5">
+                <Skeleton className="h-4 w-32" />
+                <Skeleton className="h-3 w-20" />
+              </div>
             </div>
-            <Skeleton className="h-4 w-24" />
+            <div className="flex items-center gap-4">
+              <Skeleton className="h-4 w-16" />
+              <Skeleton className="h-4 w-16" />
+            </div>
           </div>
         ))}
       </div>
@@ -516,7 +673,7 @@ function LeaderboardContent({ refreshKey }: { refreshKey: number }) {
   }
 
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col gap-2">
       {entries.map((entry, index) => {
         const name = displayName(entry.user)
         const href = entry.user.handle ? userPath(entry.user.handle) : "#"
@@ -524,30 +681,29 @@ function LeaderboardContent({ refreshKey }: { refreshKey: number }) {
         return (
           <div
             key={entry.user.id}
-            className={cn(
-              "flex items-center gap-4 py-3 px-2",
-              index < entries.length - 1 && "border-b border-border/40",
-            )}
+            className="flex items-center justify-between gap-3 rounded-lg border border-border/60 p-3"
           >
-            <span className={cn(
-              "w-6 text-center text-sm font-semibold",
-              index === 0 && "text-amber-500",
-              index === 1 && "text-muted-foreground",
-              index === 2 && "text-orange-700",
-              index > 2 && "text-muted-foreground/60",
-            )}>
-              {index + 1}
-            </span>
+            <div className="flex items-center gap-3 min-w-0">
+              <span className={cn(
+                "w-6 text-center text-sm font-semibold shrink-0",
+                index === 0 && "text-amber-500",
+                index === 1 && "text-muted-foreground",
+                index === 2 && "text-orange-700",
+                index > 2 && "text-muted-foreground/60",
+              )}>
+                {index + 1}
+              </span>
 
-            <Link href={href} className="flex items-center gap-3 min-w-0 flex-1 hover:opacity-80 transition-opacity">
-              <ProfileAvatar type="user" src={entry.user.avatarUrl} name={name} size="sm" />
-              <div className="min-w-0">
-                <div className="truncate text-sm font-medium">{name}</div>
-                {entry.user.handle && (
-                  <div className="truncate text-xs text-muted-foreground">@{entry.user.handle}</div>
-                )}
-              </div>
-            </Link>
+              <Link href={href} className="flex items-center gap-3 min-w-0 hover:opacity-80 transition-opacity">
+                <ProfileAvatar type="user" src={entry.user.avatarUrl} name={name} size="sm" />
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium">{name}</div>
+                  {entry.user.handle && (
+                    <div className="truncate text-xs text-muted-foreground">@{entry.user.handle}</div>
+                  )}
+                </div>
+              </Link>
+            </div>
 
             <div className="flex items-center gap-4 shrink-0 text-xs">
               <div className="flex items-center gap-1">
@@ -573,36 +729,26 @@ function LeaderboardContent({ refreshKey }: { refreshKey: number }) {
 export default function ActivityPage() {
   const [tab, setTab] = React.useState<"activity" | "leaderboard">("activity")
   const [isFiltersOpen, setIsFiltersOpen] = React.useState(false)
-  const [filters, setFilters] = React.useState<FilterState>({ q: "", kind: "" })
+  const [filters, setFilters] = React.useState<FilterState>(EMPTY_FILTERS)
   const [refreshKey, setRefreshKey] = React.useState(0)
 
-  const { events: rawEvents, loading, loadingMore, hasMore, loadMore, refresh } = useActivityFeed()
-
+  // Debounce only the text search; other filters apply immediately
   const debouncedQ = useDebouncedValue(filters.q, 300)
+  const apiFilters = React.useMemo<FilterState>(
+    () => ({ ...filters, q: debouncedQ }),
+    [filters, debouncedQ],
+  )
+
+  const { events, loading, loadingMore, hasMore, loadMore, refresh } = useActivityFeed(apiFilters)
+
   const activeFilters = hasActiveFilters(filters)
-
-  // Client-side filtering
-  const filteredEvents = React.useMemo(() => {
-    let result = rawEvents
-
-    if (filters.kind) {
-      result = result.filter((e) => e.kind === filters.kind)
-    }
-
-    if (debouncedQ) {
-      const q = debouncedQ.toLowerCase()
-      result = result.filter((e) => eventSearchText(e).includes(q))
-    }
-
-    return result
-  }, [rawEvents, filters.kind, debouncedQ])
 
   function handleFiltersChange(updates: Partial<FilterState>) {
     setFilters((prev) => ({ ...prev, ...updates }))
   }
 
   function handleClearAll() {
-    setFilters({ q: "", kind: "" })
+    setFilters(EMPTY_FILTERS)
   }
 
   function handleRefresh() {
@@ -610,7 +756,7 @@ export default function ActivityPage() {
     setRefreshKey((k) => k + 1)
   }
 
-  if (loading) {
+  if (loading && !hasActiveFilters(apiFilters)) {
     return <ActivitySkeleton />
   }
 
@@ -618,7 +764,8 @@ export default function ActivityPage() {
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 mt-24 pb-40">
       <Tabs className="gap-0" value={tab} onValueChange={(v) => setTab(v as "activity" | "leaderboard")}>
         <PageHeader
-          title="Activity"
+          leading={<Globe className="size-6 text-muted-foreground" />}
+          title="Global Feed"
           description="Recent activity across the platform"
           actionsAsFormActions={false}
           actions={
@@ -656,7 +803,7 @@ export default function ActivityPage() {
 
           {activeFilters && (
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="secondary">{filteredEvents.length} results</Badge>
+              <Badge variant="secondary">{events.length} results</Badge>
               {filters.kind && (
                 <Badge variant="outline" className="gap-1.5">
                   Type: {ACTIVITY_KIND_CONFIG[filters.kind].label}
@@ -665,6 +812,62 @@ export default function ActivityPage() {
                     className="inline-flex size-3.5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
                     onClick={() => handleFiltersChange({ kind: "" })}
                     aria-label="Remove type filter"
+                  >
+                    ×
+                  </button>
+                </Badge>
+              )}
+              {filters.attestationType && (
+                <Badge variant="outline" className="gap-1.5">
+                  {ATTESTATION_TYPES[filters.attestationType]?.emoji} {ATTESTATION_TYPES[filters.attestationType]?.label ?? filters.attestationType}
+                  <button
+                    type="button"
+                    className="inline-flex size-3.5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
+                    onClick={() => handleFiltersChange({ attestationType: "" })}
+                    aria-label="Remove attestation type filter"
+                  >
+                    ×
+                  </button>
+                </Badge>
+              )}
+              {filters.direction && (
+                <Badge variant="outline" className="gap-1.5">
+                  Direction: {filters.direction === "given" ? "Given" : "Received"}
+                  <button
+                    type="button"
+                    className="inline-flex size-3.5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
+                    onClick={() => handleFiltersChange({ direction: "" })}
+                    aria-label="Remove direction filter"
+                  >
+                    ×
+                  </button>
+                </Badge>
+              )}
+              {filters.onchain && (
+                <Badge variant="outline" className="gap-1.5">
+                  Status: {filters.onchain === "onchain" ? "Onchain" : "Offchain"}
+                  <button
+                    type="button"
+                    className="inline-flex size-3.5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
+                    onClick={() => handleFiltersChange({ onchain: "" })}
+                    aria-label="Remove onchain status filter"
+                  >
+                    ×
+                  </button>
+                </Badge>
+              )}
+              {(filters.dateFrom || filters.dateTo) && (
+                <Badge variant="outline" className="gap-1.5">
+                  Date: {filters.dateFrom && filters.dateTo
+                    ? `${formatDateLabel(new Date(filters.dateFrom))} – ${formatDateLabel(new Date(filters.dateTo))}`
+                    : filters.dateFrom
+                      ? `From ${formatDateLabel(new Date(filters.dateFrom))}`
+                      : `Until ${formatDateLabel(new Date(filters.dateTo))}`}
+                  <button
+                    type="button"
+                    className="inline-flex size-3.5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
+                    onClick={() => handleFiltersChange({ dateFrom: "", dateTo: "" })}
+                    aria-label="Remove date filter"
                   >
                     ×
                   </button>
@@ -692,12 +895,33 @@ export default function ActivityPage() {
               <CardDescription>What&apos;s happening across the platform</CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
-              <ActivityFeedContent
-                events={filteredEvents}
-                loadingMore={loadingMore}
-                hasMore={hasMore && !activeFilters}
-                onLoadMore={loadMore}
-              />
+              {loading ? (
+                <div className="flex flex-col gap-2">
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <div key={i} className="flex items-center justify-between gap-3 rounded-lg border border-border/60 p-3">
+                      <div className="flex items-center gap-2">
+                        <Skeleton className="size-8" />
+                        <Skeleton className="h-4 w-24" />
+                        <Skeleton className="h-3 w-4" />
+                        <Skeleton className="size-8" />
+                        <Skeleton className="h-4 w-24" />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Skeleton className="h-5 w-20" />
+                        <Skeleton className="h-5 w-20" />
+                        <Skeleton className="h-4 w-12" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <ActivityFeedContent
+                  events={events}
+                  loadingMore={loadingMore}
+                  hasMore={hasMore}
+                  onLoadMore={loadMore}
+                />
+              )}
             </CardContent>
           </Card>
         </TabsContent>

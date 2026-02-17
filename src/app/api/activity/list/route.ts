@@ -12,6 +12,14 @@ export const runtime = "nodejs";
 const QuerySchema = z.object({
   take: z.coerce.number().int().min(1).max(100).default(20),
   cursor: z.string().trim().min(1).optional(),
+  // Filters
+  kind: z.enum(["attestation", "user_joined", "community_created"]).optional(),
+  attestationType: z.string().trim().min(1).optional(),
+  direction: z.enum(["given", "received"]).optional(),
+  onchain: z.enum(["onchain", "offchain"]).optional(),
+  q: z.string().trim().optional(),
+  dateFrom: z.string().trim().min(1).optional(), // ISO date (YYYY-MM-DD)
+  dateTo: z.string().trim().min(1).optional(),   // ISO date (YYYY-MM-DD)
 });
 
 // --- Activity event types ---
@@ -63,7 +71,8 @@ type ActivityListOk = {
 };
 
 export const GET = api(QuerySchema, async (ctx) => {
-  const { take, cursor } = ctx.json;
+  const { take, cursor, kind, attestationType, direction, onchain, q, dateFrom, dateTo } = ctx.json;
+  const viewerId = ctx.viewerId;
 
   // We fetch `take + buffer` from each source, merge, sort, then take `take + 1`
   // for cursor pagination. Overfetch a bit to handle interleaving.
@@ -79,65 +88,121 @@ export const GET = api(QuerySchema, async (ctx) => {
     }
   }
 
-  const dateFilter = cursorDate ? { lt: cursorDate } : undefined;
+  // Build date filter: combine cursor (lt) with dateFrom/dateTo range
+  const parsedFrom = dateFrom ? new Date(dateFrom) : undefined;
+  const parsedTo = dateTo ? new Date(`${dateTo}T23:59:59.999Z`) : undefined;
+
+  const dateFilter: Record<string, Date> = {};
+  if (cursorDate) dateFilter.lt = cursorDate;
+  if (parsedFrom && Number.isFinite(parsedFrom.getTime())) dateFilter.gte = parsedFrom;
+  if (parsedTo && Number.isFinite(parsedTo.getTime())) {
+    // Use the earlier of cursor and dateTo upper bound
+    if (dateFilter.lt && parsedTo < dateFilter.lt) {
+      dateFilter.lt = parsedTo;
+    } else if (!dateFilter.lt) {
+      dateFilter.lte = parsedTo;
+    }
+  }
+  const hasDateFilter = Object.keys(dateFilter).length > 0;
+
+  // Determine which sources to fetch based on kind filter.
+  // Attestation-specific filters (attestationType, direction, onchain) implicitly restrict to attestation kind.
+  const hasAttestationFilter = Boolean(attestationType || direction || onchain);
+  const effectiveKind = kind ?? (hasAttestationFilter ? "attestation" : undefined);
+
+  const fetchAttestations = !effectiveKind || effectiveKind === "attestation";
+  const fetchUsers = !effectiveKind || effectiveKind === "user_joined";
+  const fetchCommunities = !effectiveKind || effectiveKind === "community_created";
+
+  // Build text search filter for Prisma `contains` (case-insensitive on most DBs)
+  const nameContains = q ? { contains: q, mode: "insensitive" as const } : undefined;
 
   // --- Fetch from multiple sources in parallel ---
   const [attestationRows, userRows, communityRows] = await Promise.all([
     // 1. Recent attestations
-    db.attestation.findMany({
-      where: {
-        revokedAt: null,
-        supersededById: null,
-        ...(dateFilter ? { createdAt: dateFilter } : {}),
-      },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: fetchLimit,
-      select: {
-        id: true,
-        type: true,
-        fromUserId: true,
-        toUserId: true,
-        confidence: true,
-        createdAt: true,
-        mintedAt: true,
-        fromUser: { select: { id: true, name: true, avatarUrl: true } },
-        toUser: { select: { id: true, name: true, avatarUrl: true } },
-      },
-    }),
+    fetchAttestations
+      ? db.attestation.findMany({
+          where: {
+            revokedAt: null,
+            supersededById: null,
+            ...(hasDateFilter ? { createdAt: dateFilter } : {}),
+            ...(attestationType ? { type: attestationType } : {}),
+            ...(direction === "given" && viewerId ? { fromUserId: viewerId } : {}),
+            ...(direction === "received" && viewerId ? { toUserId: viewerId } : {}),
+            ...(onchain === "onchain" ? { mintedAt: { not: null } } : {}),
+            ...(onchain === "offchain" ? { mintedAt: null } : {}),
+            ...(nameContains
+              ? {
+                  OR: [
+                    { fromUser: { name: nameContains } },
+                    { toUser: { name: nameContains } },
+                  ],
+                }
+              : {}),
+          },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          take: fetchLimit,
+          select: {
+            id: true,
+            type: true,
+            fromUserId: true,
+            toUserId: true,
+            confidence: true,
+            createdAt: true,
+            mintedAt: true,
+            fromUser: { select: { id: true, name: true, avatarUrl: true } },
+            toUser: { select: { id: true, name: true, avatarUrl: true } },
+          },
+        })
+      : [],
 
     // 2. Recently joined users (onboarded)
-    db.user.findMany({
-      where: {
-        onboardedAt: { not: null },
-        ...(dateFilter ? { onboardedAt: dateFilter } : {}),
-      },
-      orderBy: [{ onboardedAt: "desc" }, { id: "desc" }],
-      take: fetchLimit,
-      select: {
-        id: true,
-        name: true,
-        avatarUrl: true,
-        onboardedAt: true,
-      },
-    }),
+    fetchUsers
+      ? db.user.findMany({
+          where: {
+            onboardedAt: { not: null },
+            ...(hasDateFilter ? { onboardedAt: dateFilter } : {}),
+            ...(nameContains ? { name: nameContains } : {}),
+          },
+          orderBy: [{ onboardedAt: "desc" }, { id: "desc" }],
+          take: fetchLimit,
+          select: {
+            id: true,
+            name: true,
+            avatarUrl: true,
+            onboardedAt: true,
+          },
+        })
+      : [],
 
-    // 3. Recently created communities
-    db.community.findMany({
-      where: {
-        ...(dateFilter ? { createdAt: dateFilter } : {}),
-      },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: fetchLimit,
-      select: {
-        id: true,
-        name: true,
-        icon: true,
-        avatarUrl: true,
-        ownerId: true,
-        createdAt: true,
-        owner: { select: { id: true, name: true, avatarUrl: true } },
-      },
-    }),
+    // 3. Recently created communities (only public ones)
+    fetchCommunities
+      ? db.community.findMany({
+          where: {
+            isPublicDirectory: true,
+            ...(hasDateFilter ? { createdAt: dateFilter } : {}),
+            ...(nameContains
+              ? {
+                  OR: [
+                    { name: nameContains },
+                    { owner: { name: nameContains } },
+                  ],
+                }
+              : {}),
+          },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          take: fetchLimit,
+          select: {
+            id: true,
+            name: true,
+            icon: true,
+            avatarUrl: true,
+            ownerId: true,
+            createdAt: true,
+            owner: { select: { id: true, name: true, avatarUrl: true } },
+          },
+        })
+      : [],
   ]);
 
   // --- Resolve handles for all users and communities ---
