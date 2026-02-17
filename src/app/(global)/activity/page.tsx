@@ -17,7 +17,8 @@ import { AttestationBadge } from "@/components/attestation/badge"
 
 import { ProfileAvatar } from "@/components/common/profile-avatar"
 import { PageHeader } from "@/components/common/page-header"
-import { RefreshButton } from "@/components/common/refresh-button"
+
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Calendar } from "@/components/ui/calendar"
@@ -433,6 +434,7 @@ function FiltersPanel({
   return (
     <Card aria-label="Activity filters" className="bg-card/30 border-border/30">
       <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {/* Row 1: Search, Date, Activity type */}
         <div className="flex flex-col gap-2">
           <div className="text-xs font-medium text-foreground/70">Search</div>
           <Input
@@ -440,6 +442,18 @@ function FiltersPanel({
             value={filters.q}
             onChange={(e) => onFiltersChange({ q: e.target.value })}
             aria-label="Search activity"
+          />
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <div className="text-xs font-medium text-foreground/70">Date</div>
+          <DateRangePicker
+            from={filters.dateFrom ? new Date(filters.dateFrom) : undefined}
+            to={filters.dateTo ? new Date(filters.dateTo) : undefined}
+            onChange={(from, to) => onFiltersChange({
+              dateFrom: from ? from.toISOString().slice(0, 10) : "",
+              dateTo: to ? to.toISOString().slice(0, 10) : "",
+            })}
           />
         </div>
 
@@ -465,6 +479,7 @@ function FiltersPanel({
           </Select>
         </div>
 
+        {/* Row 2: Attestation type, Attestation direction, Attestation state */}
         <div className="flex flex-col gap-2">
           <div className="text-xs font-medium text-foreground/70">Attestation type</div>
           <Select
@@ -494,7 +509,7 @@ function FiltersPanel({
         </div>
 
         <div className="flex flex-col gap-2">
-          <div className="text-xs font-medium text-foreground/70">Direction</div>
+          <div className="text-xs font-medium text-foreground/70">Attestation direction</div>
           <Select
             value={filters.direction || null}
             onValueChange={(v) => onFiltersChange({ direction: (v ?? "") as FilterState["direction"] })}
@@ -513,7 +528,7 @@ function FiltersPanel({
         </div>
 
         <div className="flex flex-col gap-2">
-          <div className="text-xs font-medium text-foreground/70">Onchain status</div>
+          <div className="text-xs font-medium text-foreground/70">Attestation state</div>
           <Select
             value={filters.onchain || null}
             onValueChange={(v) => onFiltersChange({ onchain: (v ?? "") as FilterState["onchain"] })}
@@ -529,18 +544,6 @@ function FiltersPanel({
               </SelectGroup>
             </SelectContent>
           </Select>
-        </div>
-
-        <div className="flex flex-col gap-2">
-          <div className="text-xs font-medium text-foreground/70">Date range</div>
-          <DateRangePicker
-            from={filters.dateFrom ? new Date(filters.dateFrom) : undefined}
-            to={filters.dateTo ? new Date(filters.dateTo) : undefined}
-            onChange={(from, to) => onFiltersChange({
-              dateFrom: from ? from.toISOString().slice(0, 10) : "",
-              dateTo: to ? to.toISOString().slice(0, 10) : "",
-            })}
-          />
         </div>
       </CardContent>
     </Card>
@@ -579,10 +582,10 @@ function ActivitySkeleton() {
             <div key={i} className="flex items-center justify-between gap-3 rounded-lg border border-border/60 p-3">
               <div className="flex items-center gap-2">
                 <Skeleton className="size-8" />
-                <Skeleton className="h-4 w-24" />
+                <Skeleton className="h-4 w-12" />
                 <Skeleton className="h-3 w-4" />
                 <Skeleton className="size-8" />
-                <Skeleton className="h-4 w-24" />
+                <Skeleton className="h-4 w-12" />
               </div>
               <div className="flex items-center gap-2">
                 <Skeleton className="h-5 w-20" />
@@ -625,14 +628,14 @@ function ActivityFeedContent({
       ))}
 
       {hasMore && (
-        <button
+        <Button
           type="button"
           onClick={onLoadMore}
           disabled={loadingMore}
-          className="flex items-center justify-center rounded-lg border border-border/60 py-2.5 text-sm text-muted-foreground transition-colors hover:border-accent/30 hover:text-accent disabled:opacity-50"
+          className="mx-auto"
         >
           {loadingMore ? "Loading…" : "Load more"}
-        </button>
+        </Button>
       )}
     </div>
   )
@@ -646,17 +649,17 @@ function LeaderboardContent({ refreshKey }: { refreshKey: number }) {
       <div className="flex flex-col gap-2">
         {[1, 2, 3, 4, 5].map((i) => (
           <div key={i} className="flex items-center justify-between gap-3 rounded-lg border border-border/60 p-3">
-            <div className="flex items-center gap-3">
-              <Skeleton className="h-4 w-6" />
-              <Skeleton className="size-8 rounded-full" />
+            <div className="flex items-center gap-2">
+              <Skeleton className="size-4" />
+              <Skeleton className="size-8" />
               <div className="flex flex-col gap-1.5">
-                <Skeleton className="h-4 w-32" />
-                <Skeleton className="h-3 w-20" />
+                <Skeleton className="h-4 w-24" />
+                <Skeleton className="h-3 w-12" />
               </div>
             </div>
-            <div className="flex items-center gap-4">
-              <Skeleton className="h-4 w-16" />
-              <Skeleton className="h-4 w-16" />
+            <div className="flex items-center gap-2">
+              <Skeleton className="h-4 w-12" />
+              <Skeleton className="h-4 w-12" />
             </div>
           </div>
         ))}
@@ -705,7 +708,7 @@ function LeaderboardContent({ refreshKey }: { refreshKey: number }) {
               </Link>
             </div>
 
-            <div className="flex items-center gap-4 shrink-0 text-xs">
+            <div className="flex items-center gap-2 shrink-0 text-xs">
               <div className="flex items-center gap-1">
                 <ArrowDownLeft className="size-3 text-emerald-500" />
                 <span className="font-medium">{entry.receivedCount}</span>
@@ -761,15 +764,19 @@ export default function ActivityPage() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 mt-24 pb-40">
-      <Tabs className="gap-0" value={tab} onValueChange={(v) => setTab(v as "activity" | "leaderboard")}>
+    <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
+      <Tabs className="gap-6" value={tab} onValueChange={(v) => setTab(v as "activity" | "leaderboard")}>
         <PageHeader
-          leading={<Globe className="size-6 text-muted-foreground" />}
-          title="Global Feed"
-          description="Recent activity across the platform"
+          leading={
+            <Avatar className="h-12 w-12">
+              <AvatarFallback><Globe className="size-5" /></AvatarFallback>
+            </Avatar>
+          }
+          title="Activity"
+          description="Global feed"
           actionsAsFormActions={false}
           actions={
-            <div className="flex w-full items-center gap-2">
+            <div className="flex w-full items-center gap-3">
               {tab === "activity" && (
                 <>
                   {activeFilters && (
@@ -777,18 +784,18 @@ export default function ActivityPage() {
                       Reset
                     </Button>
                   )}
-                  <Button type="button" variant="secondary" onClick={() => setIsFiltersOpen((v) => !v)}>
+                  <Button type="button" variant={isFiltersOpen ? "default" : "secondary"} onClick={() => setIsFiltersOpen((v) => !v)}>
                     {isFiltersOpen ? "Hide filters" : "Show filters"}
                   </Button>
                 </>
               )}
-              <div className="ml-auto flex items-center gap-2">
-                <TabsList className="bg-primary/10">
-                  <TabsTrigger value="activity" className="data-active:bg-accent data-active:text-accent-foreground">Activity</TabsTrigger>
-                  <TabsTrigger value="leaderboard" className="data-active:bg-accent data-active:text-accent-foreground">Leaderboard</TabsTrigger>
-                </TabsList>
-                <RefreshButton onRefresh={handleRefresh} />
-              </div>
+              <Button type="button" variant="secondary" onClick={handleRefresh}>
+                Refresh
+              </Button>
+              <TabsList>
+                <TabsTrigger value="activity" className="data-active:bg-primary dark:data-active:bg-primary data-active:text-primary-foreground dark:data-active:text-primary-foreground dark:data-active:border-transparent">Activity</TabsTrigger>
+                <TabsTrigger value="leaderboard" className="data-active:bg-primary dark:data-active:bg-primary data-active:text-primary-foreground dark:data-active:text-primary-foreground dark:data-active:border-transparent">Leaderboard</TabsTrigger>
+              </TabsList>
             </div>
           }
         />
@@ -891,37 +898,16 @@ export default function ActivityPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Recent Activity</CardTitle>
+              <CardTitle>Events</CardTitle>
               <CardDescription>What&apos;s happening across the platform</CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
-              {loading ? (
-                <div className="flex flex-col gap-2">
-                  {[1, 2, 3, 4, 5].map((i) => (
-                    <div key={i} className="flex items-center justify-between gap-3 rounded-lg border border-border/60 p-3">
-                      <div className="flex items-center gap-2">
-                        <Skeleton className="size-8" />
-                        <Skeleton className="h-4 w-24" />
-                        <Skeleton className="h-3 w-4" />
-                        <Skeleton className="size-8" />
-                        <Skeleton className="h-4 w-24" />
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Skeleton className="h-5 w-20" />
-                        <Skeleton className="h-5 w-20" />
-                        <Skeleton className="h-4 w-12" />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <ActivityFeedContent
-                  events={events}
-                  loadingMore={loadingMore}
-                  hasMore={hasMore}
-                  onLoadMore={loadMore}
-                />
-              )}
+              <ActivityFeedContent
+                events={events}
+                loadingMore={loadingMore}
+                hasMore={hasMore}
+                onLoadMore={loadMore}
+              />
             </CardContent>
           </Card>
         </TabsContent>
