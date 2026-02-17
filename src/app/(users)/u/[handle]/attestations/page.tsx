@@ -4,27 +4,34 @@ import * as React from "react"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 import { useSession } from "next-auth/react"
-import { ArrowDownLeft, ArrowUpRight, Filter, Undo2, Link2, Check, Loader2, SquareCheck, Square } from "lucide-react"
+import {
+  ArrowDownLeft,
+  ArrowUpRight,
+  Link2,
+  Loader2,
+  Undo2,
+} from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { apiGet, apiPost } from "@/lib/api/client"
 import { sounds } from "@/lib/sounds"
 import { ROUTES, userPath } from "@/lib/routes"
+import { ATTESTATION_TYPES, ATTESTATION_TYPE_LIST, type AttestationType } from "@/lib/attestations/definitions"
+import { AttestationBadge } from "@/components/attestation/badge"
+import { OnchainBanner } from "@/components/attestation/onchain-banner"
+import { useAttestationQueue } from "@/components/attestation/queue-provider"
+
+import { PageHeader } from "@/components/common/page-header"
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Card, CardAction, CardContent, CardFooter, CardHeader } from "@/components/ui/card"
 import { InfiniteScroll } from "@/components/ui/infinite-scroll"
 import { Input } from "@/components/ui/input"
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { PageHeader } from "@/components/common/page-header"
-import { Spinner } from "@/components/ui/spinner"
-import { Checkbox } from "@/components/ui/checkbox"
-import { OnchainBanner } from "@/components/attestation/onchain-banner"
-import { SelectionActionBar } from "@/components/attestation/selection-action-bar"
-import { useAttestationQueue } from "@/components/attestation/queue-provider"
-import { ATTESTATION_TYPES, ATTESTATION_TYPE_LIST, type AttestationType } from "@/lib/attestations/definitions"
-import { AttestationBadge } from "@/components/attestation/badge"
 
 // === CONSTANTS ===
 
@@ -119,6 +126,37 @@ function hasActiveFilters(filters: FilterState): boolean {
 
 // === CUSTOM HOOKS ===
 
+type UserProfile = {
+  name: string | null
+  avatarUrl: string | null
+  image: string | null
+}
+
+function useUserProfile(handle: string) {
+  const [profile, setProfile] = React.useState<UserProfile | null>(null)
+
+  React.useEffect(() => {
+    if (!handle) return
+
+    const ac = new AbortController()
+
+    void (async () => {
+      const res = await apiGet<{ user: UserProfile }>(
+        "/api/user/get",
+        { handle },
+        { signal: ac.signal },
+      )
+      if (!ac.signal.aborted && res.ok) {
+        setProfile(res.value.user)
+      }
+    })()
+
+    return () => ac.abort()
+  }, [handle])
+
+  return profile
+}
+
 function useDebouncedValue<T>(value: T, delayMs: number): T {
   const [debounced, setDebounced] = React.useState(value)
 
@@ -135,14 +173,18 @@ function useAttestationsData(
   filters: FilterState,
   cursor: string | null,
   /** Timestamp of last cart save - triggers refetch when changed */
-  lastSavedAt: number = 0
+  lastSavedAt: number = 0,
+  /** Increment to force a refetch without a full page reload */
+  refreshKey: number = 0,
 ) {
   const router = useRouter()
   const [items, setItems] = React.useState<Attestation[]>([])
   const [nextCursor, setNextCursor] = React.useState<string | null>(null)
   const [loading, setLoading] = React.useState(true)
+  const [filtering, setFiltering] = React.useState(false)
   const [loadingMore, setLoadingMore] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
+  const hasLoadedOnce = React.useRef(false)
 
   const debouncedQ = useDebouncedValue(filters.q, 300)
 
@@ -177,8 +219,13 @@ function useAttestationsData(
 
     async function load() {
       setError(null)
-      setLoading(cursor === null)
-      setLoadingMore(cursor !== null)
+      if (cursor !== null) {
+        setLoadingMore(true)
+      } else if (hasLoadedOnce.current) {
+        setFiltering(true)
+      } else {
+        setLoading(true)
+      }
 
       try {
         // For "all" direction, we need to fetch both received and given
@@ -208,7 +255,9 @@ function useAttestationsData(
 
           setItems((prev) => cursor ? mergeAttestationsUnique(prev, merged) : merged)
           setNextCursor(null) // Pagination is tricky with merged results
+          hasLoadedOnce.current = true
           setLoading(false)
+          setFiltering(false)
           setLoadingMore(false)
           return
         }
@@ -226,6 +275,7 @@ function useAttestationsData(
           }
           setError("We couldn't load attestations. Try again.")
           setLoading(false)
+          setFiltering(false)
           setLoadingMore(false)
           return
         }
@@ -233,12 +283,15 @@ function useAttestationsData(
         const attestations = res.value.attestations
         setItems((prev) => cursor ? mergeAttestationsUnique(prev, attestations) : attestations)
         setNextCursor(res.value.nextCursor)
+        hasLoadedOnce.current = true
         setLoading(false)
+        setFiltering(false)
         setLoadingMore(false)
       } catch {
         if (!ac.signal.aborted) {
           setError("An unexpected error occurred.")
           setLoading(false)
+          setFiltering(false)
           setLoadingMore(false)
         }
       }
@@ -249,7 +302,7 @@ function useAttestationsData(
     return () => {
       ac.abort()
     }
-  }, [router, queryParams, cursor, handle, filters.direction, filters.type, lastSavedAt])
+  }, [router, queryParams, cursor, handle, filters.direction, filters.type, lastSavedAt, refreshKey])
 
   // Filter by search query client-side
   const filteredItems = React.useMemo(() => {
@@ -273,28 +326,10 @@ function useAttestationsData(
     })
   }, [items, debouncedQ])
 
-  return { items: filteredItems, nextCursor, loading, loadingMore, error }
+  return { items: filteredItems, nextCursor, loading, filtering, loadingMore, error }
 }
 
 // === SUB-COMPONENTS ===
-
-function Chip({ children, onRemove }: { children: React.ReactNode; onRemove?: () => void }) {
-  return (
-    <span className="inline-flex items-center gap-1 rounded-4xl bg-muted-foreground/10 px-2 py-1 text-xs font-medium">
-      <span className="truncate">{children}</span>
-      {onRemove && (
-        <button
-          type="button"
-          className="-mr-1 inline-flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
-          onClick={onRemove}
-          aria-label="Remove filter"
-        >
-          ×
-        </button>
-      )}
-    </span>
-  )
-}
 
 function AttestationCard({
   attestation,
@@ -322,138 +357,205 @@ function AttestationCard({
   const href = userPath(otherUser.handle ?? otherUser.id)
   const isMinted = !!attestation.mintedAt
 
-  // Can only retract attestations you gave
   const canRetract = !isReceived && viewerId === attestation.fromUser.id
-  // Can only mint attestations you gave that aren't minted
   const canMint = !isReceived && viewerId === attestation.fromUser.id && !isMinted
 
   const handleRetract = async () => {
     if (isRetracting || !canRetract) return
-
     setIsRetracting(true)
     try {
       const result = await apiPost<{ alreadyRevoked: boolean }>(
         "/api/attestation/retract",
         { attestationId: attestation.id }
       )
-
-      if (result.ok) {
-        onRetract?.(attestation.id)
-      }
+      if (result.ok) onRetract?.(attestation.id)
     } finally {
       setIsRetracting(false)
     }
   }
 
+  const handleCardClick = () => {
+    if (canMint) onSelect?.(attestation.id, !isSelected)
+  }
+
   return (
-    <div
+    <Card
+      size="sm"
       className={cn(
-        "relative rounded-2xl border bg-card/30 p-4 transition-colors hover:bg-card/50",
-        isSelected ? "border-primary/50 bg-primary/5" : "border-border/60"
+        "transition-colors",
+        canMint && "cursor-pointer",
+        isSelected ? "ring-primary/50 bg-primary/5" : "ring-border/60",
       )}
+      onClick={handleCardClick}
     >
-      {/* Selection checkbox (only for mintable attestations) */}
-      {canMint && (
-        <div className="absolute left-3 top-3">
-          <Checkbox
-            checked={isSelected}
-            onCheckedChange={(checked) => onSelect?.(attestation.id, !!checked)}
-            className="size-4"
-          />
-        </div>
-      )}
-
-      <div className={cn("flex items-start gap-3", canMint && "ml-6")}>
-        <Link href={href}>
-          <Avatar className="h-10 w-10">
-            <AvatarImage src={otherUser.avatarUrl ?? undefined} alt={displayName} />
-            <AvatarFallback>{initials(otherUser.name)}</AvatarFallback>
-          </Avatar>
-        </Link>
-
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <div className="flex items-center justify-between gap-2">
-            <div className="min-w-0">
-              <Link href={href} className="hover:underline">
-                <span className="truncate text-sm font-medium">{displayName}</span>
-              </Link>
-              {otherUser.handle && (
-                <span className="ml-1 text-xs text-muted-foreground">@{otherUser.handle}</span>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2 shrink-0">
-              {isMinted ? (
-                <Badge variant="secondary" className="gap-1 bg-emerald-500/10 text-emerald-600 border-emerald-500/20">
-                  <Link2 className="size-3" />
-                  Onchain
-                </Badge>
-              ) : (
-                <Badge variant="secondary" className="gap-1 bg-amber-500/10 text-amber-600 border-amber-500/20">
-                  Off-chain
-                </Badge>
-              )}
-              {isReceived ? (
-                <Badge variant="secondary" className="gap-1">
-                  <ArrowDownLeft className="size-3" />
-                  Received
-                </Badge>
-              ) : (
-                <Badge variant="outline" className="gap-1">
-                  <ArrowUpRight className="size-3" />
-                  Given
-                </Badge>
-              )}
-            </div>
+      {/* Header: avatar + name + handle on left, onchain/offchain badge on right */}
+      <CardHeader className="flex-row items-center gap-3">
+        <div className="flex items-center gap-3">
+          <Link href={href} onClick={(e) => e.stopPropagation()}>
+            <Avatar className="size-9">
+              <AvatarImage src={otherUser.avatarUrl ?? undefined} alt={displayName} />
+              <AvatarFallback>{initials(otherUser.name)}</AvatarFallback>
+            </Avatar>
+          </Link>
+          <div className="min-w-0">
+            <Link href={href} className="hover:underline" onClick={(e) => e.stopPropagation()}>
+              <span className="truncate text-sm font-medium">{displayName}</span>
+            </Link>
+            {otherUser.handle && (
+              <div className="truncate text-xs text-muted-foreground">@{otherUser.handle}</div>
+            )}
           </div>
+        </div>
+        <CardAction>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">
+              {formatRelativeTime(attestation.createdAt)}
+            </span>
+            {isMinted ? (
+              <Badge variant="secondary" className="gap-1 bg-primary/10 text-primary border-primary/20">
+                <Link2 className="size-3" />
+                Onchain
+              </Badge>
+            ) : (
+              <Badge variant="secondary" className="gap-1 bg-violet-500/10 text-violet-500 border-violet-500/20">
+                Offchain
+              </Badge>
+            )}
+          </div>
+        </CardAction>
+      </CardHeader>
 
-          {otherUser.headline && (
-            <div className="text-xs text-foreground/80 line-clamp-1">{otherUser.headline}</div>
-          )}
+      {/* Body: direction, type | buttons */}
+      <CardContent className="flex items-center gap-2">
+        {isReceived ? (
+          <Badge variant="secondary" className="gap-1 bg-emerald-500/10 text-emerald-500 border-emerald-500/20">
+            <ArrowDownLeft className="size-3" />
+            Received
+          </Badge>
+        ) : (
+          <Badge variant="secondary" className="gap-1 bg-amber-500/10 text-amber-600 border-amber-500/20">
+            <ArrowUpRight className="size-3" />
+            Given
+          </Badge>
+        )}
+        <AttestationBadge type={attestation.type} />
 
-          <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <AttestationBadge type={attestation.type} variant="default" className="bg-primary/10 text-primary hover:bg-primary/10" />
-              <span className="text-xs text-muted-foreground">
-                {formatRelativeTime(attestation.createdAt)}
-              </span>
-            </div>
-
-            <div className="flex items-center gap-1">
+        {(canRetract || canMint) && (
+          <>
+            <span className="h-4 w-px bg-border" />
+            <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+              {canRetract && (
+                <Button
+                  variant="destructive"
+                  size="xs"
+                  onClick={handleRetract}
+                  disabled={isRetracting}
+                  className="gap-1"
+                >
+                  <Undo2 className="size-3" />
+                  {isRetracting ? "Retracting…" : "Retract"}
+                </Button>
+              )}
               {canMint && (
                 <Button
-                  variant="ghost"
                   size="xs"
                   onClick={() => onMint?.(attestation.id)}
                   disabled={isMinting}
-                  className="text-primary hover:text-primary hover:bg-primary/10"
+                  className="gap-1"
                 >
                   {isMinting ? (
                     <Loader2 className="size-3 animate-spin" />
                   ) : (
-                    <>
-                      <Link2 className="size-3 mr-1" />
-                      Mint
-                    </>
+                    <Link2 className="size-3" />
                   )}
-                </Button>
-              )}
-              {canRetract && (
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  onClick={handleRetract}
-                  disabled={isRetracting}
-                  className="text-muted-foreground hover:text-destructive"
-                >
-                  <Undo2 className="size-3 mr-1" />
-                  {isRetracting ? "..." : "Retract"}
+                  Mint
                 </Button>
               )}
             </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function AttestationCardSkeleton() {
+  return (
+    <Card size="sm">
+      <CardHeader className="flex-row items-center gap-3">
+        <div className="flex items-center gap-3">
+          <Skeleton className="size-9 rounded-full" />
+          <div className="flex flex-col gap-1.5">
+            <Skeleton className="h-4 w-28" />
+            <Skeleton className="h-3 w-20" />
+          </div>
+        </div>
+        <CardAction>
+          <div className="flex items-center gap-2">
+            <Skeleton className="h-3 w-10" />
+            <Skeleton className="h-5 w-16 rounded-full" />
+          </div>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="flex items-center gap-2">
+        <Skeleton className="h-5 w-18 rounded-full" />
+        <Skeleton className="h-5 w-24 rounded-full" />
+        <Skeleton className="h-4 w-px" />
+        <Skeleton className="h-6 w-16 rounded-md" />
+        <Skeleton className="h-6 w-14 rounded-md" />
+      </CardContent>
+    </Card>
+  )
+}
+
+function AttestationRowSkeleton() {
+  return (
+    <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.5fr)] gap-3 px-4 py-3">
+      <div className="flex items-center min-w-0">
+        <div className="inline-flex items-center gap-3">
+          <Skeleton className="size-8 rounded-full shrink-0" />
+          <div className="flex flex-col gap-1">
+            <Skeleton className="h-4 w-24" />
+            <Skeleton className="h-3 w-16" />
           </div>
         </div>
       </div>
+      <div className="flex items-center"><Skeleton className="h-5 w-20 rounded-full" /></div>
+      <div className="flex items-center"><Skeleton className="h-5 w-18 rounded-full" /></div>
+      <div className="flex items-center"><Skeleton className="h-3 w-12" /></div>
+      <div className="flex items-center"><Skeleton className="h-5 w-16 rounded-full" /></div>
+      <div className="flex items-center justify-end gap-2">
+        <Skeleton className="size-6 rounded" />
+        <Skeleton className="size-6 rounded" />
+      </div>
+    </div>
+  )
+}
+
+function AttestationsGridSkeleton({ view }: { view: "cards" | "list" }) {
+  if (view === "cards") {
+    return (
+      <div className="grid gap-4 sm:grid-cols-2">
+        {Array.from({ length: 6 }, (_, i) => (
+          <AttestationCardSkeleton key={i} />
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-2xl border border-border/60 bg-card/30 overflow-hidden">
+      <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.5fr)] gap-3 border-b border-border/60 px-4 py-3 text-xs font-medium text-foreground/70">
+        <div>User</div>
+        <div>Direction</div>
+        <div>Type</div>
+        <div>Date</div>
+        <div>Status</div>
+        <div />
+      </div>
+      {Array.from({ length: 6 }, (_, i) => (
+        <AttestationRowSkeleton key={i} />
+      ))}
     </div>
   )
 }
@@ -506,51 +608,42 @@ function AttestationRow({
   const displayName = otherUser.name?.trim() || `@${otherUser.handle}`
   const href = userPath(otherUser.handle ?? otherUser.id)
 
+  const handleRowClick = () => {
+    if (canMint) onSelect?.(attestation.id, !isSelected)
+  }
+
   return (
     <div
       className={cn(
-        "grid grid-cols-[auto_minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.5fr)] gap-3 px-4 py-3 text-sm transition-colors hover:bg-card/50",
+        "grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.5fr)] gap-3 px-4 py-3 text-sm text-muted-foreground transition-colors hover:bg-muted",
+        canMint && "cursor-pointer",
         isSelected && "bg-primary/5"
       )}
+      onClick={handleRowClick}
     >
-      {/* Selection checkbox */}
-      <div className="flex items-center">
-        {canMint ? (
-          <Checkbox
-            checked={isSelected}
-            onCheckedChange={(checked) => onSelect?.(attestation.id, !!checked)}
-            className="size-4"
-          />
-        ) : (
-          <div className="size-4" />
-        )}
-      </div>
-
-      <Link href={href} className="flex min-w-0 items-center gap-3">
-        <Avatar className="h-8 w-8">
-          <AvatarImage src={otherUser.avatarUrl ?? undefined} alt={displayName} />
-          <AvatarFallback>{initials(otherUser.name)}</AvatarFallback>
-        </Avatar>
-        <div className="min-w-0">
-          <div className="truncate font-medium hover:underline">{displayName}</div>
-          {otherUser.handle && (
-            <div className="truncate text-xs text-muted-foreground">@{otherUser.handle}</div>
-          )}
-        </div>
-      </Link>
-
-      <div className="flex items-center">
-        <AttestationBadge type={attestation.type} variant="default" className="bg-primary/10 text-primary hover:bg-primary/10" />
+      <div className="flex items-center min-w-0">
+        <Link href={href} className="inline-flex min-w-0 items-center gap-3 rounded-md px-1.5 py-1 -mx-1.5 -my-1 transition-colors hover:text-primary" onClick={(e) => e.stopPropagation()}>
+          <Avatar className="h-8 w-8 shrink-0">
+            <AvatarImage src={otherUser.avatarUrl ?? undefined} alt={displayName} />
+            <AvatarFallback>{initials(otherUser.name)}</AvatarFallback>
+          </Avatar>
+          <div className="min-w-0">
+            <div className="truncate font-medium">{displayName}</div>
+            {otherUser.handle && (
+              <div className="truncate text-xs text-muted-foreground">@{otherUser.handle}</div>
+            )}
+          </div>
+        </Link>
       </div>
 
       <div className="flex items-center">
         {isReceived ? (
-          <Badge variant="secondary" className="gap-1">
+          <Badge variant="secondary" className="gap-1 bg-emerald-500/10 text-emerald-500 border-emerald-500/20">
             <ArrowDownLeft className="size-3" />
             Received
           </Badge>
         ) : (
-          <Badge variant="outline" className="gap-1">
+          <Badge variant="secondary" className="gap-1 bg-amber-500/10 text-amber-600 border-amber-500/20">
             <ArrowUpRight className="size-3" />
             Given
           </Badge>
@@ -558,30 +651,44 @@ function AttestationRow({
       </div>
 
       <div className="flex items-center">
-        {isMinted ? (
-          <Badge variant="secondary" className="gap-1 bg-emerald-500/10 text-emerald-600 border-emerald-500/20">
-            <Link2 className="size-3" />
-            Onchain
-          </Badge>
-        ) : (
-          <Badge variant="secondary" className="gap-1 bg-amber-500/10 text-amber-600 border-amber-500/20">
-            Off-chain
-          </Badge>
-        )}
+        <AttestationBadge type={attestation.type} />
       </div>
 
       <div className="flex items-center text-xs text-muted-foreground">
         {formatRelativeTime(attestation.createdAt)}
       </div>
 
-      <div className="flex items-center justify-end gap-1">
+      <div className="flex items-center">
+        {isMinted ? (
+          <Badge variant="secondary" className="gap-1 bg-primary/10 text-primary border-primary/20">
+            Onchain
+          </Badge>
+        ) : (
+          <Badge variant="secondary" className="gap-1 bg-violet-500/10 text-violet-500 border-violet-500/20">
+            Offchain
+          </Badge>
+        )}
+      </div>
+
+      <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+        {canRetract && (
+          <Button
+            variant="destructive"
+            size="xs"
+            onClick={handleRetract}
+            disabled={isRetracting}
+            className="gap-1"
+          >
+            <Undo2 className="size-3" />
+          </Button>
+        )}
         {canMint && (
           <Button
-            variant="ghost"
+            variant="default"
             size="xs"
             onClick={() => onMint?.(attestation.id)}
             disabled={isMinting}
-            className="text-primary hover:text-primary hover:bg-primary/10"
+            className="gap-1"
           >
             {isMinting ? (
               <Loader2 className="size-3 animate-spin" />
@@ -590,55 +697,36 @@ function AttestationRow({
             )}
           </Button>
         )}
-        {canRetract && (
-          <Button
-            variant="ghost"
-            size="xs"
-            onClick={handleRetract}
-            disabled={isRetracting}
-            className="text-muted-foreground hover:text-destructive"
-          >
-            <Undo2 className="size-3" />
-          </Button>
-        )}
       </div>
     </div>
   )
 }
 
-function LoadingState() {
+// === LOADING SKELETON (matches settings page pattern) ===
+
+function AttestationsSkeleton() {
   return (
-    <div className="flex items-center justify-center py-20" aria-busy="true">
-      <Spinner className="size-8 text-muted-foreground" />
+    <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
+      <div className="w-full flex flex-wrap gap-3 p-5">
+        <Skeleton className="size-12 rounded-full" />
+        <div className="flex flex-col gap-2">
+          <Skeleton className="h-7 w-48" />
+          <Skeleton className="h-3 w-24" />
+        </div>
+        <div className="flex gap-3 ml-auto sm:align-center sm:justify-end">
+          <Skeleton className="h-9 w-24" />
+          <Skeleton className="h-9 w-24" />
+          <Skeleton className="h-9 w-20" />
+        </div>
+      </div>
+
+      <Skeleton className="h-52 w-full rounded-2xl" />
+      <AttestationsGridSkeleton view="cards" />
     </div>
   )
 }
 
-function ActiveFiltersBar({
-  filters,
-  count,
-  hasMorePages,
-  onRemoveType,
-}: {
-  filters: FilterState
-  count: number
-  hasMorePages: boolean
-  onRemoveType: () => void
-}) {
-  return (
-    <div className="-mt-2 flex flex-wrap items-center gap-2">
-      <Badge variant="secondary">
-        {count}
-        {hasMorePages ? "+" : ""} attestations
-      </Badge>
-      {filters.type && (
-        <Chip onRemove={onRemoveType}>
-          Type: <AttestationBadge type={filters.type} bare />
-        </Chip>
-      )}
-    </div>
-  )
-}
+// === FILTER PANEL ===
 
 function FiltersPanel({
   filters,
@@ -648,8 +736,8 @@ function FiltersPanel({
   onFiltersChange: (updates: Partial<FilterState>) => void
 }) {
   return (
-    <section className="rounded-2xl border border-border/60 bg-card/30 p-4" aria-label="Attestation filters">
-      <div className="grid gap-4 md:grid-cols-3">
+    <Card aria-label="Attestation filters" className="bg-card/30 border-border/30">
+      <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <div className="flex flex-col gap-2">
           <div className="text-xs font-medium text-foreground/70">Search</div>
           <Input
@@ -661,37 +749,57 @@ function FiltersPanel({
         </div>
 
         <div className="flex flex-col gap-2">
-          <div className="text-xs font-medium text-foreground/70">Type</div>
-          <select
-            value={filters.type}
-            onChange={(e) => onFiltersChange({ type: e.target.value as AttestationType | "" })}
-            className="h-9 rounded-xl border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          <div className="text-xs font-medium text-foreground/70">Attestation type</div>
+          <Select
+            value={filters.type || null}
+            onValueChange={(v) => onFiltersChange({ type: (v ?? "") as AttestationType | "" })}
           >
-            <option value="">All types</option>
-            {ATTESTATION_TYPE_LIST.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.emoji} {t.label}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger className="w-full">
+              <SelectValue>
+                {(v: string | null) => {
+                  if (!v) return "All types"
+                  const def = ATTESTATION_TYPES[v as AttestationType]
+                  return def ? `${def.emoji} ${def.label}` : v
+                }}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value={null as unknown as string}>All types</SelectItem>
+                {ATTESTATION_TYPE_LIST.map((t) => (
+                  <SelectItem key={t.id} value={t.id}>
+                    {t.emoji} {t.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
         </div>
 
         <div className="flex flex-col gap-2">
           <div className="text-xs font-medium text-foreground/70">Direction</div>
-          <select
+          <Select
             value={filters.direction}
-            onChange={(e) => onFiltersChange({ direction: e.target.value as FilterState["direction"] })}
-            className="h-9 rounded-xl border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            onValueChange={(v) => onFiltersChange({ direction: (v ?? "all") as FilterState["direction"] })}
           >
-            <option value="all">All</option>
-            <option value="received">Received</option>
-            <option value="given">Given</option>
-          </select>
+            <SelectTrigger className="w-full">
+              <SelectValue>{(v: string | null) => v === "given" ? "Given" : v === "received" ? "Received" : "All"}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value="all">All</SelectItem>
+                <SelectItem value="received">Received</SelectItem>
+                <SelectItem value="given">Given</SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
         </div>
-      </div>
-    </section>
+      </CardContent>
+    </Card>
   )
 }
+
+// === CONTENT SECTIONS ===
 
 function AttestationsGrid({
   items,
@@ -716,7 +824,7 @@ function AttestationsGrid({
 }) {
   if (view === "cards") {
     return (
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2">
         {items.map((a) => (
           <AttestationCard
             key={a.id}
@@ -736,14 +844,13 @@ function AttestationsGrid({
 
   return (
     <div className="rounded-2xl border border-border/60 bg-card/30 overflow-hidden">
-      <div className="grid grid-cols-[auto_minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.5fr)] gap-3 border-b border-border/60 px-4 py-3 text-xs font-medium text-foreground/70">
-        <div className="w-4"></div>
+      <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.5fr)] gap-3 border-b border-border/60 px-4 py-3 text-xs font-medium text-foreground/70">
         <div>User</div>
-        <div>Type</div>
         <div>Direction</div>
-        <div>Status</div>
+        <div>Type</div>
         <div>Date</div>
-        <div></div>
+        <div>Status</div>
+        <div />
       </div>
 
       {items.map((a) => (
@@ -765,16 +872,17 @@ function AttestationsGrid({
 
 function EmptyState({ hasFilters, onClearFilters }: { hasFilters: boolean; onClearFilters: () => void }) {
   return (
-    <div className="rounded-2xl border border-border/60 bg-card/30 px-4 py-10 text-center text-sm text-muted-foreground">
+    <div className="rounded-lg border border-border/60 px-4 py-10 text-center text-sm text-muted-foreground">
       <p>No attestations found.</p>
       {hasFilters && (
-        <button
+        <Button
           type="button"
+          variant="link"
           onClick={onClearFilters}
-          className="mt-2 text-primary hover:underline"
+          className="mt-2"
         >
           Clear all filters
-        </button>
+        </Button>
       )}
     </div>
   )
@@ -789,11 +897,16 @@ export default function AttestationsPage() {
   const handle = params.handle?.trim() || ""
 
   const viewerId = session?.user?.id ?? null
+  const profile = useUserProfile(handle)
+
+  const displayName = profile?.name?.trim() || `@${handle}`
+  const avatarSrc = profile?.avatarUrl || profile?.image || ""
 
   // Get lastSavedAt from queue context to trigger refetch when cart saves
   const { lastSavedAt } = useAttestationQueue()
 
   const [view, setView] = React.useState<"cards" | "list">("cards")
+  const [refreshKey, setRefreshKey] = React.useState(0)
   const [cursor, setCursor] = React.useState<string | null>(null)
   const [isFiltersOpen, setIsFiltersOpen] = React.useState(false)
   const [localItems, setLocalItems] = React.useState<Attestation[]>([])
@@ -815,11 +928,12 @@ export default function AttestationsPage() {
     }
   }, [lastSavedAt])
 
-  const { items: fetchedItems, nextCursor, loading, loadingMore, error } = useAttestationsData(
+  const { items: fetchedItems, nextCursor, loading, filtering, loadingMore, error } = useAttestationsData(
     handle,
     filters,
     cursor,
-    lastSavedAt
+    lastSavedAt,
+    refreshKey,
   )
 
   // Sync fetched items to local state (allows optimistic removal on retract)
@@ -965,9 +1079,35 @@ export default function AttestationsPage() {
   const activeFilters = hasActiveFilters(filters)
   const items = localItems
 
-  // Calculate minting stats
-  const totalCount = items.filter((a) => a.fromUser.id === viewerId).length
-  const mintedCount = items.filter((a) => a.fromUser.id === viewerId && a.mintedAt).length
+  // Calculate minting stats — persisted across filter changes so the banner
+  // stays visible even when direction is "received" (which excludes given attestations)
+  const [mintStats, setMintStats] = React.useState({ totalCount: 0, mintedCount: 0 })
+
+  React.useEffect(() => {
+    // Only update stats when we have the viewer's given attestations in the list
+    // (direction "all" or "given"), or on the very first load
+    if (filters.direction === "received") return
+
+    const total = localItems.filter((a) => a.fromUser.id === viewerId).length
+    const minted = localItems.filter((a) => a.fromUser.id === viewerId && a.mintedAt).length
+
+    if (total > 0 || mintStats.totalCount === 0) {
+      setMintStats({ totalCount: total, mintedCount: minted })
+    }
+  }, [localItems, viewerId, filters.direction, mintStats.totalCount])
+
+  // Also update when individual attestations are minted (optimistic local state)
+  React.useEffect(() => {
+    if (filters.direction === "received") {
+      // When on "received", still update mintedCount from localItems that we know about
+      const minted = localItems.filter((a) => a.fromUser.id === viewerId && a.mintedAt).length
+      if (minted > mintStats.mintedCount) {
+        setMintStats((prev) => ({ ...prev, mintedCount: minted }))
+      }
+    }
+  }, [localItems, viewerId, filters.direction, mintStats.mintedCount])
+
+  const { totalCount, mintedCount } = mintStats
   const isMinting = mintingIds.size > 0
 
   // Reset paging when filters change
@@ -987,15 +1127,41 @@ export default function AttestationsPage() {
     })
   }
 
+  function handleRefresh() {
+    setCursor(null)
+    setRefreshKey((k) => k + 1)
+  }
+
   if (!handle) return null
 
+  // Full-page skeleton only on the very first load
+  if (loading) return <AttestationsSkeleton />
+
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-10">
+    <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
       <PageHeader
+        leading={
+          <Avatar className="h-12 w-12">
+            <AvatarImage src={avatarSrc} alt={displayName} />
+            <AvatarFallback>{initials(profile?.name ?? handle)}</AvatarFallback>
+          </Avatar>
+        }
         title="Attestations"
         description={`@${handle}`}
+        actionsAsFormActions={false}
         actions={
           <div className="flex items-center gap-2">
+            {activeFilters && (
+              <Button type="button" variant="ghost" onClick={handleClearAll}>
+                Reset
+              </Button>
+            )}
+            <Button type="button" variant={isFiltersOpen ? "default" : "secondary"} onClick={() => setIsFiltersOpen((v) => !v)}>
+              {isFiltersOpen ? "Hide filters" : "Show filters"}
+            </Button>
+            <Button type="button" variant="secondary" onClick={handleRefresh}>
+              Refresh
+            </Button>
             <Tabs className="gap-0" value={view} onValueChange={(v) => setView(v === "list" ? "list" : "cards")}>
               <TabsList>
                 <TabsTrigger value="cards">Cards</TabsTrigger>
@@ -1004,21 +1170,6 @@ export default function AttestationsPage() {
               <TabsContent value="cards" />
               <TabsContent value="list" />
             </Tabs>
-
-            <Button type="button" variant="secondary" onClick={() => setIsFiltersOpen((v) => !v)}>
-              <Filter className="size-4 mr-1" />
-              {isFiltersOpen ? "Hide filters" : "Filters"}
-            </Button>
-
-            <Button type="button" variant="ghost" onClick={() => router.refresh()}>
-              Refresh
-            </Button>
-
-            {activeFilters && (
-              <Button type="button" variant="ghost" onClick={handleClearAll}>
-                Reset
-              </Button>
-            )}
           </div>
         }
       />
@@ -1032,15 +1183,9 @@ export default function AttestationsPage() {
           isMinting={isMinting}
           onMintAll={handleMintAll}
           onMintSelected={handleMintSelected}
+          onClearSelection={handleClearSelection}
         />
       )}
-
-      <ActiveFiltersBar
-        filters={filters}
-        count={items.length}
-        hasMorePages={!!nextCursor}
-        onRemoveType={() => handleFiltersChange({ type: "" })}
-      />
 
       {isFiltersOpen && (
         <FiltersPanel
@@ -1049,50 +1194,65 @@ export default function AttestationsPage() {
         />
       )}
 
-      {error && (
-        <div
-          className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive"
-          role="alert"
-        >
-          {error}
+      {activeFilters && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="secondary">
+            {items.length}
+            {nextCursor ? "+" : ""} attestations
+          </Badge>
+          {filters.type && (
+            <Badge variant="outline" className="gap-1.5">
+              <AttestationBadge type={filters.type} bare />
+              <button
+                type="button"
+                className="inline-flex size-3.5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
+                onClick={() => handleFiltersChange({ type: "" })}
+                aria-label="Remove type filter"
+              >
+                ×
+              </button>
+            </Badge>
+          )}
         </div>
       )}
 
-      <div aria-live="polite" aria-atomic="true" className="sr-only">
-        {loading ? "Loading attestations..." : `${items.length} attestations loaded`}
-      </div>
-
-      {loading ? (
-        <LoadingState />
-      ) : items.length === 0 ? (
-        <EmptyState hasFilters={activeFilters} onClearFilters={handleClearAll} />
-      ) : (
-        <InfiniteScroll
-          onLoadMore={() => setCursor(nextCursor)}
-          hasMore={!!nextCursor}
-          isLoading={loadingMore}
-        >
-          <AttestationsGrid
-            items={items}
-            view={view}
-            currentHandle={handle}
-            viewerId={viewerId}
-            selectedIds={selectedIds}
-            mintingIds={mintingIds}
-            onRetract={handleRetract}
-            onSelect={handleSelect}
-            onMint={handleMint}
-          />
-        </InfiniteScroll>
+      {error && (
+        <Card className="border-destructive/30 bg-destructive/5">
+          <CardContent className="text-sm text-destructive" role="alert">
+            {error}
+          </CardContent>
+        </Card>
       )}
 
-      {/* Floating selection action bar */}
-      <SelectionActionBar
-        selectedCount={selectedIds.size}
-        isMinting={isMinting}
-        onMintSelected={handleMintSelected}
-        onClearSelection={handleClearSelection}
-      />
+      <div aria-live="polite" aria-atomic="true" className="sr-only">
+        {loading || filtering ? "Loading attestations..." : `${items.length} attestations loaded`}
+      </div>
+
+      <div className="flex flex-col gap-3">
+        {filtering ? (
+          <AttestationsGridSkeleton view={view} />
+        ) : items.length === 0 ? (
+          <EmptyState hasFilters={activeFilters} onClearFilters={handleClearAll} />
+        ) : (
+          <InfiniteScroll
+            onLoadMore={() => setCursor(nextCursor)}
+            hasMore={!!nextCursor}
+            isLoading={loadingMore}
+          >
+            <AttestationsGrid
+              items={items}
+              view={view}
+              currentHandle={handle}
+              viewerId={viewerId}
+              selectedIds={selectedIds}
+              mintingIds={mintingIds}
+              onRetract={handleRetract}
+              onSelect={handleSelect}
+              onMint={handleMint}
+            />
+          </InfiniteScroll>
+        )}
+      </div>
     </div>
   )
 }
