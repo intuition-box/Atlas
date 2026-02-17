@@ -13,9 +13,9 @@ import {
   type SimulationLinkDatum,
 } from "d3-force";
 
-import { UsersIcon, PlusIcon, FileTextIcon, CogIcon } from "@/components/ui/icons";
+import { UsersIcon, PlusIcon, FileTextIcon, CogIcon, GlobeIcon } from "@/components/ui/icons";
 import { apiGet } from "@/lib/api/client";
-import { communityMembersPath, communityApplyPath, communityApplicationsPath, communitySettingsPath } from "@/lib/routes";
+import { communityPath, communityMembersPath, communityApplyPath, communityApplicationsPath, communitySettingsPath } from "@/lib/routes";
 import { sounds } from "@/lib/sounds";
 import { useNavigation, useNavigationContext, type NavigationControls } from "@/components/navigation/navigation-provider";
 import {
@@ -135,6 +135,7 @@ interface OrbitSceneProps {
   communities: OrbitCommunity[];
   links?: OrbitLink[];
   onMemberClick?: (memberId: string) => void;
+  onUrlChange?: (url: string) => void;
   className?: string;
   style?: React.CSSProperties;
 }
@@ -342,6 +343,7 @@ export function OrbitScene({
   communities,
   links = [],
   onMemberClick,
+  onUrlChange,
   className,
   style,
 }: OrbitSceneProps) {
@@ -462,6 +464,8 @@ export function OrbitScene({
   // Stable refs
   const onMemberClickRef = React.useRef(onMemberClick);
   onMemberClickRef.current = onMemberClick;
+  const onUrlChangeRef = React.useRef(onUrlChange);
+  onUrlChangeRef.current = onUrlChange;
 
   /* ────────────────────────────
      Navigation controls
@@ -476,6 +480,7 @@ export function OrbitScene({
     const { handle, isAdmin } = activeCommunity;
 
     const bottomLeft = [
+      { icon: GlobeIcon, label: "Profile", href: communityPath(handle) },
       { icon: UsersIcon, label: "Members", href: communityMembersPath(handle) },
       { icon: PlusIcon, label: "Apply", href: communityApplyPath(handle) },
     ];
@@ -946,6 +951,9 @@ export function OrbitScene({
     setSceneMode("zoom-in");
     sounds.play("whoosh", { volume: 0.3 });
 
+    // Update URL to community path
+    onUrlChangeRef.current?.(communityPath(community.handle));
+
     // Clear tooltips
     s.hoveredUniverseNode = null;
     setCommunityTooltip(null);
@@ -1068,14 +1076,50 @@ export function OrbitScene({
      Breadcrumb — show community name in top-left nav
   ──────────────────────────── */
 
+  // Navigate back to universe: zoom out + restore URL
+  const navigateBackToUniverse = React.useCallback(
+    (source: "breadcrumb" | "popstate") => {
+      // If triggered by breadcrumb, navigate browser history back (URL changes automatically)
+      // If triggered by popstate, URL is already correct — just run the zoom-out animation
+      if (source === "breadcrumb") {
+        window.history.back();
+        // handleBack() will be called by the popstate listener below
+        return;
+      }
+      handleBack();
+    },
+    [handleBack],
+  );
+
   React.useEffect(() => {
     if (activeCommunity) {
-      setBreadcrumb({ label: activeCommunity.name, onBack: handleBack });
+      setBreadcrumb({
+        label: activeCommunity.name,
+        onBack: () => navigateBackToUniverse("breadcrumb"),
+      });
     } else {
       setBreadcrumb(null);
     }
     return () => setBreadcrumb(null);
-  }, [activeCommunity, handleBack, setBreadcrumb]);
+  }, [activeCommunity, navigateBackToUniverse, setBreadcrumb]);
+
+  /* ────────────────────────────
+     Browser back button — zoom out when user presses back
+  ──────────────────────────── */
+
+  React.useEffect(() => {
+    function handlePopState() {
+      const s = stateRef.current;
+      if (
+        window.location.pathname === "/" &&
+        (s.mode === "orbit" || s.mode === "loading")
+      ) {
+        handleBack();
+      }
+    }
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [handleBack]);
 
   /* ────────────────────────────
      Render effect
