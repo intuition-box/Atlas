@@ -110,3 +110,8 @@ export function communityApplicationsPath(handle: string): string {
 export function communitySettingsPath(handle: string): string {
   return `/c/${encodeURIComponent(handle)}/settings`;
 }
+
+/** `/c/:handle/orbit` */
+export function communityOrbitPath(handle: string): string {
+  return `/c/${encodeURIComponent(handle)}/orbit`;
+}
