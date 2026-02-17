@@ -10,6 +10,7 @@ import { parseApiError } from "@/lib/api/errors"
 import { normalizeHandle, validateHandle } from "@/lib/handle"
 import { userPath, userSettingsPath, userAttestationsPath } from "@/lib/routes"
 
+import { AttestationBadge } from "@/components/attestation/badge"
 import { AttestationButtons } from "@/components/attestation/buttons"
 import { PageHeader } from "@/components/common/page-header"
 import { ProfileAvatar } from "@/components/common/profile-avatar"
@@ -530,7 +531,7 @@ export default function UserProfilePage() {
                             <ProfileAvatar type="user" src={peerAvatar} name={peerName} size="sm" />
                             <div className="min-w-0 text-sm">
                               <span className="font-medium truncate">{peerName}</span>
-                              <span className="text-muted-foreground"> · {a.type}</span>
+                              <span className="text-muted-foreground"> · <AttestationBadge type={a.type} bare /></span>
                             </div>
                           </Link>
                         ) : (
@@ -538,7 +539,7 @@ export default function UserProfilePage() {
                             <ProfileAvatar type="user" src={peerAvatar} name={peerName} size="sm" />
                             <div className="min-w-0 text-sm">
                               <span className="font-medium truncate">{peerName}</span>
-                              <span className="text-muted-foreground"> · {a.type}</span>
+                              <span className="text-muted-foreground"> · <AttestationBadge type={a.type} bare /></span>
                             </div>
                           </>
                         )}

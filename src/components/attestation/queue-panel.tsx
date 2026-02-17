@@ -25,7 +25,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useAttestationQueue, type QueuedAttestation } from "./queue-provider";
-import { ATTESTATION_TYPES, type AttestationType } from "@/lib/attestations/definitions";
+import { AttestationBadge } from "@/components/attestation/badge";
 import { TrashIcon } from "../ui/icons";
 
 /* ────────────────────────────
@@ -50,8 +50,6 @@ function QueueItem({
   item: QueuedAttestation;
   onRemove: (id: string) => void;
 }) {
-  const attestationType = ATTESTATION_TYPES[item.type];
-
   return (
     <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/30 border border-border/30">
       <Avatar className="size-9 shrink-0">
@@ -69,7 +67,7 @@ function QueueItem({
           )}
         </div>
         <span className="text-xs text-muted-foreground">
-          {attestationType.label}
+          <AttestationBadge type={item.type} bare />
         </span>
       </div>
 

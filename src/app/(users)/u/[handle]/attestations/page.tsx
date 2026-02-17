@@ -24,6 +24,7 @@ import { OnchainBanner } from "@/components/attestation/onchain-banner"
 import { SelectionActionBar } from "@/components/attestation/selection-action-bar"
 import { useAttestationQueue } from "@/components/attestation/queue-provider"
 import { ATTESTATION_TYPES, ATTESTATION_TYPE_LIST, type AttestationType } from "@/lib/attestations/definitions"
+import { AttestationBadge } from "@/components/attestation/badge"
 
 // === CONSTANTS ===
 
@@ -319,7 +320,6 @@ function AttestationCard({
   const otherUser = isReceived ? attestation.fromUser : attestation.toUser
   const displayName = otherUser.name?.trim() || `@${otherUser.handle}`
   const href = userPath(otherUser.handle ?? otherUser.id)
-  const typeInfo = ATTESTATION_TYPES[attestation.type]
   const isMinted = !!attestation.mintedAt
 
   // Can only retract attestations you gave
@@ -413,9 +413,7 @@ function AttestationCard({
 
           <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="default" className="bg-primary/10 text-primary hover:bg-primary/10">
-                {typeInfo.label}
-              </Badge>
+              <AttestationBadge type={attestation.type} variant="default" className="bg-primary/10 text-primary hover:bg-primary/10" />
               <span className="text-xs text-muted-foreground">
                 {formatRelativeTime(attestation.createdAt)}
               </span>
@@ -507,7 +505,6 @@ function AttestationRow({
   }
   const displayName = otherUser.name?.trim() || `@${otherUser.handle}`
   const href = userPath(otherUser.handle ?? otherUser.id)
-  const typeInfo = ATTESTATION_TYPES[attestation.type]
 
   return (
     <div
@@ -543,9 +540,7 @@ function AttestationRow({
       </Link>
 
       <div className="flex items-center">
-        <Badge variant="default" className="bg-primary/10 text-primary hover:bg-primary/10">
-          {typeInfo.label}
-        </Badge>
+        <AttestationBadge type={attestation.type} variant="default" className="bg-primary/10 text-primary hover:bg-primary/10" />
       </div>
 
       <div className="flex items-center">
@@ -638,7 +633,7 @@ function ActiveFiltersBar({
       </Badge>
       {filters.type && (
         <Chip onRemove={onRemoveType}>
-          Type: {ATTESTATION_TYPES[filters.type].label}
+          Type: <AttestationBadge type={filters.type} bare />
         </Chip>
       )}
     </div>
@@ -675,7 +670,7 @@ function FiltersPanel({
             <option value="">All types</option>
             {ATTESTATION_TYPE_LIST.map((t) => (
               <option key={t.id} value={t.id}>
-                {t.label}
+                {t.emoji} {t.label}
               </option>
             ))}
           </select>

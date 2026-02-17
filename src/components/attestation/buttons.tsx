@@ -3,21 +3,16 @@
 import * as React from "react";
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Check, Link2 } from "lucide-react";
+import { Check } from "lucide-react";
 import { useSession } from "next-auth/react";
 
 import { cn } from "@/lib/utils";
-import { apiGet, apiPost } from "@/lib/api/client";
+import { apiGet } from "@/lib/api/client";
 import { sounds } from "@/lib/sounds";
 import { Button } from "@/components/ui/button";
-import { Spinner } from "@/components/ui/spinner";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { useAttestationQueue } from "./queue-provider";
 import { ATTESTATION_TYPES, type AttestationType } from "@/lib/attestations/definitions";
+import { AttestationBadge } from "@/components/attestation/badge";
 
 const ANIMATION = {
   shineDelay: 250,
@@ -43,8 +38,6 @@ type AttestationButtonsProps = {
   className?: string;
   /** Size variant */
   size?: "xs" | "sm";
-  /** Show retract button for active attestations */
-  allowRetract?: boolean;
 };
 
 type FlyingDot = {
@@ -55,7 +48,6 @@ type FlyingDot = {
 
 type StatusResponse = {
   activeTypes: string[];
-  activeAttestations: Array<{ type: string; mintedAt: string | null }>;
 };
 
 /* ────────────────────────────
@@ -69,14 +61,11 @@ export function AttestationButtons({
   toAvatarUrl,
   className,
   size = "xs",
-  allowRetract = false,
 }: AttestationButtonsProps) {
   const { data: session, status: sessionStatus } = useSession();
   const [animatingTypes, setAnimatingTypes] = useState<Set<AttestationType>>(new Set());
   const [flyingDots, setFlyingDots] = useState<FlyingDot[]>([]);
   const [activeTypes, setActiveTypes] = useState<Set<AttestationType>>(new Set());
-  const [mintedTypes, setMintedTypes] = useState<Set<AttestationType>>(new Set());
-  const [retractingTypes, setRetractingTypes] = useState<Set<AttestationType>>(new Set());
   const [isFetching, setIsFetching] = useState(true);
   const { addToQueue, isInQueue, buttonRef, lastSavedAt } = useAttestationQueue();
 
@@ -111,26 +100,19 @@ export function AttestationButtons({
 
     apiGet<StatusResponse>("/api/attestation/status", { toUserId }, { signal: controller.signal })
       .then((result) => {
+        if (controller.signal.aborted) return;
         if (result.ok) {
-          const active = new Set(
+          setActiveTypes(new Set(
             result.value.activeTypes.filter(
               (t): t is AttestationType => t in ATTESTATION_TYPES
             )
-          );
-          const minted = new Set<AttestationType>();
-          for (const att of result.value.activeAttestations) {
-            if (att.mintedAt && att.type in ATTESTATION_TYPES) {
-              minted.add(att.type as AttestationType);
-            }
-          }
-          setActiveTypes(active);
-          setMintedTypes(minted);
+          ));
         }
+        setIsFetching(false);
       })
       .catch(() => {
-        // Ignore errors (e.g., aborted)
-      })
-      .finally(() => {
+        // Don't update state if aborted (component unmounted or deps changed)
+        if (controller.signal.aborted) return;
         setIsFetching(false);
       });
 
@@ -186,155 +168,54 @@ export function AttestationButtons({
     );
   };
 
-  const handleRetractClick = async (type: AttestationType) => {
-    if (retractingTypes.has(type)) return;
-
-    setRetractingTypes((prev) => {
-      const next = new Set(prev);
-      next.add(type);
-      return next;
-    });
-
-    try {
-      // First, we need to find the attestation ID
-      // For now, we'll use the list endpoint to get it
-      const listResult = await apiGet<{
-        attestations: Array<{ id: string; type: string }>;
-      }>("/api/attestation/list", {
-        fromUserId: currentUserId,
-        toUserId,
-        type,
-        take: "1",
-      });
-
-      if (!listResult.ok || listResult.value.attestations.length === 0) {
-        return;
-      }
-
-      const attestationId = listResult.value.attestations[0]!.id;
-
-      const result = await apiPost<{ alreadyRevoked: boolean }>(
-        "/api/attestation/retract",
-        { attestationId }
-      );
-
-      if (result.ok) {
-        setActiveTypes((prev) => {
-          const next = new Set(prev);
-          next.delete(type);
-          return next;
-        });
-      }
-    } finally {
-      setRetractingTypes((prev) => {
-        const next = new Set(prev);
-        next.delete(type);
-        return next;
-      });
-    }
-  };
-
-  // Show buttons with spinner while loading (no layout shift)
-  if (isSessionLoading || isFetching) {
-    return (
-      <div className={cn("flex flex-wrap gap-1.5", className)}>
-        {Object.values(ATTESTATION_TYPES).map((attestType) => (
-          <Button
-            key={attestType.id}
-            variant="outline"
-            size={size}
-            disabled
-          >
-            <Spinner className="size-3 mr-1" />
-            {attestType.label}
-          </Button>
-        ))}
-      </div>
-    );
-  }
+  const isLoading = isSessionLoading || isFetching;
 
   return (
     <>
-      {/* Attestation Type Buttons */}
       <div className={cn("flex flex-wrap gap-1.5", className)}>
         {Object.values(ATTESTATION_TYPES).map((attestType) => {
           const type = attestType.id as AttestationType;
           const inQueue = isInQueue(toUserId, type);
           const isAnimating = animatingTypes.has(type);
           const isActive = activeTypes.has(type);
-          const isMinted = mintedTypes.has(type);
-          const isRetracting = retractingTypes.has(type);
 
-          // If already attested and we allow retract, show retract button
-          if (isActive && allowRetract) {
+          // 1. Loading — all buttons disabled with skeleton
+          if (isLoading) {
             return (
-              <Tooltip key={attestType.id}>
-                <TooltipTrigger>
-                  <Button
-                    variant="outline"
-                    size={size}
-                    onClick={() => handleRetractClick(type)}
-                    disabled={isRetracting}
-                    className={cn(
-                      "transition-colors duration-200",
-                      "bg-primary/10 text-primary border-primary/30",
-                      "hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30"
-                    )}
-                  >
-                    {isMinted ? (
-                      <Link2 className="size-3 mr-1" />
-                    ) : (
-                      <Check className="size-3 mr-1" />
-                    )}
-                    {attestType.label}
-                    {isRetracting && (
-                      <span className="ml-1 animate-pulse">...</span>
-                    )}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p className="text-xs">
-                    {isMinted ? "Onchain - Click to retract" : "Click to retract"}
-                  </p>
-                </TooltipContent>
-              </Tooltip>
+              <Button
+                key={attestType.id}
+                variant="secondary"
+                size={size}
+                disabled
+                className="relative"
+              >
+                <span className="invisible">
+                  <AttestationBadge type={attestType.id} bare />
+                </span>
+                <span className="absolute inset-0 flex items-center justify-center gap-2">
+                  <span className="size-3.5 rounded-full bg-muted-foreground/20 animate-pulse" />
+                  <span className="h-3 w-12 rounded-full bg-muted-foreground/20 animate-pulse" />
+                </span>
+              </Button>
             );
           }
 
-          // If already attested (no retract), show as active/disabled
+          // 2. Already attested — stays disabled, green
           if (isActive) {
             return (
-              <Tooltip key={attestType.id}>
-                <TooltipTrigger>
-                  <Button
-                    variant="outline"
-                    size={size}
-                    disabled
-                    className={cn(
-                      "cursor-default",
-                      isMinted
-                        ? "bg-primary/15 text-primary border-primary/40"
-                        : "bg-primary/10 text-primary border-primary/30"
-                    )}
-                  >
-                    {isMinted ? (
-                      <Link2 className="size-3 mr-1" />
-                    ) : (
-                      <Check className="size-3 mr-1" />
-                    )}
-                    {attestType.label}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p className="text-xs">
-                    {isMinted ? "Attested onchain" : "Already attested"}
-                  </p>
-                </TooltipContent>
-              </Tooltip>
+              <Button
+                key={attestType.id}
+                variant="secondary"
+                size={size}
+                disabled
+                className="bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
+              >
+                <AttestationBadge type={attestType.id} bare />
+              </Button>
             );
           }
 
-          // Normal button (not attested yet)
+          // 3. Available — enabled
           return (
             <Button
               key={attestType.id}
@@ -345,10 +226,10 @@ export function AttestationButtons({
               className={cn(
                 "transition-colors duration-200",
                 isAnimating && "bg-primary text-primary-foreground border-primary",
-                inQueue && "bg-primary/10 text-primary border-primary/30"
+                inQueue && "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
               )}
             >
-              {attestType.label}
+              <AttestationBadge type={attestType.id} bare />
             </Button>
           );
         })}
