@@ -26,7 +26,6 @@ import {
 } from "@/components/ui/tooltip";
 import { useAttestationQueue, type QueuedAttestation } from "./queue-provider";
 import { AttestationBadge } from "@/components/attestation/badge";
-import { TrashIcon } from "../ui/icons";
 
 /* ────────────────────────────
    Helpers
@@ -160,7 +159,7 @@ export function AttestationQueuePanel() {
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogContent className="sm:max-w-md" showCloseButton={false}>
+      <DialogContent className="sm:max-w-lg" showCloseButton={false}>
         <DialogHeader className="relative">
           <div className="flex items-start justify-between gap-4">
             <div className="flex flex-col gap-1">
@@ -183,7 +182,7 @@ export function AttestationQueuePanel() {
                       disabled={isSaving}
                       className="text-red-500 hover:text-red-600"
                     >
-                      <TrashIcon className="size-4" />
+                      <Trash2 className="size-4" />
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>Clear all</TooltipContent>
@@ -234,7 +233,7 @@ export function AttestationQueuePanel() {
           </div>
         </DialogHeader>
 
-        <div className="max-h-80 overflow-y-auto">
+        <div className="max-h-[28rem] overflow-y-auto [scrollbar-width:thin] [scrollbar-color:oklch(1_0_0/20%)_transparent]">
           {queue.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 text-center">
               <p className="text-muted-foreground text-sm">
@@ -246,7 +245,7 @@ export function AttestationQueuePanel() {
               </p>
             </div>
           ) : (
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-3">
               {queue.map((item) => (
                 <QueueItem
                   key={item.id}

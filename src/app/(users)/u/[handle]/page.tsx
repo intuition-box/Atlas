@@ -496,11 +496,10 @@ export default function UserProfilePage() {
           {/* Attest — only visible to other users */}
           {!isSelf && (
             <Card>
-              <CardHeader>
-                <CardTitle>Attest</CardTitle>
-                <CardDescription>Vouch for {user.name?.split(" ")[0] || `@${handleLabel}`}&apos;s skills and contributions</CardDescription>
-              </CardHeader>
-              <CardContent>
+              <CardContent className="flex flex-col items-center gap-3">
+                <p className="text-sm text-muted-foreground">
+                  Vouch for {user.name?.split(" ")[0] || `@${handleLabel}`}&apos;s skills and contributions
+                </p>
                 <AttestationButtons
                   toUserId={user.id}
                   toName={displayName}
@@ -513,9 +512,7 @@ export default function UserProfilePage() {
           )}
 
           {attestations.length === 0 ? (
-            <Alert>
-              <AlertDescription>No attestations yet.</AlertDescription>
-            </Alert>
+            <p className="text-sm text-muted-foreground text-center py-6">No attestations yet.</p>
           ) : (
             <div className="flex flex-col gap-3">
               {attestations.slice(0, 10).map((a) => {
@@ -529,18 +526,14 @@ export default function UserProfilePage() {
                         {a.peer.handle ? (
                           <Link href={userPath(a.peer.handle)} className="flex items-center gap-3 min-w-0 hover:opacity-80 transition-opacity">
                             <ProfileAvatar type="user" src={peerAvatar} name={peerName} size="sm" />
-                            <div className="min-w-0 text-sm">
-                              <span className="font-medium truncate">{peerName}</span>
-                              <span className="text-muted-foreground"> · <AttestationBadge type={a.type} bare /></span>
-                            </div>
+                            <span className="text-sm font-medium truncate">{peerName}</span>
+                            <AttestationBadge type={a.type} />
                           </Link>
                         ) : (
                           <>
                             <ProfileAvatar type="user" src={peerAvatar} name={peerName} size="sm" />
-                            <div className="min-w-0 text-sm">
-                              <span className="font-medium truncate">{peerName}</span>
-                              <span className="text-muted-foreground"> · <AttestationBadge type={a.type} bare /></span>
-                            </div>
+                            <span className="text-sm font-medium truncate">{peerName}</span>
+                            <AttestationBadge type={a.type} />
                           </>
                         )}
                       </div>
@@ -561,14 +554,11 @@ export default function UserProfilePage() {
                 )
               })}
 
-              <Link
-                href={userAttestationsPath(handleLabel)}
-                className="flex items-center justify-center rounded-lg border border-border/60 py-2.5 text-sm text-muted-foreground transition-colors hover:border-accent/30 hover:text-accent"
-              >
+              <Button variant="default" className="self-center" render={<Link href={userAttestationsPath(handleLabel)} />}>
                 {attestations.length > 10
                   ? `View all ${attestations.length} attestations`
                   : "View all attestations"}
-              </Link>
+              </Button>
             </div>
           )}
         </CardContent>

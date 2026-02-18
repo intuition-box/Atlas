@@ -219,13 +219,12 @@ export function AttestationButtons({
           return (
             <Button
               key={attestType.id}
-              variant="outline"
+              variant="secondary"
               size={size}
               onClick={(e) => handleAttestClick(e, type)}
               disabled={inQueue}
               className={cn(
-                "transition-colors duration-200",
-                isAnimating && "bg-primary text-primary-foreground border-primary",
+                "bg-primary/10 text-primary border-primary/20 hover:bg-primary/20 hover:border-emerald-500/40 transition-colors duration-200",
                 inQueue && "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
               )}
             >

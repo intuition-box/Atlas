@@ -188,17 +188,18 @@ function useCommunityData(handle: string) {
 
 function SettingsSkeleton() {
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-10 pb-40">
-      {/* Header skeleton */}
-      <Card>
-        <CardContent className="flex items-center gap-4 px-5">
-          <Skeleton className="size-12 rounded-full" />
-          <div className="flex flex-col gap-2">
-            <Skeleton className="h-5 w-36" />
-            <Skeleton className="h-4 w-28" />
-          </div>
-        </CardContent>
-      </Card>
+    <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-7 pb-40">
+      <div className="w-full flex flex-wrap gap-3 p-5">
+        <Skeleton className="size-12 rounded-full" />
+        <div className="flex flex-col gap-2">
+          <Skeleton className="h-7 w-48" />
+          <Skeleton className="h-3 w-24" />
+        </div>
+        <div className="flex gap-3 ml-auto sm:align-center sm:justify-end">
+          <Skeleton className="h-9 w-14" />
+          <Skeleton className="h-9 w-14" />
+        </div>
+      </div>
 
       {/* Section skeletons */}
       {[1, 2, 3, 4].map((i) => (
