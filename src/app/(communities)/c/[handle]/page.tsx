@@ -11,6 +11,7 @@ import {
   communityApplyPath,
   communityMembersPath,
   communitySettingsPath,
+  ROUTES,
 } from "@/lib/routes"
 
 import { PageHeader } from "@/components/common/page-header"
@@ -151,29 +152,62 @@ export default function CommunityProfilePage() {
 
   if (state.status === "loading" || state.status === "idle") {
     return (
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-10 pb-40">
+      <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-7 pb-40">
+        <div className="w-full flex flex-wrap gap-3 p-5">
+          <Skeleton className="size-12 rounded-full" />
+          <div className="flex flex-col gap-2">
+            <Skeleton className="h-7 w-48" />
+            <Skeleton className="h-3 w-24" />
+          </div>
+          <div className="flex gap-3 ml-auto sm:align-center sm:justify-end">
+            <Skeleton className="h-9 w-20" />
+          </div>
+        </div>
+
         <Card>
-          <CardContent className="flex items-center gap-4 px-5">
-            <Skeleton className="size-12 rounded-full" />
-            <div className="flex flex-col gap-2">
-              <Skeleton className="h-5 w-40" />
-              <Skeleton className="h-4 w-28" />
-            </div>
+          <CardHeader className="gap-4">
+            <CardTitle>
+              <Skeleton className="h-5 w-24" />
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-2 gap-3">
+            <Skeleton className="h-19 w-full" />
+            <Skeleton className="h-19 w-full" />
+            <Skeleton className="h-19 w-full" />
+            <Skeleton className="h-19 w-full" />
           </CardContent>
         </Card>
 
-        {[1, 2, 3].map((i) => (
-          <Card key={i}>
-            <CardContent className="flex flex-col gap-4 px-5">
-              <div className="flex flex-col gap-1">
-                <Skeleton className="h-4 w-24" />
-                <Skeleton className="h-3 w-56" />
+        <Card>
+          <CardHeader className="gap-4">
+            <CardTitle>
+              <Skeleton className="h-5 w-24" />
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="flex items-center gap-3">
+                <Skeleton className="size-8 rounded-full" />
+                <div className="flex flex-col gap-1">
+                  <Skeleton className="h-4 w-28" />
+                  <Skeleton className="h-3 w-20" />
+                </div>
               </div>
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-            </CardContent>
-          </Card>
-        ))}
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="gap-4">
+            <CardTitle>
+              <Skeleton className="h-5 w-32" />
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex items-center gap-3">
+            <Skeleton className="h-5 w-16 rounded-full" />
+            <Skeleton className="h-5 w-14 rounded-full" />
+          </CardContent>
+        </Card>
       </div>
     )
   }
@@ -182,7 +216,7 @@ export default function CommunityProfilePage() {
 
   if (state.status === "not-found") {
     return (
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-10 pb-40">
+      <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
         <Alert>
           <AlertDescription>We couldn&apos;t find @{handle}.</AlertDescription>
         </Alert>
@@ -194,7 +228,7 @@ export default function CommunityProfilePage() {
 
   if (state.status === "error") {
     return (
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-10 pb-40">
+      <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
         <Alert variant="destructive">
           <AlertDescription>{state.message}</AlertDescription>
         </Alert>
@@ -219,7 +253,7 @@ export default function CommunityProfilePage() {
   const previewMembers = orbitMembers.slice(0, 5)
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-10 pb-40">
+    <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
       <PageHeader
         leading={
           <Avatar className="h-12 w-12">
@@ -232,14 +266,17 @@ export default function CommunityProfilePage() {
         sticky={false}
         actions={
           <div className="flex items-center gap-2">
+            <Button variant="secondary" render={<Link href={ROUTES.home} />}>
+              Orbit
+            </Button>
             {isAdmin ? (
-              <Button type="button" variant="secondary">
-                <Link href={communitySettingsPath(handleLabel)}>Settings</Link>
+              <Button render={<Link href={communitySettingsPath(handleLabel)} />}>
+                Settings
               </Button>
             ) : null}
             {!viewerMembership && community.isMembershipOpen ? (
-              <Button type="button" variant="secondary">
-                <Link href={communityApplyPath(handleLabel)}>Apply</Link>
+              <Button variant="secondary" render={<Link href={communityApplyPath(handleLabel)} />}>
+                Apply
               </Button>
             ) : null}
           </div>
@@ -247,12 +284,27 @@ export default function CommunityProfilePage() {
         actionsAsFormActions={false}
       />
 
+      {/* Viewer membership */}
+      {viewerMembership ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Your membership</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-3">
+              <Badge variant="secondary">{roleLabel(viewerMembership.role)}</Badge>
+              <Badge variant="outline">{statusLabel(viewerMembership.status)}</Badge>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
       {/* About */}
       <Card>
         <CardHeader>
           <CardTitle>About</CardTitle>
         </CardHeader>
-        <CardContent className="px-5">
+        <CardContent>
           <div className="flex flex-col gap-3">
             {/* Row 1: Created + Members */}
             <div className="grid gap-3 sm:grid-cols-2">
@@ -305,7 +357,7 @@ export default function CommunityProfilePage() {
           <CardHeader>
             <CardTitle>Members</CardTitle>
           </CardHeader>
-          <CardContent className="px-5">
+          <CardContent>
             <div className="flex flex-col gap-3">
               {previewMembers.map((m) => {
                 const memberName = m.name?.trim() || m.handle || "Unknown"
@@ -332,26 +384,9 @@ export default function CommunityProfilePage() {
                 )
               })}
 
-              <Button type="button" variant="ghost" size="sm" className="w-fit">
-                <Link href={communityMembersPath(handleLabel)}>
-                  View all members →
-                </Link>
+              <Button variant="ghost" size="sm" className="w-fit" render={<Link href={communityMembersPath(handleLabel)} />}>
+                View all members →
               </Button>
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {/* Viewer membership */}
-      {viewerMembership ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Your membership</CardTitle>
-          </CardHeader>
-          <CardContent className="px-5">
-            <div className="flex items-center gap-3">
-              <Badge variant="secondary">{roleLabel(viewerMembership.role)}</Badge>
-              <Badge variant="outline">{statusLabel(viewerMembership.status)}</Badge>
             </div>
           </CardContent>
         </Card>
