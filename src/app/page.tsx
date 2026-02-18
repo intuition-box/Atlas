@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { OrbitScene, type OrbitCommunity, type OrbitLink } from "@/components/orbit/scene";
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from "@/components/ui/empty";
@@ -56,17 +56,12 @@ export default function Home() {
     };
   }, []);
 
-  const handleUrlChange = useCallback((url: string) => {
-    window.history.pushState(null, "", url);
-  }, []);
-
   return (
     <>
       <OrbitScene
         communities={communities}
         links={links}
         onMemberClick={(memberId) => router.push(userPath(memberId))}
-        onUrlChange={handleUrlChange}
       />
 
       {/* Status */}
