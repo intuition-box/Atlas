@@ -60,24 +60,11 @@ const SettingsSchema = z.object({
   bio: z.string().max(2000, "Bio is too long"),
   location: z.string(),
   links: z.array(
-    z.object({
-      url: z
-        .string()
-        .trim()
-        .max(2048, "Link is too long")
-        .superRefine((value, ctx) => {
-          if (!value) return
-          try {
-            new URL(value)
-          } catch {
-            ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Enter a valid URL" })
-          }
-        }),
-    })
-  ),
+    z.object({ url: z.string().trim().max(2048, "Link is too long") })
+  ).max(5, "Maximum 5 links"),
   skills: z.array(z.string()),
   tools: z.array(z.string().max(80, "Tool is too long")),
-  image: z.string().url("Enter a valid image URL").optional().or(z.literal("")),
+  image: z.string().optional(),
 })
 
 type SettingsValues = z.infer<typeof SettingsSchema>
@@ -114,7 +101,10 @@ function optionalString(value: string | undefined | null): string | undefined {
 }
 
 function normalizeLinks(links: Array<{ url: string }>): string[] {
-  return links.map((l) => l.url.trim()).filter(Boolean)
+  return links
+    .map((l) => l.url.trim())
+    .filter(Boolean)
+    .map((url) => (/^https?:\/\//i.test(url) ? url : `https://${url}`))
 }
 
 function normalizeStringArray(arr: string[]): string[] {
@@ -537,13 +527,15 @@ function LinksSection({
                 </div>
             ))}
 
-            <Button
-              type="button"
-              onClick={() => links.append({ url: "" }, { shouldFocus: false })}
-              className="self-start"
-            >
-              + Add another link
-            </Button>
+            {links.fields.length < 5 && (
+              <Button
+                type="button"
+                onClick={() => links.append({ url: "" }, { shouldFocus: false })}
+                className="self-start"
+              >
+                + Add another link
+              </Button>
+            )}
           </div>
 
           {typeof form.formState.errors.links?.message === "string" && (
@@ -986,8 +978,11 @@ export default function UserSettingsPage() {
   async function handleSubmit(values: SettingsValues) {
     form.clearErrors("root")
 
+    const trimmedHandle = values.handle.trim()
+
     const payload = {
-      handle: values.handle.trim(),
+      // Only send handle when it actually changed to avoid re-claiming the same one.
+      ...(trimmedHandle !== handle ? { handle: trimmedHandle } : {}),
       name: optionalString(values.name)!,
       headline: optionalString(values.headline),
       bio: optionalString(values.bio),

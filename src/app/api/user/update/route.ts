@@ -53,7 +53,7 @@ const UpdateUserSchema = z
     // To keep Prisma JSON-null semantics simple, we do not accept `null` here; use [] to clear.
     links: z
       .array(z.string().trim())
-      .max(20, "Too many links")
+      .max(5, "Maximum 5 links")
       .optional()
       .transform((v) => (v === undefined ? undefined : uniqStrings(v.filter(Boolean)))),
     skills: z
@@ -93,8 +93,10 @@ export async function POST(req: NextRequest) {
       return errJson({ code: "UNAUTHORIZED", message: "Sign in required", status: 401 });
     }
 
-    const csrf = await requireCsrf(req);
-    if (csrf instanceof Response) return csrf;
+    const csrf = requireCsrf(req);
+    if (!csrf.ok) {
+      return errJson({ code: csrf.error.code, message: csrf.error.message, status: csrf.error.status });
+    }
 
     const raw = await req.json().catch(() => null);
     const parsed = UpdateUserSchema.safeParse(raw);
