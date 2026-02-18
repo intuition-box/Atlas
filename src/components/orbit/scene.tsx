@@ -1,4 +1,8 @@
 "use client";
+/* eslint-disable react-compiler/react-compiler */
+// Opted out of React Compiler: the render effect (canvas draw loop) captures
+// only refs and must run exactly once. The compiler re-evaluates its deps on
+// every re-render, tearing down and rebuilding the canvas — causing flicker.
 
 import * as React from "react";
 import {
@@ -17,7 +21,7 @@ import { UsersIcon, PlusIcon, FileTextIcon, CogIcon, GlobeIcon } from "@/compone
 import { apiGet } from "@/lib/api/client";
 import { communityPath, communityMembersPath, communityApplyPath, communityApplicationsPath, communitySettingsPath } from "@/lib/routes";
 import { sounds } from "@/lib/sounds";
-import { useNavigation, useNavigationContext, type NavigationControls } from "@/components/navigation/navigation-provider";
+import { useNavigation, type NavigationControls } from "@/components/navigation/navigation-provider";
 import {
   NodeTooltip,
   NodePopover,
@@ -135,7 +139,6 @@ interface OrbitSceneProps {
   communities: OrbitCommunity[];
   links?: OrbitLink[];
   onMemberClick?: (memberId: string) => void;
-  onUrlChange?: (url: string) => void;
   className?: string;
   style?: React.CSSProperties;
 }
@@ -343,11 +346,9 @@ export function OrbitScene({
   communities,
   links = [],
   onMemberClick,
-  onUrlChange,
   className,
   style,
 }: OrbitSceneProps) {
-  const { setBreadcrumb } = useNavigationContext();
   const containerRef = React.useRef<HTMLDivElement>(null);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
 
@@ -464,8 +465,6 @@ export function OrbitScene({
   // Stable refs
   const onMemberClickRef = React.useRef(onMemberClick);
   onMemberClickRef.current = onMemberClick;
-  const onUrlChangeRef = React.useRef(onUrlChange);
-  onUrlChangeRef.current = onUrlChange;
 
   /* ────────────────────────────
      Navigation controls
@@ -951,9 +950,6 @@ export function OrbitScene({
     setSceneMode("zoom-in");
     sounds.play("whoosh", { volume: 0.3 });
 
-    // Update URL to community path
-    onUrlChangeRef.current?.(communityPath(community.handle));
-
     // Clear tooltips
     s.hoveredUniverseNode = null;
     setCommunityTooltip(null);
@@ -1071,37 +1067,6 @@ export function OrbitScene({
     // Start the transition animation loop
     runTransition();
   }, [stopOrbitRotation, runTransition]);
-
-  /* ────────────────────────────
-     Breadcrumb — show community name in top-left nav
-  ──────────────────────────── */
-
-  // Navigate back to universe: zoom out + restore URL
-  const navigateBackToUniverse = React.useCallback(
-    (source: "breadcrumb" | "popstate") => {
-      // If triggered by breadcrumb, navigate browser history back (URL changes automatically)
-      // If triggered by popstate, URL is already correct — just run the zoom-out animation
-      if (source === "breadcrumb") {
-        window.history.back();
-        // handleBack() will be called by the popstate listener below
-        return;
-      }
-      handleBack();
-    },
-    [handleBack],
-  );
-
-  React.useEffect(() => {
-    if (activeCommunity) {
-      setBreadcrumb({
-        label: activeCommunity.name,
-        onBack: () => navigateBackToUniverse("breadcrumb"),
-      });
-    } else {
-      setBreadcrumb(null);
-    }
-    return () => setBreadcrumb(null);
-  }, [activeCommunity, navigateBackToUniverse, setBreadcrumb]);
 
   /* ────────────────────────────
      Browser back button — zoom out when user presses back
@@ -1400,7 +1365,8 @@ export function OrbitScene({
       drawRef.current = null;
       s.fetchAbort?.abort();
     };
-  }, [stopOrbitRotation]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- effect only uses refs; stopOrbitRotation was a stale dep that caused teardown/rebuild on re-render
+  }, []);
 
   /* ────────────────────────────
      Pointer events
