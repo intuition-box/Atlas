@@ -504,35 +504,35 @@ export async function claimHandle(
   }
 
   // Ensure desired handle exists.
+  // We look up by both `key` and `name` to catch inconsistencies, then upsert
+  // instead of create+catch to avoid poisoning the Postgres transaction on P2002.
   if (!desiredRow) {
-    try {
-      desiredRow = await client.handle.create({
-        data: { name: desired, key: desiredKey, status: HandleStatus.ACTIVE },
-        select: handleRowSelect,
+    // Check by name as well (key lookup above may miss if key doesn't match).
+    desiredRow = await client.handle.findUnique({ where: { name: desired }, select: handleRowSelect });
+  }
+
+  if (!desiredRow) {
+    desiredRow = await client.handle.upsert({
+      where: { key: desiredKey },
+      create: { name: desired, key: desiredKey, status: HandleStatus.ACTIVE },
+      update: {},
+      select: handleRowSelect,
+    });
+
+    // If retrieved via upsert (already existed), re-evaluate claimability.
+    if (desiredRow.status !== HandleStatus.ACTIVE || desiredRow.owner) {
+      const existingOwner =
+        desiredRow.status === HandleStatus.ACTIVE && desiredRow.owner
+          ? { ownerType: desiredRow.owner.ownerType, ownerId: desiredRow.owner.ownerId }
+          : null;
+
+      const recheck = evaluateClaimability({
+        row: desiredRow,
+        now: new Date(),
+        claimant,
+        activeOwner: existingOwner,
       });
-    } catch (e) {
-      // Another transaction may have created it first.
-      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
-        desiredRow = await client.handle.findUnique({ where: { key: desiredKey }, select: handleRowSelect });
-
-        // Re-evaluate claimability after the race.
-        if (!desiredRow) return err(notAvailable());
-
-        const newActiveOwner =
-          desiredRow.status === HandleStatus.ACTIVE && desiredRow.owner
-            ? { ownerType: desiredRow.owner.ownerType, ownerId: desiredRow.owner.ownerId }
-            : null;
-
-        const recheck = evaluateClaimability({
-          row: desiredRow,
-          now: new Date(),
-          claimant,
-          activeOwner: newActiveOwner,
-        });
-        if (!recheck.ok) return recheck;
-      } else {
-        throw e;
-      }
+      if (!recheck.ok) return recheck;
     }
   }
 
