@@ -3,7 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { useParams } from "next/navigation"
-import { Wallet } from "lucide-react"
+import { ArrowUpRight, Wallet } from "lucide-react"
 
 import { apiGet } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
@@ -104,14 +104,21 @@ function formatRelativeTime(iso: string | null): string | null {
   return `${Math.floor(days / 365)} years ago`
 }
 
-function safeUrl(input: string) {
+/** Ensures the string is a valid http(s) URL, prepending https:// for bare domains. */
+function safeUrl(input: string): string | null {
+  const raw = /^https?:\/\//i.test(input) ? input : `https://${input}`
   try {
-    const url = new URL(input)
+    const url = new URL(raw)
     if (url.protocol !== "http:" && url.protocol !== "https:") return null
     return url.toString()
   } catch {
     return null
   }
+}
+
+/** Strips protocol and trailing slash for display (e.g. "https://wave.so/" → "wave.so"). */
+function displayUrl(input: string): string {
+  return input.replace(/^https?:\/\//i, "").replace(/\/+$/, "")
 }
 
 function truncateAddress(address: string) {
@@ -427,25 +434,27 @@ export default function UserProfilePage() {
             <CardTitle>Portfolio</CardTitle>
             <CardDescription>Website and public portfolio links.</CardDescription>
           </CardHeader>
-          <CardContent className="flex flex-col gap-2">
+          <CardContent>
+            <div className="flex flex-wrap gap-2">
             {links.map((l) => {
               const href = safeUrl(l)
               return href ? (
-                <a
+                <Badge
                   key={l}
-                  href={href}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="block truncate text-sm text-foreground/80 underline underline-offset-2 hover:text-foreground"
+                  variant="secondary"
+                  className="gap-1 text-primary"
+                  render={<a href={href} target="_blank" rel="noreferrer" />}
                 >
-                  {href}
-                </a>
+                  {displayUrl(l)}
+                  <ArrowUpRight className="size-3" />
+                </Badge>
               ) : (
-                <div key={l} className="truncate text-sm text-foreground/60">
-                  {l}
-                </div>
+                <Badge key={l} variant="secondary" className="text-muted-foreground">
+                  {displayUrl(l)}
+                </Badge>
               )
             })}
+            </div>
           </CardContent>
         </Card>
       ) : null}
