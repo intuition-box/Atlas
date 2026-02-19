@@ -45,20 +45,9 @@ type CommunityInfo = {
 
 type CommunityGetResponse = {
   community: CommunityInfo
-}
-
-type MembershipStatusResponse = {
-  membership?: {
+  viewerMembership: {
     status: string
-    role?: string
-    createdAt?: string
-    updatedAt?: string
-    approvedAt?: string | null
-  } | null
-  application?: {
-    status: string
-    createdAt?: string
-    updatedAt?: string
+    role: string
   } | null
 }
 
@@ -253,23 +242,8 @@ function useCommunityData(handle: string) {
         const parsedQuestions = parseQuestions(communityData.membershipConfig)
         setQuestions(parsedQuestions)
 
-        const statusRes = await apiGet<MembershipStatusResponse>(
-          "/api/membership/status",
-          { communityHandle: handle },
-          { signal: controller.signal }
-        )
-
-        if (cancelled) return
-
-        if (statusRes.ok) {
-          const s =
-            (statusRes.value.membership?.status) ||
-            (statusRes.value.application?.status) ||
-            null
-          setMembershipStatus(typeof s === "string" ? s : null)
-        } else {
-          setMembershipStatus(null)
-        }
+        const viewerStatus = communityRes.value.viewerMembership?.status ?? null
+        setMembershipStatus(viewerStatus)
 
         setLoading(false)
       } catch (err) {

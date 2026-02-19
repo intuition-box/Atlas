@@ -274,7 +274,7 @@ export default function CommunityProfilePage() {
                 Settings
               </Button>
             ) : null}
-            {!viewerMembership && community.isMembershipOpen ? (
+            {viewerMembership?.status !== "APPROVED" && community.isMembershipOpen ? (
               <Button variant="secondary" render={<Link href={communityApplyPath(handleLabel)} />}>
                 Apply
               </Button>
