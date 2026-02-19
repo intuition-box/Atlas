@@ -119,6 +119,7 @@ model User {
   skills        String[] @default([]) // ex: ["TypeScript", "Design Systems"]
   tags          String[] @default([]) // ex: ["open-source", "dao", "mentor"]
   languages     String[] @default([]) // ex: ["English", "Portuguese"]
+  contactPreference  String?  // "discord" | "email" | "telegram" | "x"
 
   // Auth.js relations
   accounts      Account[]
@@ -456,8 +457,8 @@ model Application {
   user      User      @relation("ApplicationApplicant", fields: [userId], references: [id], onDelete: Cascade)
   community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
 
-  // One “active” application per user/community for MVP simplicity
-  @@unique([userId, communityId])
+  // Multiple applications allowed per user/community (full history)
+  @@index([userId, communityId, createdAt])
   @@index([communityId, status, createdAt])
 }
 

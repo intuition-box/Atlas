@@ -40,6 +40,7 @@ type GetUserOk = {
     skills: string[] | null;
     tags: string[] | null;
     languages: string[] | null;
+    contactPreference: string | null;
     discordId: string | null;
     discordHandle: string | null;
     twitterHandle: string | null;
@@ -119,6 +120,7 @@ export async function GET(req: NextRequest) {
         skills: true,
         tags: true,
         languages: true,
+        contactPreference: true,
         discordId: true,
         discordHandle: true,
         twitterHandle: true,
@@ -220,6 +222,7 @@ export async function GET(req: NextRequest) {
         skills: user.skills,
         tags: user.tags,
         languages: user.languages,
+        contactPreference: user.contactPreference,
         discordId: user.discordId,
         discordHandle: user.discordHandle,
         twitterHandle: user.twitterHandle,

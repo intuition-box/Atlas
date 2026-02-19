@@ -39,6 +39,7 @@ type UserGetResponse = {
     skills: string[] | null
     tags: string[] | null
     languages: string[] | null
+    contactPreference: string | null
     discordId: string | null
     discordHandle: string | null
     twitterHandle: string | null
@@ -125,6 +126,13 @@ function displayUrl(input: string): string {
 function truncateAddress(address: string) {
   if (address.length <= 12) return address
   return `${address.slice(0, 6)}…${address.slice(-4)}`
+}
+
+const CONTACT_LABELS: Record<string, string> = {
+  discord: "Discord",
+  telegram: "Telegram",
+  x: "X",
+  email: "Email",
 }
 
 // === LOADING SKELETON ===
@@ -386,7 +394,7 @@ export default function UserProfilePage() {
       <Card>
         <CardHeader>
           <CardTitle>About</CardTitle>
-          <CardDescription>Background, experience, and location.</CardDescription>
+          <CardDescription>Background and experience.</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex flex-col gap-3">
@@ -402,7 +410,7 @@ export default function UserProfilePage() {
               </div>
             </div>
 
-            {(user.headline || user.location) ? (
+            {(user.headline || user.contactPreference) ? (
               <div className="grid gap-3 sm:grid-cols-2">
                 {user.headline ? (
                   <div className="rounded-lg border border-border/60 p-3 text-sm">
@@ -411,10 +419,10 @@ export default function UserProfilePage() {
                   </div>
                 ) : null}
 
-                {user.location ? (
+                {user.contactPreference ? (
                   <div className="rounded-lg border border-border/60 p-3 text-sm">
-                    <h2 className="text-xs font-medium text-muted-foreground mb-3">Location</h2>
-                    <p className="text-sm font-medium">{user.location}</p>
+                    <h2 className="text-xs font-medium text-muted-foreground mb-3">Preferred contact</h2>
+                    <p className="text-sm font-medium">{CONTACT_LABELS[user.contactPreference] ?? user.contactPreference}</p>
                   </div>
                 ) : null}
               </div>
@@ -430,18 +438,30 @@ export default function UserProfilePage() {
         </CardContent>
       </Card>
 
-      {languages.length ? (
+      {(user.location || languages.length > 0) ? (
         <Card>
           <CardHeader>
-            <CardTitle>Languages</CardTitle>
-            <CardDescription>What they speak.</CardDescription>
+            <CardTitle>Location & languages</CardTitle>
+            <CardDescription>Where they&apos;re based and what they speak.</CardDescription>
           </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap gap-2">
-              {languages.map((l) => (
-                <Badge key={l} variant="secondary">{l}</Badge>
-              ))}
-            </div>
+          <CardContent className="flex flex-col gap-6">
+            {user.location ? (
+              <div className="flex flex-col gap-2">
+                <h2 className="text-sm font-medium leading-none">Country</h2>
+                <p className="text-sm text-muted-foreground">{user.location}</p>
+              </div>
+            ) : null}
+
+            {languages.length > 0 ? (
+              <div className="flex flex-col gap-2">
+                <h2 className="text-sm font-medium leading-none">Languages</h2>
+                <div className="flex flex-wrap gap-2">
+                  {languages.map((l) => (
+                    <Badge key={l} variant="secondary">{l}</Badge>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       ) : null}

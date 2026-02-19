@@ -25,6 +25,7 @@ type UpdateUserOk = {
     skills: string[];
     tags: string[];
     languages: string[];
+    contactPreference: string | null;
   };
 };
 
@@ -72,6 +73,7 @@ const UpdateUserSchema = z
       .max(50, "Too many languages")
       .optional()
       .transform((v) => (v === undefined ? undefined : uniqStrings(v.filter(Boolean)))),
+    contactPreference: z.enum(["discord", "email", "telegram", "x"]).nullable().optional(),
   })
   .refine(
     (v) =>
@@ -84,7 +86,8 @@ const UpdateUserSchema = z
       v.links !== undefined ||
       v.skills !== undefined ||
       v.tags !== undefined ||
-      v.languages !== undefined,
+      v.languages !== undefined ||
+      v.contactPreference !== undefined,
     {
       message: "At least one field is required",
       path: ["name"],
@@ -146,6 +149,7 @@ export async function POST(req: NextRequest) {
             ...(input.skills !== undefined ? { skills: input.skills } : {}),
             ...(input.tags !== undefined ? { tags: input.tags } : {}),
             ...(input.languages !== undefined ? { languages: input.languages } : {}),
+            ...(input.contactPreference !== undefined ? { contactPreference: input.contactPreference } : {}),
           },
           select: {
             id: true,
@@ -158,6 +162,7 @@ export async function POST(req: NextRequest) {
             skills: true,
             tags: true,
             languages: true,
+            contactPreference: true,
           },
         }),
         resolveHandleNameForOwner(
@@ -182,6 +187,7 @@ export async function POST(req: NextRequest) {
         skills: Array.isArray(updated.skills) ? (updated.skills as string[]) : [],
         tags: Array.isArray(updated.tags) ? (updated.tags as string[]) : [],
         languages: Array.isArray(updated.languages) ? (updated.languages as string[]) : [],
+        contactPreference: updated.contactPreference,
       },
     });
   } catch (e) {

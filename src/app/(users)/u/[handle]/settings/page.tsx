@@ -46,6 +46,7 @@ import {
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
 import { Form, FormActions, FormField, fieldControlProps, useForm } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { EncryptedText } from "@/components/ui/encrypted-text"
 import { DiscordIcon, GitHubIcon, XIcon } from "@/components/ui/icons"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -67,6 +68,7 @@ const SettingsSchema = z.object({
   skills: z.array(z.string()),
   tools: z.array(z.string().max(80, "Tool is too long")),
   image: z.string().optional(),
+  contactPreference: z.enum(["discord", "email", "telegram", "x", ""]).optional(),
 })
 
 type SettingsValues = z.infer<typeof SettingsSchema>
@@ -84,6 +86,7 @@ type UserData = {
   languages: string[]
   skills: string[]
   tags: string[]
+  contactPreference: string | null
 }
 
 type UserGetResponse = {
@@ -316,7 +319,7 @@ function SettingsSkeleton() {
         </CardContent>
       </Card>
 
-      {[1, 2, 3, 4].map((i) => (
+      {[1, 2, 3, 4, 5].map((i) => (
         <Card key={i}>
           <CardHeader className="gap-4">
             <CardTitle>
@@ -470,8 +473,8 @@ function CountryLanguageSection({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Country & language</CardTitle>
-        <CardDescription>Where you&apos;re based and what you speak.</CardDescription>
+        <CardTitle>Location & languages</CardTitle>
+        <CardDescription>Where you&apos;re based and what languages you speak.</CardDescription>
       </CardHeader>
 
       <CardContent className="flex flex-col gap-6">
@@ -1048,6 +1051,49 @@ function ConnectedAccountsSection() {
   )
 }
 
+// === CONTACT SECTION ===
+
+const CONTACT_OPTIONS = [
+  { value: "", label: "None" },
+  { value: "discord", label: "Discord" },
+  { value: "telegram", label: "Telegram" },
+  { value: "x", label: "X" },
+  { value: "email", label: "Email" },
+] as const
+
+function ContactSection({
+  form,
+}: {
+  form: ReturnType<typeof useForm<SettingsValues>>
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Contact</CardTitle>
+        <CardDescription>How people can best reach you.</CardDescription>
+      </CardHeader>
+
+      <CardContent>
+        <FormField<SettingsValues, "contactPreference">
+          name="contactPreference"
+          label="Preferred way of contact"
+          description="This will be visible on your profile."
+          render={({ field }) => (
+            <RadioGroup value={field.value ?? ""} onValueChange={field.onChange}>
+              {CONTACT_OPTIONS.map(({ value, label }) => (
+                <label key={value} className="flex items-center gap-2 cursor-pointer text-sm">
+                  <RadioGroupItem value={value} />
+                  {label}
+                </label>
+              ))}
+            </RadioGroup>
+          )}
+        />
+      </CardContent>
+    </Card>
+  )
+}
+
 // === MAIN COMPONENT ===
 
 export default function UserSettingsPage() {
@@ -1071,6 +1117,7 @@ export default function UserSettingsPage() {
       skills: [],
       tools: [],
       image: "",
+      contactPreference: "",
     },
     mode: "onBlur",
   })
@@ -1096,6 +1143,7 @@ export default function UserSettingsPage() {
         skills: Array.isArray(userData.skills) ? userData.skills : [],
         tools: Array.isArray(userData.tags) ? userData.tags : [],
         image: userData.image ?? "",
+        contactPreference: (userData.contactPreference ?? "") as SettingsValues["contactPreference"],
       },
       { keepDirty: false }
     )
@@ -1132,6 +1180,7 @@ export default function UserSettingsPage() {
       skills: normalizeStringArray(values.skills),
       tags: normalizeStringArray(values.tools),
       image: optionalString(values.image) ?? null,
+      contactPreference: values.contactPreference || null,
     }
 
     const result = await apiPost<UpdateUserResponse>("/api/user/update", payload)
@@ -1210,6 +1259,8 @@ export default function UserSettingsPage() {
         <ConnectedAccountsSection />
 
         <WalletLinkSection />
+
+        <ContactSection form={form} />
 
         <ProfileSection
           form={form}
