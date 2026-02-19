@@ -144,7 +144,7 @@ function createStatusBanner(status: string | null): StatusBanner | null {
     return {
       tone: "neutral",
       title: "Application in review",
-      body: "Your application is being reviewed. You can't submit again right now.",
+      body: "Your application is being reviewed. You can still submit a new one.",
     }
   }
 
@@ -185,6 +185,7 @@ function canUserApply(community: CommunityInfo | null, membershipStatus: string 
   if (!community.isMembershipOpen) return false
   if (!membershipStatus) return true
   if (membershipStatus === "WITHDRAWN") return true
+  if (membershipStatus === "PENDING") return true
 
   return false
 }
