@@ -1,0 +1,98 @@
+Atlas Source-Available License
+Version 1.0, 2026
+
+Copyright (c) 2026 Intuition Box LLC. All rights reserved.
+
+TERMS AND CONDITIONS
+
+1. DEFINITIONS
+
+   "License" means this document.
+   "Software" means the source code, documentation, and associated files
+   in this repository.
+   "You" means the individual or entity exercising the rights granted
+   under this License.
+   "Commercial Use" means any use of the Software intended for or
+   directed toward commercial advantage or monetary compensation,
+   including but not limited to: selling the Software or derivative works,
+   offering the Software as a paid service, or using the Software as part
+   of a revenue-generating product or service.
+   "Non-Commercial Use" means any use that does not constitute
+   Commercial Use, including personal projects, academic research,
+   education, and non-profit activities.
+
+2. GRANT OF RIGHTS
+
+   Subject to the terms of this License, you are granted a non-exclusive,
+   worldwide, royalty-free right to:
+
+   a) View, copy, and study the Software.
+   b) Modify the Software and create derivative works.
+   c) Use the Software for Non-Commercial Use.
+   d) Distribute the Software or derivative works for Non-Commercial Use.
+
+3. CONDITIONS
+
+   The rights granted above are subject to the following conditions:
+
+   a) ATTRIBUTION: You must give appropriate credit to the original
+      authors, provide a copy of this License, and indicate if changes
+      were made. Attribution must be clearly visible in any derivative
+      work, including in the source code, documentation, and any public-
+      facing materials (e.g., website footer, about page, README).
+
+   b) SAME LICENSE: Any derivative work must be distributed under the
+      same terms as this License. You may not apply additional
+      restrictions or grant additional permissions beyond those stated
+      here.
+
+   c) LICENSE NOTICE: You must include a copy of this License in all
+      copies or substantial portions of the Software.
+
+   d) MODIFICATION NOTICE: If you modify the Software, you must include
+      prominent notices stating that you changed the files and the date
+      of any change.
+
+4. COMMERCIAL USE RESTRICTION
+
+   Commercial Use of the Software is strictly prohibited without prior
+   written consent from the copyright holder. To obtain a commercial
+   license, contact the copyright holder directly.
+
+5. DISSOLUTION FALLBACK
+
+   If the copyright holder (Intuition Box LLC) is formally dissolved,
+   ceases to exist as a legal entity, or becomes unreachable for a
+   continuous period of twelve (12) months (meaning no public activity,
+   no response to contact attempts via publicly listed channels, and no
+   maintenance of the Software), the Software shall automatically be
+   re-licensed under the GNU Affero General Public License, Version 3
+   (AGPL-3.0), as published by the Free Software Foundation.
+
+   Upon conversion to AGPL-3.0:
+   a) All terms of this License cease to apply.
+   b) The AGPL-3.0 terms govern all subsequent use, modification, and
+      distribution.
+   c) The original copyright notice and attribution requirements remain
+      in effect as required by AGPL-3.0.
+
+   This clause is irrevocable and survives any transfer of copyright
+   ownership.
+
+6. NO WARRANTY
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-
+   INFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+   LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN
+   ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN
+   CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+   SOFTWARE.
+
+7. TERMINATION
+
+   This License and the rights granted hereunder will terminate
+   automatically if you fail to comply with any of the terms. Upon
+   termination, you must cease all use and distribution of the Software
+   and destroy all copies in your possession.
