@@ -118,6 +118,7 @@ model User {
   links         String[] @default([]) // ex: ["https://github.com/x", "https://x.com/y"]
   skills        String[] @default([]) // ex: ["TypeScript", "Design Systems"]
   tags          String[] @default([]) // ex: ["open-source", "dao", "mentor"]
+  languages     String[] @default([]) // ex: ["English", "Portuguese"]
 
   // Auth.js relations
   accounts      Account[]

@@ -24,6 +24,7 @@ type UpdateUserOk = {
     links: string[];
     skills: string[];
     tags: string[];
+    languages: string[];
   };
 };
 
@@ -66,6 +67,11 @@ const UpdateUserSchema = z
       .max(50, "Too many tags")
       .optional()
       .transform((v) => (v === undefined ? undefined : uniqStrings(v.filter(Boolean)))),
+    languages: z
+      .array(z.string().trim())
+      .max(50, "Too many languages")
+      .optional()
+      .transform((v) => (v === undefined ? undefined : uniqStrings(v.filter(Boolean)))),
   })
   .refine(
     (v) =>
@@ -77,7 +83,8 @@ const UpdateUserSchema = z
       v.location !== undefined ||
       v.links !== undefined ||
       v.skills !== undefined ||
-      v.tags !== undefined,
+      v.tags !== undefined ||
+      v.languages !== undefined,
     {
       message: "At least one field is required",
       path: ["name"],
@@ -138,6 +145,7 @@ export async function POST(req: NextRequest) {
             ...(input.links !== undefined ? { links: input.links } : {}),
             ...(input.skills !== undefined ? { skills: input.skills } : {}),
             ...(input.tags !== undefined ? { tags: input.tags } : {}),
+            ...(input.languages !== undefined ? { languages: input.languages } : {}),
           },
           select: {
             id: true,
@@ -149,6 +157,7 @@ export async function POST(req: NextRequest) {
             links: true,
             skills: true,
             tags: true,
+            languages: true,
           },
         }),
         resolveHandleNameForOwner(
@@ -172,6 +181,7 @@ export async function POST(req: NextRequest) {
         links: Array.isArray(updated.links) ? (updated.links as string[]) : [],
         skills: Array.isArray(updated.skills) ? (updated.skills as string[]) : [],
         tags: Array.isArray(updated.tags) ? (updated.tags as string[]) : [],
+        languages: Array.isArray(updated.languages) ? (updated.languages as string[]) : [],
       },
     });
   } catch (e) {

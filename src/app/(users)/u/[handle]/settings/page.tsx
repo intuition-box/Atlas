@@ -12,6 +12,7 @@ import { apiGet, apiPost } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
 import { userPath, userSettingsPath } from "@/lib/routes"
 import { COUNTRIES } from "@/config/countries"
+import { LANGUAGE_LIST as LANGUAGES } from "@/config/languages"
 import { SKILL_LIST as SKILLS, TOOL_LIST as TOOLS } from "@/lib/attestations/definitions"
 
 import { AvatarDropzone } from "@/components/common/avatar-dropzone"
@@ -62,6 +63,7 @@ const SettingsSchema = z.object({
   links: z.array(
     z.object({ url: z.string().trim().max(2048, "Link is too long") })
   ).max(5, "Maximum 5 links"),
+  languages: z.array(z.string()),
   skills: z.array(z.string()),
   tools: z.array(z.string().max(80, "Tool is too long")),
   image: z.string().optional(),
@@ -79,6 +81,7 @@ type UserData = {
   bio: string | null
   location: string | null
   links: string[]
+  languages: string[]
   skills: string[]
   tags: string[]
 }
@@ -219,6 +222,27 @@ function useSkillsState() {
     skillQuery,
     setSkillQuery,
     addSkillOption,
+  }
+}
+
+function useLanguagesState() {
+  const [languageOptions, setLanguageOptions] = React.useState<string[]>([...LANGUAGES])
+  const [languageQuery, setLanguageQuery] = React.useState("")
+
+  const addLanguageOption = React.useCallback((language: string) => {
+    setLanguageOptions((prev) => {
+      if (prev.some((l) => l.toLowerCase() === language.toLowerCase())) {
+        return prev
+      }
+      return [language, ...prev]
+    })
+  }, [])
+
+  return {
+    languageOptions,
+    languageQuery,
+    setLanguageQuery,
+    addLanguageOption,
   }
 }
 
@@ -400,10 +424,8 @@ function ProfileSection({
 
 function AboutSection({
   form,
-  countryItems,
 }: {
   form: ReturnType<typeof useForm<SettingsValues>>
-  countryItems: string[]
 }) {
   return (
     <Card>
@@ -425,10 +447,37 @@ function AboutSection({
             />
           )}
         />
+      </CardContent>
+    </Card>
+  )
+}
 
+function CountryLanguageSection({
+  form,
+  countryItems,
+  languageOptions,
+  languageQuery,
+  onLanguageQueryChange,
+  onAddLanguage,
+}: {
+  form: ReturnType<typeof useForm<SettingsValues>>
+  countryItems: string[]
+  languageOptions: string[]
+  languageQuery: string
+  onLanguageQueryChange: (value: string) => void
+  onAddLanguage: (language: string) => void
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Country & language</CardTitle>
+        <CardDescription>Where you&apos;re based and what you speak.</CardDescription>
+      </CardHeader>
+
+      <CardContent className="flex flex-col gap-6">
         <FormField<SettingsValues, "location">
           name="location"
-          label="Location"
+          label="Country"
           description="Where you're based."
           render={({ id, field, fieldState }) => (
             <div className="relative">
@@ -473,6 +522,94 @@ function AboutSection({
             </div>
           )}
         />
+
+        <Field data-slot="settings-languages" name="languages" invalid={!!form.formState.errors.languages}>
+          <FieldLabel>Languages</FieldLabel>
+          <FieldDescription>Pick from suggestions or press Enter to add a custom language.</FieldDescription>
+
+          <FormField<SettingsValues, "languages">
+            name="languages"
+            render={({ id, field }) => {
+              const selected: string[] = Array.isArray(field.value) ? field.value : []
+              const items = filterAvailableItems(languageOptions, selected)
+
+              function handleAddLanguage(language: string) {
+                const v = language.trim()
+                if (!v) return
+
+                const lowerSelected = new Set(selected.map((s) => s.toLowerCase()))
+                if (lowerSelected.has(v.toLowerCase())) return
+
+                onAddLanguage(v)
+                field.onChange([...selected, v])
+                onLanguageQueryChange("")
+              }
+
+              return (
+                <Combobox
+                  items={items}
+                  value={null}
+                  inputValue={languageQuery}
+                  onInputValueChange={(v) => onLanguageQueryChange(String(v ?? ""))}
+                  onValueChange={(value) => {
+                    if (typeof value !== "string" || !value) return
+                    handleAddLanguage(value)
+                  }}
+                >
+                  <ComboboxInput
+                    id={id}
+                    placeholder="Add a language…"
+                    className="w-full"
+                    showClear
+                    showTrigger
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter") return
+                      e.preventDefault()
+                      handleAddLanguage(languageQuery)
+                    }}
+                  />
+
+                  <ComboboxContent className="bg-popover text-popover-foreground border border-border/60 shadow-lg rounded-2xl p-1">
+                    <ComboboxEmpty className="px-3 py-2 text-sm text-muted-foreground">
+                      {languageQuery.trim()
+                        ? <>Press Enter to add &ldquo;{languageQuery.trim()}&rdquo;.</>
+                        : "All suggestions selected. Type to add a custom language."}
+                    </ComboboxEmpty>
+                    <ComboboxList className="max-h-64 overflow-auto">
+                      <ComboboxCollection>
+                        {(item: string) => (
+                          <ComboboxItem
+                            key={item}
+                            value={item}
+                            className="data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground flex items-center gap-2 rounded-xl px-3 py-2 text-sm"
+                          >
+                            <span className="flex-1">{item}</span>
+                          </ComboboxItem>
+                        )}
+                      </ComboboxCollection>
+                    </ComboboxList>
+                  </ComboboxContent>
+
+                  {selected.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {selected.map((l) => (
+                        <Badge
+                          key={l}
+                          variant="secondary"
+                          className="cursor-pointer gap-1"
+                          render={<button type="button" onClick={() => field.onChange(selected.filter((x) => x !== l))} />}
+                        >
+                          {l}
+                          <X data-icon="inline-end" className="size-3" />
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                </Combobox>
+              )
+            }}
+          />
+        </Field>
       </CardContent>
     </Card>
   )
@@ -930,6 +1067,7 @@ export default function UserSettingsPage() {
       bio: "",
       location: "",
       links: [{ url: "" }],
+      languages: [],
       skills: [],
       tools: [],
       image: "",
@@ -938,6 +1076,7 @@ export default function UserSettingsPage() {
   })
 
   const links = useFieldArray({ control: form.control, name: "links" })
+  const { languageOptions, languageQuery, setLanguageQuery, addLanguageOption } = useLanguagesState()
   const { skillOptions, skillQuery, setSkillQuery, addSkillOption } = useSkillsState()
   const { toolOptions, toolQuery, setToolQuery, addToolOption } = useToolsState()
 
@@ -953,6 +1092,7 @@ export default function UserSettingsPage() {
         bio: userData.bio ?? "",
         location: userData.location ?? "",
         links: initializeLinks(userData.links),
+        languages: Array.isArray(userData.languages) ? userData.languages : [],
         skills: Array.isArray(userData.skills) ? userData.skills : [],
         tools: Array.isArray(userData.tags) ? userData.tags : [],
         image: userData.image ?? "",
@@ -988,6 +1128,7 @@ export default function UserSettingsPage() {
       bio: optionalString(values.bio),
       location: optionalString(values.location),
       links: normalizeLinks(values.links),
+      languages: normalizeStringArray(values.languages),
       skills: normalizeStringArray(values.skills),
       tags: normalizeStringArray(values.tools),
       image: optionalString(values.image) ?? null,
@@ -1076,7 +1217,16 @@ export default function UserSettingsPage() {
           currentHandle={handle}
         />
 
-        <AboutSection form={form} countryItems={countryItems} />
+        <AboutSection form={form} />
+
+        <CountryLanguageSection
+          form={form}
+          countryItems={countryItems}
+          languageOptions={languageOptions}
+          languageQuery={languageQuery}
+          onLanguageQueryChange={setLanguageQuery}
+          onAddLanguage={addLanguageOption}
+        />
 
         <LinksSection form={form} links={links} />
 

@@ -38,6 +38,7 @@ type UserGetResponse = {
     links: string[] | null
     skills: string[] | null
     tags: string[] | null
+    languages: string[] | null
     discordId: string | null
     discordHandle: string | null
     twitterHandle: string | null
@@ -356,6 +357,7 @@ export default function UserProfilePage() {
 
   const skills = (user.skills ?? []).filter(Boolean)
   const tags = (user.tags ?? []).filter(Boolean)
+  const languages = (user.languages ?? []).filter(Boolean)
   const links = (user.links ?? []).map((l) => String(l || "").trim()).filter(Boolean)
 
   return (
@@ -427,6 +429,22 @@ export default function UserProfilePage() {
           </div>
         </CardContent>
       </Card>
+
+      {languages.length ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Languages</CardTitle>
+            <CardDescription>What they speak.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-2">
+              {languages.map((l) => (
+                <Badge key={l} variant="secondary">{l}</Badge>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {links.length ? (
         <Card>
