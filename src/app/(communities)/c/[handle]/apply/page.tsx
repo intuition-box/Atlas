@@ -157,7 +157,7 @@ function createStatusBanner(status: string | null): StatusBanner | null {
     return {
       tone: "danger",
       title: "Application rejected",
-      body: "You can't submit again right now.",
+      body: "Your previous application was not accepted. You may submit a new one.",
     }
   }
 
@@ -175,6 +175,7 @@ function canUserApply(community: CommunityInfo | null, membershipStatus: string 
   if (!membershipStatus) return true
   if (membershipStatus === "WITHDRAWN") return true
   if (membershipStatus === "PENDING") return true
+  if (membershipStatus === "REJECTED") return true
 
   return false
 }
@@ -498,7 +499,7 @@ export default function CommunityApplyPage() {
         <>
           <PageHeader
             title="Apply"
-            description={communityPath(communityHandle)}
+            description={`@${communityHandle}`}
             actions={
               <Button type="button" variant="secondary" onClick={handleCancel}>
                 Back
@@ -521,7 +522,7 @@ export default function CommunityApplyPage() {
               </Avatar>
             }
             title="Apply"
-            description={communityPath(communityHandle)}
+            description={`@${communityHandle}`}
             actions={
               <Button type="button" variant="secondary" onClick={handleCancel}>
                 Back
@@ -544,7 +545,7 @@ export default function CommunityApplyPage() {
               </Avatar>
             }
             title="Apply"
-            description={communityPath(communityHandle)}
+            description={`@${communityHandle}`}
             actions={
               <Button type="button" variant="secondary" onClick={handleCancel}>
                 Back
@@ -554,6 +555,27 @@ export default function CommunityApplyPage() {
           <Alert>
             <AlertDescription>This community is not accepting applications right now.</AlertDescription>
           </Alert>
+        </>
+      ) : !canApply && statusBanner ? (
+        <>
+          <PageHeader
+            leading={
+              <Avatar className="h-12 w-12">
+                <AvatarImage src={community.avatarUrl ?? undefined} alt={communityName} />
+                <AvatarFallback>
+                  <UsersIcon />
+                </AvatarFallback>
+              </Avatar>
+            }
+            title="Apply"
+            description={`@${communityHandle}`}
+            actions={
+              <Button type="button" variant="secondary" onClick={handleCancel}>
+                Back
+              </Button>
+            }
+          />
+          <StatusBannerAlert banner={statusBanner} />
         </>
       ) : (
         <Form form={form} onSubmit={handleSubmit} className="gap-10">
@@ -565,7 +587,7 @@ export default function CommunityApplyPage() {
               </Avatar>
             }
             title="Apply"
-            description={communityPath(communityHandle)}
+            description={`@${communityHandle}`}
             actions={
               <FormActions className="flex items-center gap-3">
                 <Button type="button" variant="secondary" onClick={handleCancel}>

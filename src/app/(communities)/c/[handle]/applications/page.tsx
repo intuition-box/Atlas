@@ -2,24 +2,18 @@
 
 import * as React from "react"
 import { useParams, useRouter } from "next/navigation"
+import { Check, ExternalLink, RefreshCw, Users, X } from "lucide-react"
 
 import { apiGet, apiPost } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
 import { ROUTES, userPath, communityPath } from "@/lib/routes"
-import { PageHeader } from "@/components/common/page-header"
 
+import { PageHeader } from "@/components/common/page-header"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Combobox,
   ComboboxCollection,
@@ -29,15 +23,19 @@ import {
   ComboboxItem,
   ComboboxList,
 } from "@/components/ui/combobox"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { UsersIcon } from "@/components/ui/icons"
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Card, CardContent } from "@/components/ui/card"
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 
 // === TYPES ===
-
-type ApplicationStatus = "PENDING" | "APPROVED" | "REJECTED" | "WITHDRAWN" | "BANNED"
 
 type ApplicationUser = {
   handle: string
@@ -50,6 +48,8 @@ type ApplicationItem = {
   id: string
   status?: string | null
   createdAt: string | Date
+  reviewedAt?: string | Date | null
+  reviewNote?: string | null
   user: ApplicationUser
   answers?: unknown
 }
@@ -349,6 +349,10 @@ function ApplicationsTable({
 }) {
   return (
     <Card>
+      <CardHeader>
+        <CardTitle>Membership requests</CardTitle>
+        <CardDescription>Review and manage applications. Click a row to see answers.</CardDescription>
+      </CardHeader>
       <Table>
         <TableHeader>
           <TableRow>
@@ -378,7 +382,7 @@ function ApplicationsTable({
                     <div className="flex items-center gap-3">
                       <Avatar className="h-9 w-9">
                         <AvatarImage src={user.image || undefined} alt={display} />
-                        <AvatarFallback><UsersIcon /></AvatarFallback>
+                        <AvatarFallback><Users className="size-4" /></AvatarFallback>
                       </Avatar>
                       <div className="min-w-0">
                         <div className="truncate text-sm font-medium">{display}</div>
@@ -416,7 +420,8 @@ function ApplicationsTable({
                         size="sm"
                         onClick={() => onViewProfile(user.handle)}
                       >
-                        Profile ↗
+                        Profile
+                        <ExternalLink className="size-3" />
                       </Button>
                       <Button
                         type="button"
@@ -425,7 +430,8 @@ function ApplicationsTable({
                         disabled={isActing || processed}
                         onClick={() => onDecide(app, "approve")}
                       >
-                        {isActing && acting === "approve" ? "Approving…" : "Approve ✓"}
+                        {isActing && acting === "approve" ? "Approving…" : "Approve"}
+                        {!(isActing && acting === "approve") && <Check className="size-3" />}
                       </Button>
                       <Button
                         type="button"
@@ -434,7 +440,8 @@ function ApplicationsTable({
                         disabled={isActing || processed}
                         onClick={() => onRowReject(app)}
                       >
-                        {isActing && acting === "reject" ? "Rejecting…" : "Reject ✕"}
+                        {isActing && acting === "reject" ? "Rejecting…" : "Reject"}
+                        {!(isActing && acting === "reject") && <X className="size-3" />}
                       </Button>
                     </div>
                   </TableCell>
@@ -473,7 +480,6 @@ function ApplicationDialog({
   onDecide: (app: ApplicationItem, decision: DecisionAction) => void
   onViewProfile: (handle: string) => void
 }) {
-  const router = useRouter()
   const processed = active ? isProcessedStatus(active.status) : false
 
   return (
@@ -496,7 +502,7 @@ function ApplicationDialog({
             <div className="flex items-center gap-3">
               <Avatar className="h-10 w-10">
                 <AvatarImage src={active.user.image || undefined} alt={active.user.handle} />
-                <AvatarFallback><UsersIcon /></AvatarFallback>
+                <AvatarFallback><Users className="size-4" /></AvatarFallback>
               </Avatar>
               <div className="min-w-0">
                 <div className="truncate text-sm font-medium">@{active.user.handle}</div>
@@ -507,9 +513,10 @@ function ApplicationDialog({
             </div>
 
             <Card>
-              <CardContent className="px-5">
-              <div className="text-sm font-medium">Answers</div>
-              <div className="mt-3 flex flex-col gap-3">
+              <CardHeader>
+                <CardTitle>Answers</CardTitle>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-3">
                 {parseAnswers(active.answers).length > 0 ? (
                   parseAnswers(active.answers).map(([k, v]) => (
                     <div key={k} className="flex flex-col gap-1">
@@ -520,9 +527,20 @@ function ApplicationDialog({
                 ) : (
                   <div className="text-sm text-muted-foreground">No answers provided.</div>
                 )}
-              </div>
               </CardContent>
             </Card>
+
+            {processed && (
+              <div className="flex flex-col gap-1 rounded-lg border border-border/60 bg-muted/40 px-4 py-3">
+                <div className="text-xs font-medium text-muted-foreground">
+                  {String(active.status || "").toUpperCase() === "APPROVED" ? "Approved" : "Rejected"}
+                  {active.reviewedAt ? ` on ${formatDate(active.reviewedAt)}` : ""}
+                </div>
+                {active.reviewNote && (
+                  <div className="text-sm whitespace-pre-wrap break-words">{active.reviewNote}</div>
+                )}
+              </div>
+            )}
 
             {dialogError && (
               <Alert variant="destructive">
@@ -556,7 +574,8 @@ function ApplicationDialog({
                 className="flex-1 sm:flex-initial"
                 onClick={() => onViewProfile(active.user.handle)}
               >
-                Profile ↗
+                Profile
+                <ExternalLink className="size-3" />
               </Button>
               <Button
                 type="button"
@@ -584,7 +603,8 @@ function ApplicationDialog({
                 className="flex-1 sm:flex-initial"
                 onClick={() => onViewProfile(active.user.handle)}
               >
-                View Profile ↗
+                View Profile
+                <ExternalLink className="size-3" />
               </Button>
               <Badge variant="outline" className="px-3 py-1">
                 {String(active.status || "PENDING")}
@@ -738,21 +758,27 @@ export default function CommunityApplicationsPage() {
 
   if (loading) {
     return (
-      <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-10">
-        {/* Header skeleton */}
-        <Card>
-          <CardContent className="flex items-center gap-4 px-5">
-            <Skeleton className="size-12 rounded-full" />
-            <div className="flex flex-col gap-2">
-              <Skeleton className="h-5 w-32" />
-              <Skeleton className="h-4 w-24" />
-            </div>
-          </CardContent>
-        </Card>
+      <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-7 pb-40">
+        {/* PageHeader skeleton */}
+        <div className="w-full flex flex-wrap gap-3 p-5">
+          <Skeleton className="size-12 rounded-full" />
+          <div className="flex flex-col gap-2">
+            <Skeleton className="h-7 w-48" />
+            <Skeleton className="h-3 w-24" />
+          </div>
+          <div className="flex gap-3 ml-auto sm:align-center sm:justify-end">
+            <Skeleton className="h-9 w-20" />
+            <Skeleton className="h-9 w-28" />
+          </div>
+        </div>
 
-        {/* Table skeleton */}
+        {/* Applications table skeleton */}
         <Card>
-          <CardContent className="flex flex-col gap-4 px-5">
+          <CardHeader className="gap-4">
+            <CardTitle><Skeleton className="h-5 w-32" /></CardTitle>
+            <CardDescription><Skeleton className="h-4 w-86" /></CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
             {Array.from({ length: 5 }).map((_, i) => (
               <div key={i} className="flex items-center gap-4">
                 <Skeleton className="size-9 rounded-full" />
@@ -766,21 +792,22 @@ export default function CommunityApplicationsPage() {
             ))}
           </CardContent>
         </Card>
-      </main>
+      </div>
     )
   }
 
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-10">
+    <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
       <PageHeader
         leading={
           <Avatar className="h-12 w-12">
             <AvatarImage src={data?.community?.avatarUrl ?? undefined} alt={data?.community?.name} />
-            <AvatarFallback><UsersIcon /></AvatarFallback>
+            <AvatarFallback><Users className="size-4" /></AvatarFallback>
           </Avatar>
         }
         title="Applications"
         description={`@${handle}`}
+        actionsAsFormActions={false}
         actions={
           <div className="flex flex-wrap items-center justify-end gap-2">
             <Button
@@ -805,15 +832,12 @@ export default function CommunityApplicationsPage() {
               Sort: {sortOrder === "newest" ? "Newest" : "Oldest"}
             </Button>
             <Button type="button" variant="secondary" disabled={refreshing} onClick={handleRefresh}>
+              <RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} />
               {refreshing ? "Refreshing…" : "Refresh"}
             </Button>
           </div>
         }
       />
-
-      <p className="text-sm text-muted-foreground">
-        Review membership applications for this community. Click a row to see answers.
-      </p>
 
       {showFilters ? (
         <FilterBar
@@ -863,6 +887,6 @@ export default function CommunityApplicationsPage() {
         onDecide={handleDecide}
         onViewProfile={handleViewProfile}
       />
-    </main>
+    </div>
   )
 }
