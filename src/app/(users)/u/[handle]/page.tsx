@@ -444,24 +444,26 @@ export default function UserProfilePage() {
             <CardTitle>Location & languages</CardTitle>
             <CardDescription>Where they&apos;re based and what they speak.</CardDescription>
           </CardHeader>
-          <CardContent className="flex flex-col gap-6">
-            {user.location ? (
-              <div className="flex flex-col gap-2">
-                <h2 className="text-sm font-medium leading-none">Country</h2>
-                <p className="text-sm text-muted-foreground">{user.location}</p>
-              </div>
-            ) : null}
-
-            {languages.length > 0 ? (
-              <div className="flex flex-col gap-2">
-                <h2 className="text-sm font-medium leading-none">Languages</h2>
-                <div className="flex flex-wrap gap-2">
-                  {languages.map((l) => (
-                    <Badge key={l} variant="secondary">{l}</Badge>
-                  ))}
+          <CardContent>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {user.location ? (
+                <div className="rounded-lg border border-border/60 p-3 text-sm">
+                  <h2 className="text-xs font-medium text-muted-foreground mb-3">Country</h2>
+                  <p className="text-sm font-medium">{user.location}</p>
                 </div>
-              </div>
-            ) : null}
+              ) : null}
+
+              {languages.length > 0 ? (
+                <div className="rounded-lg border border-border/60 p-3 text-sm">
+                  <h2 className="text-xs font-medium text-muted-foreground mb-3">Languages</h2>
+                  <div className="flex flex-wrap gap-2">
+                    {languages.map((l) => (
+                      <Badge key={l} variant="secondary">{l}</Badge>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
           </CardContent>
         </Card>
       ) : null}
