@@ -369,7 +369,6 @@ export default function OnboardingPage() {
             <AvatarDropzone
               value={String(form.watch("image") || "") || null}
               alt="Avatar"
-              fallback={(watchedName || "?").slice(0, 1).toUpperCase()}
               onChange={(url) => {
                 oauthImageHydratedRef.current = true
                 form.clearErrors("root")

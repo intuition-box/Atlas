@@ -1,6 +1,11 @@
 import "server-only";
 
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import {
+  DeleteObjectCommand,
+  ListObjectsV2Command,
+  PutObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 function requireEnv(name: string) {
@@ -89,6 +94,74 @@ export function buildPublicUrl(key: string) {
   return `${base}/${k}`;
 }
 
+
+/**
+ * Extract the R2 object key from a public URL.
+ * Returns null if the URL doesn't match the configured R2_PUBLIC_BASE_URL.
+ */
+export function extractR2Key(publicUrl: string): string | null {
+  const baseRaw = getOptionalEnv("R2_PUBLIC_BASE_URL");
+  if (!baseRaw) return null;
+
+  const base = baseRaw.replace(/\/+$/, "");
+  if (!publicUrl.startsWith(base + "/")) return null;
+
+  const key = publicUrl.slice(base.length + 1);
+  return key.length > 0 ? key : null;
+}
+
+export async function deleteR2Object(key: string): Promise<void> {
+  assertSafeKey(key);
+
+  const bucket = requireEnv("R2_BUCKET");
+  const client = r2Client();
+
+  const cmd = new DeleteObjectCommand({
+    Bucket: bucket,
+    Key: key,
+  });
+
+  await client.send(cmd);
+}
+
+/**
+ * Delete all R2 objects under a given key prefix.
+ * Best-effort: logs errors but never throws.
+ * Avatar folders are small (usually 1-2 objects), so sequential deletes are fine.
+ */
+export async function deleteR2Prefix(prefix: string): Promise<void> {
+  try {
+    const bucket = requireEnv("R2_BUCKET");
+    const client = r2Client();
+
+    let continuationToken: string | undefined;
+    do {
+      const list = await client.send(
+        new ListObjectsV2Command({
+          Bucket: bucket,
+          Prefix: prefix,
+          MaxKeys: 100,
+          ContinuationToken: continuationToken,
+        }),
+      );
+
+      if (list.Contents) {
+        await Promise.all(
+          list.Contents.map((obj) =>
+            obj.Key
+              ? client.send(new DeleteObjectCommand({ Bucket: bucket, Key: obj.Key }))
+              : Promise.resolve(),
+          ),
+        );
+      }
+
+      continuationToken = list.IsTruncated ? list.NextContinuationToken : undefined;
+    } while (continuationToken);
+  } catch (err) {
+    // Best-effort cleanup — don't block callers.
+    console.error("[R2] deleteR2Prefix failed:", prefix, err);
+  }
+}
 
 export async function putR2Object(params: {
   key: string;

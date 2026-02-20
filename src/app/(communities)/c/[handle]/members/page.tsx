@@ -26,7 +26,7 @@ import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { PageHeader } from "@/components/common/page-header"
 import { RefreshButton } from "@/components/common/refresh-button"
-import { UsersIcon } from "@/components/ui/icons"
+import { User, Users } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 
 // === CONSTANTS ===
@@ -463,7 +463,7 @@ function MemberCard({ member }: { member: CommunityMember }) {
       <div className="flex items-start gap-3">
         <Avatar className="h-10 w-10">
           <AvatarImage src={u.image ?? undefined} alt={displayName} />
-          <AvatarFallback><UsersIcon /></AvatarFallback>
+          <AvatarFallback><User className="size-4 text-muted-foreground" /></AvatarFallback>
         </Avatar>
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <div className="flex items-center justify-between gap-2">
@@ -528,7 +528,7 @@ function MemberRow({ member }: { member: CommunityMember }) {
       <div className="flex min-w-0 items-center gap-3">
         <Avatar className="h-8 w-8">
           <AvatarImage src={u.image ?? undefined} alt={displayName} />
-          <AvatarFallback><UsersIcon /></AvatarFallback>
+          <AvatarFallback><User className="size-4 text-muted-foreground" /></AvatarFallback>
         </Avatar>
         <div className="min-w-0">
           <div className="truncate font-medium">{displayName}</div>
@@ -891,7 +891,7 @@ export default function CommunityMembersPage() {
         leading={
           <Avatar className="h-12 w-12">
             <AvatarImage src={data?.community?.avatarUrl ?? undefined} alt={communityName} />
-            <AvatarFallback><UsersIcon /></AvatarFallback>
+            <AvatarFallback><Users className="size-5 text-muted-foreground" /></AvatarFallback>
           </Avatar>
         }
         title="Members"

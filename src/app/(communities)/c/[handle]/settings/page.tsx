@@ -18,6 +18,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Form, FormActions, FormField, fieldControlProps, useForm } from "@/components/ui/form"
+import { Users } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
@@ -560,6 +561,7 @@ function ProfileSection({
             <AvatarDropzone
               value={String(form.watch("avatarUrl") || "") || null}
               alt="Community avatar"
+              fallbackIcon={Users}
               className="flex flex-col items-center text-center"
               upload={onAvatarUpload}
               onChange={(url) => {

@@ -7,7 +7,7 @@ import { parseApiError } from "@/lib/api/errors"
 import { cn } from "@/lib/utils"
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { UserIcon } from "@/components/ui/icons"
+import { User } from "lucide-react"
 
 type SignedUpload = {
   uploadUrl?: string
@@ -18,7 +18,8 @@ type SignedUpload = {
 export type AvatarDropzoneProps = {
   value?: string | null
   alt: string
-  fallback?: string
+  /** Lucide icon rendered inside AvatarFallback when no image is loaded. Defaults to User. */
+  fallbackIcon?: React.ComponentType<React.SVGProps<SVGSVGElement>>
   disabled?: boolean
   className?: string
   accept?: string
@@ -186,7 +187,7 @@ function isProbablyImage(file: File) {
 function AvatarDropzone({
   value,
   alt,
-  fallback,
+  fallbackIcon: FallbackIcon = User,
   disabled,
   className,
   accept,
@@ -380,7 +381,7 @@ function AvatarDropzone({
             referrerPolicy="no-referrer"
           />
           <AvatarFallback>
-            {fallback ? <span className="text-sm font-medium">{fallback}</span> : <UserIcon />}
+            <FallbackIcon />
           </AvatarFallback>
         </Avatar>
 

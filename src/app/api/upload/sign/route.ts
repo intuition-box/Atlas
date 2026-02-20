@@ -3,14 +3,17 @@ import "server-only";
 import { errJson, okJson } from "@/lib/api/server";
 import { requireAuth } from "@/lib/auth/policy";
 import { db } from "@/lib/db/client";
-import { putR2Object, signR2Upload } from "@/lib/r2";
+import { deleteR2Prefix, putR2Object, signR2Upload } from "@/lib/r2";
 import { requireCsrf } from "@/lib/security/csrf";
+import { buildRateLimitHeaders, getRateLimitKey, rateLimit } from "@/lib/security/rate-limit";
 import { MembershipRole } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 
 export const runtime = "nodejs";
+
+const MAX_AVATAR_BYTES = 1 * 1024 * 1024; // 1 MB
 
 const UploadTypeSchema = z.enum(["user.avatar", "community.avatar"]);
 
@@ -50,7 +53,7 @@ const SignUploadSchema = z
     contentType: ContentTypeSchema,
 
     // Used for client-side UX + future guards. R2 signing itself is based on key + contentType.
-    size: z.number().int().positive().max(25 * 1024 * 1024),
+    size: z.number().int().positive().max(MAX_AVATAR_BYTES),
 
     // Required for community assets.
     communityId: z.string().trim().min(1).optional(),
@@ -69,11 +72,89 @@ function zodIssuesToApiIssues(
   }));
 }
 
+/**
+ * Resolve the R2 prefix for avatar cleanup and the DB write for persisting the avatar URL.
+ *
+ * For user avatars: deletes all objects under `avatars/users/{userId}/`, writes `user.avatarUrl`.
+ * For community avatars: deletes all objects under `avatars/communities/{communityId}/`, writes `community.avatarUrl`.
+ *
+ * Returns the owner-scoped prefix for R2 cleanup.
+ */
+async function cleanupAndPersistAvatar(
+  type: "user.avatar" | "community.avatar",
+  ownerId: string,
+  publicUrl: string,
+): Promise<void> {
+  if (type === "user.avatar") {
+    // Nuke all existing avatars for this user, then save the new URL.
+    await deleteR2Prefix(`avatars/users/${ownerId}/`);
+    await db.user.update({
+      where: { id: ownerId },
+      data: { avatarUrl: publicUrl, image: publicUrl },
+      select: { id: true },
+    });
+  } else {
+    await deleteR2Prefix(`avatars/communities/${ownerId}/`);
+    await db.community.update({
+      where: { id: ownerId },
+      data: { avatarUrl: publicUrl },
+      select: { id: true },
+    });
+  }
+}
+
+/**
+ * Authorize a community avatar upload.
+ * Returns the communityId if authorized, or an error response.
+ */
+async function authorizeCommunityUpload(
+  userId: string,
+  communityId: string | undefined,
+): Promise<{ communityId: string } | { error: ReturnType<typeof errJson> }> {
+  if (!communityId) {
+    return {
+      error: errJson({
+        code: "INVALID_REQUEST",
+        message: "communityId is required for community.avatar",
+        status: 400,
+      }),
+    };
+  }
+
+  const membership = await db.membership.findUnique({
+    where: { userId_communityId: { userId, communityId } },
+    select: { role: true },
+  });
+
+  const canUpload =
+    membership &&
+    (membership.role === MembershipRole.OWNER ||
+      membership.role === MembershipRole.ADMIN);
+
+  if (!canUpload) {
+    return { error: errJson({ code: "FORBIDDEN", message: "Forbidden", status: 403 }) };
+  }
+
+  return { communityId };
+}
+
 export async function POST(req: NextRequest) {
   try {
+    // ── Rate limit (before auth to prevent DoS on auth lookups) ──
+    const rlKey = getRateLimitKey(req);
+    const rl = await rateLimit({ key: rlKey, policyId: "upload" });
+
+    if (!rl.allowed) {
+      return errJson(
+        { code: "RATE_LIMITED", message: "Too many uploads. Please slow down.", status: 429 },
+        { headers: buildRateLimitHeaders(rl) },
+      );
+    }
+
     const contentTypeHeader = req.headers.get("content-type") ?? "";
 
-    // If the browser can’t PUT to R2 (CORS/preflight), we also support proxy uploads:
+    // ── Multipart proxy path ──
+    // If the browser can't PUT to R2 (CORS/preflight), we also support proxy uploads:
     // POST multipart/form-data to this same endpoint with a `file` field.
     if (contentTypeHeader.includes("multipart/form-data")) {
       requireCsrf(req);
@@ -120,42 +201,25 @@ export async function POST(req: NextRequest) {
       let communityId: string | null = null;
 
       if (input.type === "community.avatar") {
-        communityId = input.communityId ?? null;
-        if (!communityId) {
-          return errJson({
-            code: "INVALID_REQUEST",
-            message: "communityId is required for community.avatar",
-            status: 400,
-          });
-        }
-
-        const membership = await db.membership.findUnique({
-          where: {
-            userId_communityId: {
-              userId,
-              communityId,
-            },
-          },
-          select: { role: true },
-        });
-
-        const canUpload =
-          membership &&
-          (membership.role === MembershipRole.OWNER ||
-            membership.role === MembershipRole.ADMIN);
-
-        if (!canUpload) {
-          return errJson({ code: "FORBIDDEN", message: "Forbidden", status: 403 });
-        }
+        const authResult = await authorizeCommunityUpload(userId, input.communityId);
+        if ("error" in authResult) return authResult.error;
+        communityId = authResult.communityId;
       }
 
       // Server chooses the object key. Never accept a raw key from clients.
+      const ownerId = input.type === "user.avatar" ? userId : communityId!;
       const nonce = makeUploadNonce();
-
       const key =
         input.type === "user.avatar"
-          ? `avatars/users/${userId}/${nonce}.${ext}`
-          : `avatars/communities/${communityId}/${nonce}.${ext}`;
+          ? `avatars/users/${ownerId}/${nonce}.${ext}`
+          : `avatars/communities/${ownerId}/${nonce}.${ext}`;
+
+      // Delete all old avatars in the owner's R2 folder BEFORE uploading the new one.
+      const prefix =
+        input.type === "user.avatar"
+          ? `avatars/users/${ownerId}/`
+          : `avatars/communities/${ownerId}/`;
+      await deleteR2Prefix(prefix);
 
       const body = Buffer.from(await file.arrayBuffer());
 
@@ -175,15 +239,13 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      return okJson({
-        publicUrl,
-        upload: {
-          key,
-          publicUrl,
-        },
-      });
+      // Persist to DB immediately so the avatar survives page refreshes without saving.
+      await cleanupAndPersistAvatar(input.type, ownerId, publicUrl);
+
+      return okJson({ publicUrl, upload: { key, publicUrl } });
     }
 
+    // ── Presign path (legacy) ──
     requireCsrf(req);
     const { userId } = await requireAuth();
 
@@ -205,44 +267,25 @@ export async function POST(req: NextRequest) {
     let communityId: string | null = null;
 
     if (input.type === "community.avatar") {
-      // `refine` guarantees this at runtime; keep TS happy.
-      communityId = input.communityId ?? null;
-      if (!communityId) {
-        return errJson({
-          code: "INVALID_REQUEST",
-          message: "communityId is required for community.avatar",
-          status: 400,
-        });
-      }
-
-      const membership = await db.membership.findUnique({
-        where: {
-          userId_communityId: {
-            userId,
-            communityId,
-          },
-        },
-        select: { role: true },
-      });
-
-      const canUpload =
-        membership &&
-        (membership.role === MembershipRole.OWNER ||
-          membership.role === MembershipRole.ADMIN);
-
-      if (!canUpload) {
-        return errJson({ code: "FORBIDDEN", message: "Forbidden", status: 403 });
-      }
+      const authResult = await authorizeCommunityUpload(userId, input.communityId);
+      if ("error" in authResult) return authResult.error;
+      communityId = authResult.communityId;
     }
 
     // Server chooses the object key. Never accept a raw key from clients.
-    // Keep keys clear and scoped by owner id.
+    const ownerId = input.type === "user.avatar" ? userId : communityId!;
     const nonce = makeUploadNonce();
-
     const key =
       input.type === "user.avatar"
-        ? `avatars/users/${userId}/${nonce}.${ext}`
-        : `avatars/communities/${communityId}/${nonce}.${ext}`;
+        ? `avatars/users/${ownerId}/${nonce}.${ext}`
+        : `avatars/communities/${ownerId}/${nonce}.${ext}`;
+
+    // Delete old avatars before generating presigned URL.
+    const prefix =
+      input.type === "user.avatar"
+        ? `avatars/users/${ownerId}/`
+        : `avatars/communities/${ownerId}/`;
+    await deleteR2Prefix(prefix);
 
     const upload = await signR2Upload({
       key,

@@ -3,7 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { useParams } from "next/navigation"
-import { ArrowUpRight, Wallet } from "lucide-react"
+import { ArrowUpRight, User, Wallet } from "lucide-react"
 
 import { apiGet } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
@@ -71,18 +71,6 @@ type LoadState =
   | { status: "ready"; data: UserGetResponse }
 
 // === HELPERS ===
-
-function initials(nameOrHandle: string) {
-  const s = nameOrHandle.trim()
-  if (!s) return "?"
-
-  const parts = s.split(/\s+/g).filter(Boolean)
-  if (parts.length >= 2) {
-    return `${parts[0].slice(0, 1)}${parts[1].slice(0, 1)}`.toUpperCase()
-  }
-
-  return s.slice(0, 2).toUpperCase()
-}
 
 function fmtDate(iso: string) {
   const d = new Date(iso)
@@ -374,7 +362,7 @@ export default function UserProfilePage() {
         leading={
           <Avatar className="h-12 w-12">
             <AvatarImage src={avatarSrc} alt={displayName} />
-            <AvatarFallback>{initials(displayName)}</AvatarFallback>
+            <AvatarFallback><User className="size-5 text-muted-foreground" /></AvatarFallback>
           </Avatar>
         }
         title={displayName}

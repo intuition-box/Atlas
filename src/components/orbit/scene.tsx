@@ -17,7 +17,8 @@ import {
   type SimulationLinkDatum,
 } from "d3-force";
 
-import { UsersIcon, PlusIcon, FileTextIcon, CogIcon, GlobeIcon } from "@/components/ui/icons";
+import { Users } from "lucide-react";
+import { PlusIcon, FileTextIcon, CogIcon, GlobeIcon } from "@/components/ui/icons";
 import { apiGet } from "@/lib/api/client";
 import { communityPath, communityMembersPath, communityApplyPath, communityApplicationsPath, communitySettingsPath } from "@/lib/routes";
 import { sounds } from "@/lib/sounds";
@@ -480,7 +481,7 @@ export function OrbitScene({
 
     const bottomLeft = [
       { icon: GlobeIcon, label: "Profile", href: communityPath(handle) },
-      { icon: UsersIcon, label: "Members", href: communityMembersPath(handle) },
+      { icon: Users, label: "Members", href: communityMembersPath(handle) },
       { icon: PlusIcon, label: "Apply", href: communityApplyPath(handle) },
     ];
 

@@ -6,7 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod"
 import { Controller, useFieldArray } from "react-hook-form"
 import { useParams, useRouter } from "next/navigation"
 import { getSession, signIn, useSession } from "next-auth/react"
-import { Loader2, X } from "lucide-react"
+import { Loader2, User, X } from "lucide-react"
 
 import { apiGet, apiPost } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
@@ -342,18 +342,30 @@ function SettingsSkeleton() {
 
 // === SUB-COMPONENTS ===
 
+type AvatarStatus = {
+  type: "idle" | "deleting" | "deleted" | "uploaded" | "error"
+  message?: string
+}
+
 function ProfileSection({
   form,
   avatarUrl,
   onAvatarError,
+  onAvatarUploaded,
+  onDeleteAvatar,
+  avatarStatus,
   currentHandle,
 }: {
   form: ReturnType<typeof useForm<SettingsValues>>
   avatarUrl: string | undefined
   onAvatarError: (message: string) => void
+  onAvatarUploaded: (url: string) => void
+  onDeleteAvatar: () => void
+  avatarStatus: AvatarStatus
   currentHandle: string
 }) {
   const watchedName = form.watch("name")
+  const showOverlay = avatarStatus.type !== "idle"
 
   return (
     <Card>
@@ -367,18 +379,52 @@ function ProfileSection({
           <FieldLabel>Avatar</FieldLabel>
           <FieldDescription>A photo or image that represents you across the platform.</FieldDescription>
 
-          <div className="flex justify-center rounded-xl border border-dashed border-border p-6">
+          <div className="relative overflow-hidden rounded-xl border border-dashed border-border p-6">
             <AvatarDropzone
               value={String(avatarUrl || "") || null}
               alt="Avatar"
               className="flex flex-col items-center text-center"
               uploadType="user.avatar"
+              maxSizeBytes={1 * 1024 * 1024}
               onChange={(url) => {
-                form.clearErrors("root")
-                form.setValue("avatarUrl", url ?? "", { shouldDirty: true, shouldTouch: true })
+                if (url) {
+                  onAvatarUploaded(url)
+                } else {
+                  form.setValue("avatarUrl", "", { shouldDirty: false })
+                }
               }}
               onError={onAvatarError}
             />
+
+            {avatarUrl ? (
+              <div className="flex justify-center mt-3">
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="destructive"
+                  disabled={avatarStatus.type === "deleting"}
+                  onClick={onDeleteAvatar}
+                >
+                  {avatarStatus.type === "deleting" ? "Deleting…" : "Delete avatar"}
+                </Button>
+              </div>
+            ) : null}
+
+            {showOverlay ? (
+              <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-card/80 backdrop-blur-sm">
+                <p
+                  className={`text-xs font-medium ${
+                    avatarStatus.type === "error"
+                      ? "text-destructive"
+                      : avatarStatus.type === "deleted" || avatarStatus.type === "uploaded"
+                        ? "text-emerald-500"
+                        : "text-muted-foreground"
+                  }`}
+                >
+                  {avatarStatus.message}
+                </p>
+              </div>
+            ) : null}
           </div>
 
           {form.formState.errors.avatarUrl?.message && (
@@ -1155,11 +1201,46 @@ export default function UserSettingsPage() {
     }
   }, [error, form])
 
-  // Avatar uses default proxy upload with type "user.avatar"
-  // No custom sign/upload needed — defaultUploadViaApi handles it
+  // Avatar is saved to DB immediately on upload (via /api/upload/sign).
+  // The form field tracks the URL for display only — no dirty flag needed.
+
+  const [avatarStatus, setAvatarStatus] = React.useState<AvatarStatus>({ type: "idle" })
 
   function handleAvatarError(message: string) {
     form.setError("root", { type: "server", message })
+  }
+
+  function handleAvatarUploaded(url: string) {
+    form.clearErrors("root")
+    form.setValue("avatarUrl", url, { shouldDirty: false })
+    setAvatarStatus({ type: "uploaded", message: "Avatar uploaded" })
+    setTimeout(() => setAvatarStatus({ type: "idle" }), 3_000)
+  }
+
+  async function handleDeleteAvatar() {
+    setAvatarStatus({ type: "deleting", message: "Deleting avatar…" })
+    form.clearErrors("root")
+
+    try {
+      const result = await apiPost<{ deleted: boolean }>("/api/user/avatar/delete", {})
+
+      if (result.ok) {
+        form.setValue("avatarUrl", "", { shouldDirty: false })
+        setAvatarStatus({ type: "deleted", message: "Avatar deleted" })
+        setTimeout(() => setAvatarStatus({ type: "idle" }), 3_000)
+        router.refresh()
+      } else {
+        const parsed = parseApiError(result.error)
+        setAvatarStatus({
+          type: "error",
+          message: parsed.formError || "Couldn't delete avatar",
+        })
+        setTimeout(() => setAvatarStatus({ type: "idle" }), 4_000)
+      }
+    } catch {
+      setAvatarStatus({ type: "error", message: "Couldn't delete avatar" })
+      setTimeout(() => setAvatarStatus({ type: "idle" }), 4_000)
+    }
   }
 
   async function handleSubmit(values: SettingsValues) {
@@ -1232,7 +1313,7 @@ export default function UserSettingsPage() {
           leading={
             <Avatar className="h-12 w-12">
               <AvatarImage src={form.watch("avatarUrl") || userData?.avatarUrl || undefined} alt={`@${handle}`} referrerPolicy="no-referrer" />
-              <AvatarFallback>{String(handle || "?").slice(0, 1).toUpperCase()}</AvatarFallback>
+              <AvatarFallback><User className="size-5 text-muted-foreground" /></AvatarFallback>
             </Avatar>
           }
           title="Account settings"
@@ -1265,6 +1346,9 @@ export default function UserSettingsPage() {
           form={form}
           avatarUrl={form.watch("avatarUrl") || userData?.avatarUrl || undefined}
           onAvatarError={handleAvatarError}
+          onAvatarUploaded={handleAvatarUploaded}
+          onDeleteAvatar={handleDeleteAvatar}
+          avatarStatus={avatarStatus}
           currentHandle={handle}
         />
 

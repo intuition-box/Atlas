@@ -3,7 +3,7 @@ import "server-only";
 import type { NextRequest } from "next/server";
 import { createHash } from "node:crypto";
 
-export type RateLimitPolicyId = "api" | "auth";
+export type RateLimitPolicyId = "api" | "auth" | "upload";
 
 export type RateLimitDecision = {
   allowed: boolean;
@@ -27,6 +27,8 @@ const POLICIES: Record<RateLimitPolicyId, Policy> = {
   api: { limit: 60, windowMs: 60_000 },
   // Login / onboarding / high-risk endpoints
   auth: { limit: 10, windowMs: 60_000 },
+  // File uploads (R2 storage — stricter to prevent abuse)
+  upload: { limit: 10, windowMs: 60_000 },
 } as const;
 
 type Bucket = {

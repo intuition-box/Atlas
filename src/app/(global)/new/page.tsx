@@ -16,6 +16,7 @@ import { HandleField } from "@/components/common/handle-field"
 import { PageHeader } from "@/components/common/page-header"
 import { Button } from "@/components/ui/button"
 import { Form, FormActions, FormField, FormMessage, fieldControlProps, useForm } from "@/components/ui/form"
+import { Users } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
@@ -476,7 +477,7 @@ export default function NewCommunityPage() {
                 <AvatarDropzone
                   value={watchedAvatarUrl || null}
                   alt={watchedName || "Community"}
-                  fallback={(watchedName?.trim()?.slice(0, 1) || "C").toUpperCase()}
+                  fallbackIcon={Users}
                   onChange={(url) => {
                     form.clearErrors("root")
                     form.setValue("avatarUrl", url ?? "", { shouldDirty: true, shouldTouch: true })

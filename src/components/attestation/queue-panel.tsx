@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { X, Save, Loader2, Trash2, ExternalLink } from "lucide-react";
+import { X, Save, Loader2, Trash2, ExternalLink, User } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { apiPost } from "@/lib/api/client";
@@ -31,13 +31,6 @@ import { AttestationBadge } from "@/components/attestation/badge";
    Helpers
 ──────────────────────────── */
 
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
-  return (parts[0]!.slice(0, 1) + parts[parts.length - 1]!.slice(0, 1)).toUpperCase();
-}
-
 /* ────────────────────────────
    Queue Item Component
 ──────────────────────────── */
@@ -53,8 +46,8 @@ function QueueItem({
     <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/30 border border-border/30">
       <Avatar className="size-9 shrink-0">
         <AvatarImage src={item.toAvatarUrl ?? ""} alt={item.toName} />
-        <AvatarFallback className="text-xs font-medium">
-          {initials(item.toName)}
+        <AvatarFallback>
+          <User className="size-4 text-muted-foreground" />
         </AvatarFallback>
       </Avatar>
 

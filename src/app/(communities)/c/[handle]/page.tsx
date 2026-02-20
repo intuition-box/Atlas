@@ -3,6 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { useParams } from "next/navigation"
+import { User } from "lucide-react"
 
 import { apiGet } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
@@ -66,16 +67,6 @@ type LoadState =
   | { status: "ready"; data: CommunityGetResponse }
 
 // === HELPERS ===
-
-function initials(name: string) {
-  const s = name.trim()
-  if (!s) return "?"
-  const parts = s.split(/\s+/g).filter(Boolean)
-  if (parts.length >= 2) {
-    return `${parts[0].slice(0, 1)}${parts[1].slice(0, 1)}`.toUpperCase()
-  }
-  return s.slice(0, 2).toUpperCase()
-}
 
 function fmtDate(iso: string) {
   const d = new Date(iso)
@@ -379,7 +370,7 @@ export default function CommunityProfilePage() {
                   <div key={m.id} className="flex items-center gap-3">
                     <Avatar className="size-8">
                       <AvatarImage src={memberAvatar} alt={memberName} />
-                      <AvatarFallback>{initials(memberName)}</AvatarFallback>
+                      <AvatarFallback><User className="size-4 text-muted-foreground" /></AvatarFallback>
                     </Avatar>
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-medium text-foreground">{memberName}</div>

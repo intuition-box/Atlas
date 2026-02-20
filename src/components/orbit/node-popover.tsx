@@ -5,9 +5,8 @@ import Link from "next/link";
 
 import { ProfileAvatar } from "@/components/common/profile-avatar";
 import { Button } from "@/components/ui/button";
+import { User, Users } from "lucide-react";
 import {
-  UsersIcon,
-  UserIcon,
   CheckIcon,
   PlusIcon,
   GlobeIcon,
@@ -167,13 +166,13 @@ export function CommunityTooltipContent({
       <div className="font-semibold text-sm">{name}</div>
       <div className="mt-2 flex flex-col gap-1.5 opacity-85">
         <div className="flex items-center gap-2">
-          <UsersIcon className="size-3.5 shrink-0" />
+          <Users className="size-3.5 shrink-0" />
           <span>
             {memberCount} {memberCount === 1 ? "member" : "members"}
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <UserIcon className="size-3.5 shrink-0" />
+          <User className="size-3.5 shrink-0" />
           <span>{isPublic ? "Public" : "Private"} community</span>
         </div>
         <div className="flex items-center gap-2">
@@ -338,7 +337,7 @@ export function CommunityPopoverContent({
       {/* Info pills */}
       <div className="flex flex-wrap justify-center gap-2">
         <div className="flex items-center gap-1 rounded-full bg-muted/40 px-2.5 py-1 text-xs text-muted-foreground">
-          <UsersIcon className="size-3" />
+          <Users className="size-3" />
           <span>{community.memberCount} members</span>
         </div>
         <div className="flex items-center gap-1 rounded-full bg-muted/40 px-2.5 py-1 text-xs text-muted-foreground">

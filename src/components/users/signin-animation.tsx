@@ -5,7 +5,8 @@ import * as React from "react"
 import { cn } from "@/lib/utils"
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { PlusIcon, UserIcon } from "@/components/ui/icons"
+import { User } from "lucide-react"
+import { PlusIcon } from "@/components/ui/icons"
 
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr]
@@ -183,7 +184,7 @@ export default function OrbitAnimation({
           onError={() => markLoaded(loadKey)}
         />
         <AvatarFallback className="bg-transparent">
-          <UserIcon />
+          <User className="size-4 text-muted-foreground" />
         </AvatarFallback>
       </Avatar>
     )

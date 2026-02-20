@@ -10,6 +10,7 @@ import {
   Link2,
   Loader2,
   Undo2,
+  User,
   X,
 } from "lucide-react"
 
@@ -71,14 +72,6 @@ type FilterState = {
 }
 
 // === UTILITY FUNCTIONS ===
-
-function initials(name: string | null): string {
-  if (!name) return "?"
-  const parts = name.trim().split(/\s+/).filter(Boolean)
-  if (parts.length === 0) return "?"
-  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase()
-  return (parts[0]!.slice(0, 1) + parts[parts.length - 1]!.slice(0, 1)).toUpperCase()
-}
 
 function formatRelativeTime(iso: string): string {
   const ts = Date.parse(iso)
@@ -396,7 +389,7 @@ function AttestationCard({
           <Link href={href} onClick={(e) => e.stopPropagation()}>
             <Avatar className="size-9">
               <AvatarImage src={otherUser.avatarUrl ?? undefined} alt={displayName} />
-              <AvatarFallback>{initials(otherUser.name)}</AvatarFallback>
+              <AvatarFallback><User className="size-4 text-muted-foreground" /></AvatarFallback>
             </Avatar>
           </Link>
           <div className="min-w-0">
@@ -627,7 +620,7 @@ function AttestationRow({
         <Link href={href} className="inline-flex min-w-0 items-center gap-3 rounded-md px-1.5 py-1 -mx-1.5 -my-1 transition-colors hover:text-primary" onClick={(e) => e.stopPropagation()}>
           <Avatar className="h-8 w-8 shrink-0">
             <AvatarImage src={otherUser.avatarUrl ?? undefined} alt={displayName} />
-            <AvatarFallback>{initials(otherUser.name)}</AvatarFallback>
+            <AvatarFallback><User className="size-4 text-muted-foreground" /></AvatarFallback>
           </Avatar>
           <div className="min-w-0">
             <div className="truncate font-medium">{displayName}</div>
@@ -1169,7 +1162,7 @@ export default function AttestationsPage() {
         leading={
           <Avatar className="h-12 w-12">
             <AvatarImage src={avatarSrc} alt={displayName} />
-            <AvatarFallback>{initials(profile?.name ?? handle)}</AvatarFallback>
+            <AvatarFallback><User className="size-5 text-muted-foreground" /></AvatarFallback>
           </Avatar>
         }
         title="Attestations"

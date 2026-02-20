@@ -1,11 +1,11 @@
 "use client";
 
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
-import { UserIcon, GlobeIcon } from "@/components/ui/icons";
+import { User, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface ProfileAvatarProps {
-  /** "user" shows UserIcon fallback, "community" shows GlobeIcon */
+  /** "user" shows User fallback, "community" shows Users */
   type: "user" | "community";
   src?: string | null;
   name?: string;
@@ -26,7 +26,7 @@ export function ProfileAvatar({
   size = "default",
   className,
 }: ProfileAvatarProps) {
-  const FallbackIcon = type === "community" ? GlobeIcon : UserIcon;
+  const FallbackIcon = type === "community" ? Users : User;
 
   return (
     <Avatar size={size} className={className}>

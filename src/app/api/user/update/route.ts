@@ -8,7 +8,7 @@ import { db } from "@/lib/db/client";
 import { HandleSchema } from "@/lib/handle";
 import { claimHandle, resolveHandleNameForOwner } from "@/lib/handle-registry";
 import type { HandleProblem } from "@/lib/handle-registry";
-import { mirrorUrlToR2 } from "@/lib/r2";
+import { deleteR2Object, extractR2Key, mirrorUrlToR2 } from "@/lib/r2";
 import { requireCsrf } from "@/lib/security/csrf";
 
 export const runtime = "nodejs";
@@ -137,6 +137,12 @@ export async function POST(req: NextRequest) {
       if (r2Url) avatarUrl = r2Url;
     }
 
+    // Read old avatar URL before the transaction so we can clean up R2 after commit.
+    const oldAvatarUrl =
+      input.image !== undefined
+        ? (await db.user.findUnique({ where: { id: userId }, select: { avatarUrl: true } }))?.avatarUrl ?? null
+        : null;
+
     const { updated, handleName } = await db.$transaction(async (tx) => {
       // Claim handle before updating other fields — if this fails, the whole tx rolls back.
       if (input.handle !== undefined) {
@@ -185,6 +191,16 @@ export async function POST(req: NextRequest) {
 
       return { updated, handleName };
     });
+
+    // Delete the specific old R2 avatar object when the URL changed (best-effort).
+    // The upload/sign route already handles prefix cleanup for direct uploads;
+    // this covers the case where mirrorUrlToR2 creates a new object alongside the old one.
+    if (oldAvatarUrl && oldAvatarUrl !== avatarUrl) {
+      const oldKey = extractR2Key(oldAvatarUrl);
+      if (oldKey) {
+        void deleteR2Object(oldKey).catch(() => {});
+      }
+    }
 
     return okJson<UpdateUserOk>({
       user: {

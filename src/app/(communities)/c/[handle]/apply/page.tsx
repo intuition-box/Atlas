@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
 import { Form, FormActions, FormField, fieldControlProps, useForm } from "@/components/ui/form"
-import { UsersIcon } from "@/components/ui/icons"
+import { Users } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
@@ -517,7 +517,7 @@ export default function CommunityApplyPage() {
               <Avatar className="h-12 w-12">
                 <AvatarImage src={community.avatarUrl ?? undefined} alt={communityName} />
                 <AvatarFallback>
-                  <UsersIcon />
+                  <Users className="size-5 text-muted-foreground" />
                 </AvatarFallback>
               </Avatar>
             }
@@ -540,7 +540,7 @@ export default function CommunityApplyPage() {
               <Avatar className="h-12 w-12">
                 <AvatarImage src={community.avatarUrl ?? undefined} alt={communityName} />
                 <AvatarFallback>
-                  <UsersIcon />
+                  <Users className="size-5 text-muted-foreground" />
                 </AvatarFallback>
               </Avatar>
             }
@@ -563,7 +563,7 @@ export default function CommunityApplyPage() {
               <Avatar className="h-12 w-12">
                 <AvatarImage src={community.avatarUrl ?? undefined} alt={communityName} />
                 <AvatarFallback>
-                  <UsersIcon />
+                  <Users className="size-5 text-muted-foreground" />
                 </AvatarFallback>
               </Avatar>
             }
@@ -583,7 +583,7 @@ export default function CommunityApplyPage() {
             leading={
               <Avatar className="h-12 w-12">
                 <AvatarImage src={community.avatarUrl ?? undefined} alt={communityName} />
-                <AvatarFallback><UsersIcon /></AvatarFallback>
+                <AvatarFallback><Users className="size-5 text-muted-foreground" /></AvatarFallback>
               </Avatar>
             }
             title="Apply"

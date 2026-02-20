@@ -12,6 +12,7 @@ import { errJson, okJson } from "@/lib/api/server";
 import { db } from "@/lib/db/client";
 import { claimHandle, resolveHandleNameForOwner } from "@/lib/handle-registry";
 import type { HandleProblem } from "@/lib/handle-registry";
+import { deleteR2Object, extractR2Key } from "@/lib/r2";
 import { requireCsrf } from "@/lib/security/csrf";
 import { CommunityUpdateSchema } from "@/lib/validations";
 
@@ -97,6 +98,12 @@ export async function POST(req: NextRequest) {
     if (input.isPublicDirectory !== undefined) data.isPublicDirectory = input.isPublicDirectory;
     if (input.membershipConfig !== undefined) data.membershipConfig = prismaJson(input.membershipConfig);
     if (input.orbitConfig !== undefined) data.orbitConfig = prismaJson(input.orbitConfig);
+
+    // Read old avatar URL before the transaction so we can clean up R2 after commit.
+    const oldAvatarUrl =
+      input.avatarUrl !== undefined
+        ? (await db.community.findUnique({ where: { id: input.communityId }, select: { avatarUrl: true } }))?.avatarUrl ?? null
+        : null;
 
     const txResult = await db.$transaction(async (tx) => {
       const membership = await tx.membership.findUnique({
@@ -202,6 +209,14 @@ export async function POST(req: NextRequest) {
     }
 
     const updated = txResult.community;
+
+    // Delete the specific old R2 avatar object when the URL changed (best-effort).
+    if (oldAvatarUrl && oldAvatarUrl !== updated.avatarUrl) {
+      const oldKey = extractR2Key(oldAvatarUrl);
+      if (oldKey) {
+        void deleteR2Object(oldKey).catch(() => {});
+      }
+    }
 
     return okJson<UpdateCommunityOk>({
       community: {
