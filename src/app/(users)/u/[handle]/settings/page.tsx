@@ -1076,8 +1076,6 @@ function ContactSection({
       <CardContent>
         <FormField<SettingsValues, "contactPreference">
           name="contactPreference"
-          label="Preferred way of contact"
-          description="This will be visible on your profile."
           render={({ field }) => (
             <RadioGroup value={field.value ?? ""} onValueChange={field.onChange}>
               {CONTACT_OPTIONS.map(({ value, label }) => (
