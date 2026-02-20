@@ -122,31 +122,17 @@ export async function POST(req: NextRequest) {
         select: { id: true },
       });
 
-      const prev = await tx.application.findUnique({
-        where: { userId_communityId: { userId, communityId } },
-        select: { id: true },
-      });
-
-      await tx.application.upsert({
-        where: { userId_communityId: { userId, communityId } },
-        create: {
+      await tx.application.create({
+        data: {
           userId,
           communityId,
           status: MembershipStatus.PENDING,
           answers: body.answers as unknown as Prisma.InputJsonValue,
         },
-        update: {
-          status: MembershipStatus.PENDING,
-          answers: body.answers as unknown as Prisma.InputJsonValue,
-          reviewerId: null,
-          reviewedAt: null,
-          reviewNote: null,
-        },
         select: { id: true },
       });
 
-      // NOTE: application submission is not a scoring event. (ScoringEvent/ScoringType)
-      return { created: !prev };
+      return { created: true };
     });
 
     // Keep recompute outside the transaction.

@@ -23,7 +23,7 @@ const BodySchema = z
     userId: z.string().trim().min(1).optional(),
     userHandle: z.string().trim().min(1).optional(),
 
-    decision: z.enum(["APPROVE", "REJECT"] as const),
+    decision: z.enum(["APPROVE", "REJECT", "BAN"] as const),
     note: z.string().trim().min(1).max(500).optional(),
   })
   .superRefine((v, ctx) => {
@@ -81,10 +81,19 @@ const QuerySchema = z
   })
 
 type ReviewListOk = {
+  community: {
+    id: string
+    handle: string | null
+    name: string
+    avatarUrl: string | null
+  }
   applications: Array<{
     id: string
+    status: string
     createdAt: string
     answers: unknown
+    reviewedAt: string | null
+    reviewNote: string | null
     user: {
       id: string
       handle: string | null
@@ -142,13 +151,34 @@ export async function GET(req: NextRequest) {
       return errJson({ code: "FORBIDDEN", message: "Not allowed", status: 403 })
     }
 
+    // Fetch community info for the page header.
+    const community = await db.community.findUnique({
+      where: { id: communityId },
+      select: { id: true, name: true, avatarUrl: true },
+    })
+
+    if (!community) {
+      return errJson({ code: "NOT_FOUND", message: "Community not found", status: 404 })
+    }
+
+    // Resolve community handle.
+    const communityOwner = await db.handleOwner.findFirst({
+      where: {
+        ownerType: "COMMUNITY",
+        ownerId: communityId,
+        handle: { status: HandleStatus.ACTIVE },
+      },
+      select: { handle: { select: { name: true } } },
+    })
+
+    const communityHandle = communityOwner?.handle?.name ?? null
+
     const q = String(parsed.data.q || "").trim().toLowerCase()
     const take = parsed.data.limit ?? 100
 
     const apps = await db.application.findMany({
       where: {
         communityId,
-        status: MembershipStatus.PENDING,
         ...(q
           ? {
               user: {
@@ -161,8 +191,11 @@ export async function GET(req: NextRequest) {
       take,
       select: {
         id: true,
+        status: true,
         createdAt: true,
         answers: true,
+        reviewedAt: true,
+        reviewNote: true,
         user: {
           select: {
             id: true,
@@ -201,10 +234,19 @@ export async function GET(req: NextRequest) {
     }
 
     return okJson<ReviewListOk>({
+      community: {
+        id: community.id,
+        handle: communityHandle,
+        name: community.name,
+        avatarUrl: community.avatarUrl ?? null,
+      },
       applications: apps.map((a) => ({
         id: a.id,
+        status: a.status,
         createdAt: a.createdAt.toISOString(),
         answers: a.answers,
+        reviewedAt: a.reviewedAt?.toISOString() ?? null,
+        reviewNote: a.reviewNote ?? null,
         user: {
           id: a.user.id,
           handle: handleByUserId.get(a.user.id) ?? null,
@@ -313,7 +355,11 @@ export async function POST(req: NextRequest) {
     // Idempotency: if already reviewed, return ok only when the decision matches.
     if (app.status !== MembershipStatus.PENDING) {
       const desired =
-        decision === "APPROVE" ? MembershipStatus.APPROVED : MembershipStatus.REJECTED;
+        decision === "APPROVE"
+          ? MembershipStatus.APPROVED
+          : decision === "BAN"
+            ? MembershipStatus.BANNED
+            : MembershipStatus.REJECTED;
 
       if (app.status === desired) {
         return okJson<ReviewOk>({
@@ -322,16 +368,23 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      return errJson({
-        code: "CONFLICT",
-        message: "Application is already reviewed",
-        status: 409,
-      });
+      // Allow banning even if already rejected (escalation)
+      if (decision !== "BAN") {
+        return errJson({
+          code: "CONFLICT",
+          message: "Application is already reviewed",
+          status: 409,
+        });
+      }
     }
 
     const now = new Date();
     const nextStatus: MembershipStatus =
-      decision === "APPROVE" ? MembershipStatus.APPROVED : MembershipStatus.REJECTED;
+      decision === "APPROVE"
+        ? MembershipStatus.APPROVED
+        : decision === "BAN"
+          ? MembershipStatus.BANNED
+          : MembershipStatus.REJECTED;
 
     const updated = await db.$transaction(async (tx) => {
       const updatedApp = await tx.application.update({
@@ -369,14 +422,15 @@ export async function POST(req: NextRequest) {
           select: { id: true },
         });
       } else {
-        // Reject: do not create a membership row; if one exists, mark it rejected.
+        // Reject or ban: do not create a membership row; if one exists, update status.
+        const memberStatus = decision === "BAN" ? MembershipStatus.BANNED : MembershipStatus.REJECTED;
         await tx.membership.updateMany({
           where: {
             userId: app.userId,
             communityId: app.communityId,
           },
           data: {
-            status: MembershipStatus.REJECTED,
+            status: memberStatus,
           },
         });
       }
