@@ -7,6 +7,7 @@ import Twitter from "next-auth/providers/twitter";
 import { HandleOwnerType } from "@prisma/client";
 
 import { db } from "@/lib/db/client";
+import { mirrorUrlToR2 } from "@/lib/r2";
 import { ROUTES } from "@/lib/routes";
 
 const isDev = process.env.NODE_ENV !== "production";
@@ -39,6 +40,28 @@ function discordImageUrl(profile: unknown, fallback: string | null | undefined):
     );
   }
   return fallback ?? null;
+}
+
+function isExternalUrl(url: string): boolean {
+  const r2Base = process.env.R2_PUBLIC_BASE_URL;
+  return !r2Base || !url.includes(r2Base);
+}
+
+/** Mirror an external avatar URL to R2, then update the user record. */
+function mirrorAvatarToR2(userId: string, externalUrl: string) {
+  const nonce = crypto.randomUUID();
+  mirrorUrlToR2({ url: externalUrl, key: `avatars/users/${userId}/${nonce}.png` })
+    .then((r2Url) => {
+      if (!r2Url) return;
+      return db.user.update({
+        where: { id: userId },
+        data: { avatarUrl: r2Url },
+        select: { id: true },
+      });
+    })
+    .catch((err) => {
+      if (isDev) console.warn("[auth] failed to mirror avatar to R2", err);
+    });
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -77,13 +100,24 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             data: {
               discordId,
               discordHandle,
-              // For now store provider image URL; later we can mirror to R2 and overwrite.
               avatarUrl: imageUrl,
               image: imageUrl,
               lastActiveAt: new Date(),
             },
             select: { id: true },
           });
+
+          // Mirror external avatar to R2 in the background (non-blocking).
+          // Only mirror if the user doesn't already have an R2-hosted avatar.
+          if (imageUrl && user.id) {
+            const existing = await db.user.findUnique({
+              where: { id: user.id },
+              select: { avatarUrl: true },
+            });
+            if (!existing?.avatarUrl || isExternalUrl(existing.avatarUrl)) {
+              mirrorAvatarToR2(user.id, imageUrl);
+            }
+          }
         } catch (err) {
           // Don't block sign-in if this write fails.
           if (isDev) console.warn("[auth] failed to persist discord profile fields", err);

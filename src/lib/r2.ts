@@ -117,6 +117,35 @@ export async function putR2Object(params: {
   return { key: params.key, publicUrl };
 }
 
+/**
+ * Fetches an external image URL and uploads it to R2.
+ * Returns the R2 public URL, or null if the fetch/upload fails.
+ */
+export async function mirrorUrlToR2(params: {
+  url: string;
+  key: string;
+}): Promise<string | null> {
+  try {
+    const res = await fetch(params.url, { redirect: "follow" });
+    if (!res.ok) return null;
+
+    const contentType = res.headers.get("content-type") ?? "image/png";
+    const body = new Uint8Array(await res.arrayBuffer());
+    if (body.length === 0) return null;
+
+    const result = await putR2Object({
+      key: params.key,
+      body,
+      contentType,
+      cacheControl: "public, max-age=31536000, immutable",
+    });
+
+    return result.publicUrl ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function signR2Upload(params: {
   key: string;
   contentType: string;

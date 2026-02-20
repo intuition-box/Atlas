@@ -8,6 +8,7 @@ import { db } from "@/lib/db/client";
 import { HandleSchema } from "@/lib/handle";
 import { claimHandle, resolveHandleNameForOwner } from "@/lib/handle-registry";
 import type { HandleProblem } from "@/lib/handle-registry";
+import { mirrorUrlToR2 } from "@/lib/r2";
 import { requireCsrf } from "@/lib/security/csrf";
 
 export const runtime = "nodejs";
@@ -17,7 +18,7 @@ type UpdateUserOk = {
     id: string;
     handle: string | null;
     name: string | null;
-    image: string | null;
+    avatarUrl: string | null;
     headline: string | null;
     bio: string | null;
     location: string | null;
@@ -125,6 +126,17 @@ export async function POST(req: NextRequest) {
 
     const input = parsed.data;
 
+    // Mirror external avatar URLs to R2 so we never persist third-party CDN URLs.
+    let avatarUrl: string | null | undefined = input.image;
+    if (avatarUrl && !avatarUrl.includes(process.env.R2_PUBLIC_BASE_URL ?? "__r2__")) {
+      const nonce = crypto.randomUUID();
+      const r2Url = await mirrorUrlToR2({
+        url: avatarUrl,
+        key: `avatars/users/${userId}/${nonce}.png`,
+      });
+      if (r2Url) avatarUrl = r2Url;
+    }
+
     const { updated, handleName } = await db.$transaction(async (tx) => {
       // Claim handle before updating other fields — if this fails, the whole tx rolls back.
       if (input.handle !== undefined) {
@@ -141,7 +153,7 @@ export async function POST(req: NextRequest) {
           where: { id: userId },
           data: {
             ...(input.name !== undefined ? { name: input.name } : {}),
-            ...(input.image !== undefined ? { image: input.image } : {}),
+            ...(input.image !== undefined ? { avatarUrl } : {}),
             ...(input.headline !== undefined ? { headline: input.headline } : {}),
             ...(input.bio !== undefined ? { bio: input.bio } : {}),
             ...(input.location !== undefined ? { location: input.location } : {}),
@@ -154,7 +166,7 @@ export async function POST(req: NextRequest) {
           select: {
             id: true,
             name: true,
-            image: true,
+            avatarUrl: true,
             headline: true,
             bio: true,
             location: true,
@@ -179,7 +191,7 @@ export async function POST(req: NextRequest) {
         id: updated.id,
         handle: handleName,
         name: updated.name,
-        image: updated.image,
+        avatarUrl: updated.avatarUrl,
         headline: updated.headline,
         bio: updated.bio,
         location: updated.location,

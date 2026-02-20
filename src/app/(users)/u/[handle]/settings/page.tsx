@@ -67,7 +67,7 @@ const SettingsSchema = z.object({
   languages: z.array(z.string()),
   skills: z.array(z.string()),
   tools: z.array(z.string().max(80, "Tool is too long")),
-  image: z.string().optional(),
+  avatarUrl: z.string().url("Enter a valid image URL").optional().or(z.literal("")),
   contactPreference: z.enum(["discord", "email", "telegram", "x", ""]).optional(),
 })
 
@@ -78,7 +78,7 @@ type SettingsValues = z.infer<typeof SettingsSchema>
 type UserData = {
   handle: string | null
   name: string | null
-  image: string | null
+  avatarUrl: string | null
   headline: string | null
   bio: string | null
   location: string | null
@@ -344,14 +344,15 @@ function SettingsSkeleton() {
 
 function ProfileSection({
   form,
+  avatarUrl,
   onAvatarError,
   currentHandle,
 }: {
   form: ReturnType<typeof useForm<SettingsValues>>
+  avatarUrl: string | undefined
   onAvatarError: (message: string) => void
   currentHandle: string
 }) {
-  const avatarValue = form.watch("image")
   const watchedName = form.watch("name")
 
   return (
@@ -362,26 +363,26 @@ function ProfileSection({
       </CardHeader>
 
       <CardContent className="flex flex-col gap-6">
-        <Field data-slot="settings-avatar" name="image" invalid={!!form.formState.errors.image}>
+        <Field data-slot="settings-avatar" name="avatarUrl" invalid={!!form.formState.errors.avatarUrl}>
           <FieldLabel>Avatar</FieldLabel>
-          <FieldDescription>A photo that represents you across the platform.</FieldDescription>
+          <FieldDescription>A photo or image that represents you across the platform.</FieldDescription>
 
           <div className="flex justify-center rounded-xl border border-dashed border-border p-6">
             <AvatarDropzone
-              value={String(avatarValue || "") || null}
+              value={String(avatarUrl || "") || null}
               alt="Avatar"
               className="flex flex-col items-center text-center"
               uploadType="user.avatar"
               onChange={(url) => {
                 form.clearErrors("root")
-                form.setValue("image", url ?? "", { shouldDirty: true, shouldTouch: true })
+                form.setValue("avatarUrl", url ?? "", { shouldDirty: true, shouldTouch: true })
               }}
               onError={onAvatarError}
             />
           </div>
 
-          {form.formState.errors.image?.message && (
-            <FieldError>{String(form.formState.errors.image.message)}</FieldError>
+          {form.formState.errors.avatarUrl?.message && (
+            <FieldError>{String(form.formState.errors.avatarUrl.message)}</FieldError>
           )}
         </Field>
 
@@ -1114,7 +1115,7 @@ export default function UserSettingsPage() {
       languages: [],
       skills: [],
       tools: [],
-      image: "",
+      avatarUrl: "",
       contactPreference: "",
     },
     mode: "onBlur",
@@ -1140,7 +1141,7 @@ export default function UserSettingsPage() {
         languages: Array.isArray(userData.languages) ? userData.languages : [],
         skills: Array.isArray(userData.skills) ? userData.skills : [],
         tools: Array.isArray(userData.tags) ? userData.tags : [],
-        image: userData.image ?? "",
+        avatarUrl: userData.avatarUrl ?? "",
         contactPreference: (userData.contactPreference ?? "") as SettingsValues["contactPreference"],
       },
       { keepDirty: false }
@@ -1177,7 +1178,7 @@ export default function UserSettingsPage() {
       languages: normalizeStringArray(values.languages),
       skills: normalizeStringArray(values.skills),
       tags: normalizeStringArray(values.tools),
-      image: optionalString(values.image) ?? null,
+      image: optionalString(values.avatarUrl) ?? null,
       contactPreference: values.contactPreference || null,
     }
 
@@ -1230,7 +1231,7 @@ export default function UserSettingsPage() {
         <PageHeader
           leading={
             <Avatar className="h-12 w-12">
-              <AvatarImage src={form.watch("image") || userData?.image || undefined} alt={`@${handle}`} />
+              <AvatarImage src={form.watch("avatarUrl") || userData?.avatarUrl || undefined} alt={`@${handle}`} referrerPolicy="no-referrer" />
               <AvatarFallback>{String(handle || "?").slice(0, 1).toUpperCase()}</AvatarFallback>
             </Avatar>
           }
@@ -1262,6 +1263,7 @@ export default function UserSettingsPage() {
 
         <ProfileSection
           form={form}
+          avatarUrl={form.watch("avatarUrl") || userData?.avatarUrl || undefined}
           onAvatarError={handleAvatarError}
           currentHandle={handle}
         />
