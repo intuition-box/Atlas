@@ -7,8 +7,11 @@ import { useSession } from "next-auth/react"
 import {
   ArrowDownLeft,
   ArrowUpRight,
+  LayoutGrid,
   Link2,
+  List,
   Loader2,
+  RefreshCw,
   Undo2,
   X,
 } from "lucide-react"
@@ -16,13 +19,14 @@ import {
 import { cn } from "@/lib/utils"
 import { apiGet, apiPost } from "@/lib/api/client"
 import { sounds } from "@/lib/sounds"
-import { ROUTES, userPath } from "@/lib/routes"
+import { ROUTES, userPath, userAttestationsPath, userSettingsPath } from "@/lib/routes"
 import { ATTESTATION_TYPES, ATTESTATION_TYPE_LIST, type AttestationType } from "@/lib/attestations/definitions"
 import { AttestationBadge } from "@/components/attestation/badge"
 import { OnchainBanner } from "@/components/attestation/onchain-banner"
 import { useAttestationQueue } from "@/components/attestation/queue-provider"
 
 import { PageHeader } from "@/components/common/page-header"
+import { PageHeaderMenu } from "@/components/common/page-header-menu"
 import { ProfileAvatar } from "@/components/common/profile-avatar"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -32,6 +36,7 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { InfiniteScroll } from "@/components/ui/infinite-scroll"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
@@ -743,10 +748,18 @@ function AttestationsSkeleton() {
 function FiltersPanel({
   filters,
   onFiltersChange,
+  onClearAll,
+  itemCount,
+  hasMore,
 }: {
   filters: FilterState
   onFiltersChange: (updates: Partial<FilterState>) => void
+  onClearAll: () => void
+  itemCount: number
+  hasMore: boolean
 }) {
+  const active = hasActiveFilters(filters)
+
   return (
     <Card aria-label="Attestation filters" className="bg-card/30 border-border/30">
       <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -806,6 +819,20 @@ function FiltersPanel({
             </SelectContent>
           </Select>
         </div>
+
+        {active && (
+          <>
+            <Separator className="sm:col-span-2 lg:col-span-3" />
+            <div className="flex items-center justify-center gap-2 sm:col-span-2 lg:col-span-3">
+              <Badge variant="secondary">
+                {itemCount}{hasMore ? "+" : ""} attestations
+              </Badge>
+              <Button type="button" variant="destructive" size="sm" onClick={onClearAll}>
+                Clear filters
+              </Button>
+            </div>
+          </>
+        )}
       </CardContent>
     </Card>
   )
@@ -1139,10 +1166,26 @@ export default function AttestationsPage() {
     })
   }
 
+  const [refreshing, setRefreshing] = React.useState(false)
+  const refreshStartedRef = React.useRef(false)
+
   function handleRefresh() {
+    setRefreshing(true)
+    refreshStartedRef.current = false
     setCursor(null)
     setRefreshKey((k) => k + 1)
   }
+
+  // Clear refreshing once the fetch cycle completes (filtering: false→true→false)
+  React.useEffect(() => {
+    if (!refreshing) return
+    if (filtering || loading) {
+      refreshStartedRef.current = true
+    } else if (refreshStartedRef.current) {
+      setRefreshing(false)
+      refreshStartedRef.current = false
+    }
+  }, [refreshing, filtering, loading])
 
   if (!handle) return null
 
@@ -1160,25 +1203,28 @@ export default function AttestationsPage() {
         actionsAsFormActions={false}
         actions={
           <div className="flex items-center gap-2">
-            {activeFilters && (
-              <Button type="button" variant="ghost" onClick={handleClearAll}>
-                Reset
-              </Button>
-            )}
-            <Button type="button" variant={isFiltersOpen ? "default" : "secondary"} onClick={() => setIsFiltersOpen((v) => !v)}>
-              {isFiltersOpen ? "Hide filters" : "Show filters"}
+            <Button type="button" variant="secondary" disabled={refreshing} onClick={handleRefresh}>
+              {refreshing && <RefreshCw className="size-4 animate-spin" />}
+              {refreshing ? "Refreshing…" : "Refresh"}
             </Button>
-            <Button type="button" variant="secondary" onClick={handleRefresh}>
-              Refresh
+            <Button type="button" variant={isFiltersOpen ? "default" : "secondary"} onClick={() => setIsFiltersOpen((v) => !v)}>
+              Filters
             </Button>
             <Tabs className="gap-0" value={view} onValueChange={(v) => setView(v === "list" ? "list" : "cards")}>
               <TabsList>
-                <TabsTrigger value="cards">Cards</TabsTrigger>
-                <TabsTrigger value="list">List</TabsTrigger>
+                <TabsTrigger value="cards" aria-label="Cards view" className="cursor-pointer px-3 !border-transparent data-active:!bg-primary data-active:!text-primary-foreground"><LayoutGrid className="size-4" /></TabsTrigger>
+                <TabsTrigger value="list" aria-label="List view" className="cursor-pointer px-3 !border-transparent data-active:!bg-primary data-active:!text-primary-foreground"><List className="size-4" /></TabsTrigger>
               </TabsList>
               <TabsContent value="cards" />
               <TabsContent value="list" />
             </Tabs>
+            <PageHeaderMenu
+              items={[
+                { label: "Profile", href: userPath(handle) },
+                { label: "Attestations", href: userAttestationsPath(handle) },
+                { label: "Settings", href: userSettingsPath(handle) },
+              ]}
+            />
           </div>
         }
       />
@@ -1200,29 +1246,10 @@ export default function AttestationsPage() {
         <FiltersPanel
           filters={filters}
           onFiltersChange={handleFiltersChange}
+          onClearAll={handleClearAll}
+          itemCount={items.length}
+          hasMore={!!nextCursor}
         />
-      )}
-
-      {activeFilters && (
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="secondary">
-            {items.length}
-            {nextCursor ? "+" : ""} attestations
-          </Badge>
-          {filters.type && (
-            <Badge variant="outline" className="gap-1.5">
-              <AttestationBadge type={filters.type} bare />
-              <button
-                type="button"
-                className="inline-flex size-3.5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
-                onClick={() => handleFiltersChange({ type: "" })}
-                aria-label="Remove type filter"
-              >
-                <X className="size-3" />
-              </button>
-            </Badge>
-          )}
-        </div>
       )}
 
       {error && (

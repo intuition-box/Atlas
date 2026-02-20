@@ -10,7 +10,7 @@ import { Loader2, X } from "lucide-react"
 
 import { apiGet, apiPost } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
-import { userPath, userSettingsPath } from "@/lib/routes"
+import { userPath, userSettingsPath, userAttestationsPath } from "@/lib/routes"
 import { COUNTRIES } from "@/config/countries"
 import { LANGUAGE_LIST as LANGUAGES } from "@/config/languages"
 import { SKILL_LIST as SKILLS, TOOL_LIST as TOOLS } from "@/lib/attestations/definitions"
@@ -18,6 +18,7 @@ import { SKILL_LIST as SKILLS, TOOL_LIST as TOOLS } from "@/lib/attestations/def
 import { AvatarDropzone } from "@/components/common/avatar-dropzone"
 import { HandleField } from "@/components/common/handle-field"
 import { PageHeader } from "@/components/common/page-header"
+import { PageHeaderMenu } from "@/components/common/page-header-menu"
 import { ProfileAvatar } from "@/components/common/profile-avatar"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import {
@@ -1325,16 +1326,25 @@ export default function UserSettingsPage() {
           leading={
             <ProfileAvatar type="user" src={form.watch("avatarUrl") || (formReady ? undefined : userData?.avatarUrl) || undefined} name={`@${handle}`} className="h-12 w-12" />
           }
-          title="Account settings"
+          title="Settings"
           description={`@${handle}`}
           actions={
             <FormActions className="flex items-center gap-3">
-              <Button type="button" variant="secondary" onClick={handleCancel}>
-                View
-              </Button>
-              <Button type="submit" disabled={!form.formState.isDirty || form.formState.isSubmitting}>
+              <Button
+                type="submit"
+                variant="secondary"
+                disabled={!form.formState.isDirty || form.formState.isSubmitting}
+                className={form.formState.isDirty ? "!bg-emerald-500/10 !text-emerald-500 hover:!bg-emerald-500/20" : ""}
+              >
                 {form.formState.isSubmitting ? "Saving…" : "Save"}
               </Button>
+              <PageHeaderMenu
+                items={[
+                  { label: "Profile", href: userPath(handle) },
+                  { label: "Attestations", href: userAttestationsPath(handle) },
+                  { label: "Settings", href: userSettingsPath(handle) },
+                ]}
+              />
             </FormActions>
           }
         />

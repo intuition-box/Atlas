@@ -10,25 +10,37 @@ import {
   SelectContent,
   SelectGroup,
   SelectItem,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
 
-interface NavMenuItem {
+interface NavMenuLink {
+  type?: "link"
   label: string
   href: string
 }
 
+interface NavMenuSeparator {
+  type: "separator"
+}
+
+type NavMenuItem = NavMenuLink | NavMenuSeparator
+
 interface PageHeaderMenuProps {
-  /** Navigation links. The first item is selected by default. */
+  /** Navigation links and separators. The first link item is used as the trigger label. */
   items: NavMenuItem[]
   className?: string
+}
+
+function isLink(item: NavMenuItem): item is NavMenuLink {
+  return item.type !== "separator"
 }
 
 /**
  * Select-based navigation for page headers.
  *
- * The trigger displays the first item's label ("Profile").
+ * The trigger displays the first link item's label ("Profile").
  * Hovering opens the dropdown; clicking the trigger navigates to the first item's href.
  * Selecting any other item navigates to that item's href.
  */
@@ -38,7 +50,8 @@ export function PageHeaderMenu({ items, className }: PageHeaderMenuProps) {
   const hoveringRef = React.useRef(false)
   const triggerRef = React.useRef<HTMLButtonElement>(null)
 
-  if (items.length === 0) return null
+  const linkItems = items.filter(isLink)
+  if (linkItems.length === 0) return null
 
   function handleMouseEnter() {
     hoveringRef.current = true
@@ -78,15 +91,20 @@ export function PageHeaderMenu({ items, className }: PageHeaderMenuProps) {
             e.preventDefault()
           }}
         >
-          <SelectValue>{() => items[0].label}</SelectValue>
+          <SelectValue>{() => linkItems[0].label}</SelectValue>
         </SelectTrigger>
         <SelectContent>
           <SelectGroup>
-            {items.map((item) => (
-              <SelectItem key={item.href} value={item.href} className="cursor-pointer [&_svg]:hidden [&>span:last-child]:hidden">
-                {item.label}
-              </SelectItem>
-            ))}
+            {items.map((item, i) => {
+              if (item.type === "separator") {
+                return <SelectSeparator key={`sep-${i}`} />
+              }
+              return (
+                <SelectItem key={item.href} value={item.href} className="cursor-pointer [&_svg]:hidden [&>span:last-child]:hidden">
+                  {item.label}
+                </SelectItem>
+              )
+            })}
           </SelectGroup>
         </SelectContent>
       </Select>
