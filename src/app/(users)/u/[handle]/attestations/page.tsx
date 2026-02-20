@@ -10,6 +10,7 @@ import {
   Link2,
   Loader2,
   Undo2,
+  X,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -23,10 +24,11 @@ import { useAttestationQueue } from "@/components/attestation/queue-provider"
 
 import { PageHeader } from "@/components/common/page-header"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardAction, CardContent, CardFooter, CardHeader } from "@/components/ui/card"
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { InfiniteScroll } from "@/components/ui/infinite-scroll"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -706,7 +708,7 @@ function AttestationRow({
 
 function AttestationsSkeleton() {
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
+    <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-7 pb-40">
       <div className="w-full flex flex-wrap gap-3 p-5">
         <Skeleton className="size-12 rounded-full" />
         <div className="flex flex-col gap-2">
@@ -720,8 +722,32 @@ function AttestationsSkeleton() {
         </div>
       </div>
 
-      <Skeleton className="h-52 w-full rounded-2xl" />
-      <AttestationsGridSkeleton view="cards" />
+      <Card>
+        <CardHeader className="gap-4">
+          <CardTitle><Skeleton className="h-5 w-48" /></CardTitle>
+          <CardDescription><Skeleton className="h-4 w-86" /></CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col items-center gap-4">
+          <Skeleton className="h-4 w-64" />
+          <Skeleton className="h-4 w-48" />
+          <Skeleton className="h-9 w-32" />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="gap-4">
+          <CardTitle><Skeleton className="h-5 w-24" /></CardTitle>
+          <CardDescription><Skeleton className="h-4 w-86" /></CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 sm:grid-cols-2">
+          <Skeleton className="h-19 w-full" />
+          <Skeleton className="h-19 w-full" />
+          <Skeleton className="h-19 w-full" />
+          <Skeleton className="h-19 w-full" />
+          <Skeleton className="h-19 w-full col-span-2" />
+          <Skeleton className="h-19 w-full col-span-2" />
+        </CardContent>
+      </Card>
     </div>
   )
 }
@@ -1209,7 +1235,7 @@ export default function AttestationsPage() {
                 onClick={() => handleFiltersChange({ type: "" })}
                 aria-label="Remove type filter"
               >
-                ×
+                <X className="size-3" />
               </button>
             </Badge>
           )}
@@ -1217,11 +1243,9 @@ export default function AttestationsPage() {
       )}
 
       {error && (
-        <Card className="border-destructive/30 bg-destructive/5">
-          <CardContent className="text-sm text-destructive" role="alert">
-            {error}
-          </CardContent>
-        </Card>
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
 
       <div aria-live="polite" aria-atomic="true" className="sr-only">
