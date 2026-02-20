@@ -10,11 +10,16 @@ import { normalizeHandle, validateHandle } from "@/lib/handle"
 import {
   communityApplyPath,
   communityMembersPath,
+  communityOrbitPath,
+  communityApplicationsPath,
   communitySettingsPath,
+  communityPath,
   ROUTES,
 } from "@/lib/routes"
 
 import { PageHeader } from "@/components/common/page-header"
+import { PageHeaderMenu } from "@/components/common/page-header-menu"
+import { ProfileAvatar } from "@/components/common/profile-avatar"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
@@ -256,29 +261,36 @@ export default function CommunityProfilePage() {
     <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
       <PageHeader
         leading={
-          <Avatar className="h-12 w-12">
-            <AvatarImage src={avatarSrc} alt={community.name} />
-            <AvatarFallback>{initials(community.name)}</AvatarFallback>
-          </Avatar>
+          <ProfileAvatar
+            type="community"
+            src={avatarSrc}
+            name={community.name}
+            className="h-12 w-12"
+          />
         }
         title={community.name}
         description={`@${handleLabel}`}
         sticky={false}
         actions={
-          <div className="flex items-center gap-2">
-            <Button variant="secondary" render={<Link href={ROUTES.home} />}>
-              Orbit
-            </Button>
-            {isAdmin ? (
-              <Button render={<Link href={communitySettingsPath(handleLabel)} />}>
-                Settings
-              </Button>
-            ) : null}
+          <div className="flex items-center gap-3">
             {viewerMembership?.status !== "APPROVED" && community.isMembershipOpen ? (
               <Button variant="secondary" render={<Link href={communityApplyPath(handleLabel)} />}>
                 Apply
               </Button>
             ) : null}
+            <PageHeaderMenu
+              items={[
+                { label: "Profile", href: communityPath(handleLabel) },
+                { label: "Members", href: communityMembersPath(handleLabel) },
+                { label: "Orbit", href: communityOrbitPath(handleLabel) },
+                ...(isAdmin
+                  ? [
+                      { label: "Applications", href: communityApplicationsPath(handleLabel) },
+                      { label: "Settings", href: communitySettingsPath(handleLabel) },
+                    ]
+                  : []),
+              ]}
+            />
           </div>
         }
         actionsAsFormActions={false}

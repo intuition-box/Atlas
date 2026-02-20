@@ -554,6 +554,8 @@ function ProfileSection({
 
       <CardContent className="flex flex-col gap-6">
         <Field data-slot="community-settings-avatar" name="avatarUrl" invalid={!!form.formState.errors.avatarUrl}>
+          <FieldLabel>Avatar</FieldLabel>
+          <FieldDescription>A photo or image that represents the community across the platform.</FieldDescription>
           <div className="flex justify-center rounded-xl border border-dashed border-border p-6">
             <AvatarDropzone
               value={String(form.watch("avatarUrl") || "") || null}
