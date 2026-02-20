@@ -35,7 +35,7 @@ function RadioIndicator({ className, ...props }: RadioIndicatorProps) {
     <RadioPrimitive.Indicator
       data-slot="radio-indicator"
       className={cn(
-        "group-aria-invalid/radio:text-destructive text-primary-foreground flex items-center justify-center data-[unchecked]:opacity-0",
+        "group-aria-invalid/radio:text-destructive text-primary-foreground absolute inset-0 flex items-center justify-center data-[unchecked]:opacity-0",
         "after:block after:size-2 after:rounded-full after:bg-current",
         className,
       )}
