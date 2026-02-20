@@ -19,7 +19,7 @@ interface NavMenuItem {
   href: string
 }
 
-interface PageHeaderNavMenuProps {
+interface PageHeaderMenuProps {
   /** Navigation links. The first item is selected by default. */
   items: NavMenuItem[]
   className?: string
@@ -32,7 +32,7 @@ interface PageHeaderNavMenuProps {
  * Hovering opens the dropdown; clicking the trigger navigates to the first item's href.
  * Selecting any other item navigates to that item's href.
  */
-export function PageHeaderNavMenu({ items, className }: PageHeaderNavMenuProps) {
+export function PageHeaderMenu({ items, className }: PageHeaderMenuProps) {
   const router = useRouter()
   const [open, setOpen] = React.useState(false)
   const hoveringRef = React.useRef(false)
@@ -71,7 +71,7 @@ export function PageHeaderNavMenu({ items, className }: PageHeaderNavMenuProps) 
         <SelectTrigger
           ref={triggerRef}
           className={cn(
-            "!border-transparent !bg-primary !text-primary-foreground hover:!bg-primary/80 [&_[data-slot=select-icon]]:hidden focus:!ring-0",
+            "!border-transparent !bg-primary !text-primary-foreground font-medium hover:!bg-primary/80 [&_[data-slot=select-icon]]:hidden focus:!ring-0",
             className
           )}
           onClick={(e) => {
