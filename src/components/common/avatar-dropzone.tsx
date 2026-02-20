@@ -7,12 +7,18 @@ import { parseApiError } from "@/lib/api/errors"
 import { cn } from "@/lib/utils"
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Button } from "@/components/ui/button"
 import { User } from "lucide-react"
 
 type SignedUpload = {
   uploadUrl?: string
   publicUrl: string
   headers?: Record<string, string>
+}
+
+export type AvatarDropzoneHandle = {
+  /** Programmatically open the file picker. */
+  openPicker: () => void
 }
 
 export type AvatarDropzoneProps = {
@@ -35,6 +41,10 @@ export type AvatarDropzoneProps = {
   /** Optional hook for custom proxy upload logic. */
   upload?: (file: File) => Promise<{ publicUrl: string }>
   onError?: (message: string) => void
+  /** Called when the user clicks the Delete button. When provided, Delete/Upload buttons are shown below the avatar. */
+  onDelete?: () => void
+  /** Whether a delete operation is in progress (disables the Delete button and shows "Deleting…"). */
+  isDeleting?: boolean
 }
 
 function defaultAccept() {
@@ -184,7 +194,7 @@ function isProbablyImage(file: File) {
   return file.type ? file.type.startsWith("image/") : true
 }
 
-function AvatarDropzone({
+const AvatarDropzone = React.forwardRef<AvatarDropzoneHandle, AvatarDropzoneProps>(function AvatarDropzone({
   value,
   alt,
   fallbackIcon: FallbackIcon = User,
@@ -198,7 +208,9 @@ function AvatarDropzone({
   uploadMode = "proxy",
   upload: uploadOverride,
   onError,
-}: AvatarDropzoneProps) {
+  onDelete,
+  isDeleting,
+}, ref) {
   const inputRef = React.useRef<HTMLInputElement | null>(null)
   const dragCounterRef = React.useRef(0)
 
@@ -295,6 +307,8 @@ function AvatarDropzone({
     if (disabled || isUploading) return
     inputRef.current?.click()
   }
+
+  React.useImperativeHandle(ref, () => ({ openPicker }), [disabled, isUploading])
 
   function onKeyDown(e: React.KeyboardEvent) {
     if (disabled || isUploading) return
@@ -417,6 +431,28 @@ function AvatarDropzone({
         Drag and drop an image onto the avatar, or click to choose.
       </p>
 
+      {onDelete ? (
+        <div className="flex justify-center gap-2">
+          <Button
+            type="button"
+            size="xs"
+            variant="destructive"
+            disabled={!normalizedSrc || isDeleting || isUploading}
+            onClick={onDelete}
+          >
+            {isDeleting ? "Deleting…" : "Delete"}
+          </Button>
+          <Button
+            type="button"
+            size="xs"
+            disabled={isUploading || isDeleting}
+            onClick={openPicker}
+          >
+            Upload
+          </Button>
+        </div>
+      ) : null}
+
       {error ? (
         <div className="flex items-start justify-between gap-2">
           <p data-slot="avatar-dropzone-error" className="text-xs text-destructive flex-1">
@@ -434,6 +470,6 @@ function AvatarDropzone({
       ) : null}
     </div>
   )
-}
+})
 
 export { AvatarDropzone }
