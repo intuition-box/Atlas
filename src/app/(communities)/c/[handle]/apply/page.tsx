@@ -10,13 +10,12 @@ import { parseApiError } from "@/lib/api/errors"
 import { communityPath } from "@/lib/routes"
 
 import { PageHeader } from "@/components/common/page-header"
+import { ProfileAvatar } from "@/components/common/profile-avatar"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
 import { Form, FormActions, FormField, fieldControlProps, useForm } from "@/components/ui/form"
-import { Users } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
@@ -514,12 +513,7 @@ export default function CommunityApplyPage() {
         <>
           <PageHeader
             leading={
-              <Avatar className="h-12 w-12">
-                <AvatarImage src={community.avatarUrl ?? undefined} alt={communityName} />
-                <AvatarFallback>
-                  <Users className="size-5 text-muted-foreground" />
-                </AvatarFallback>
-              </Avatar>
+              <ProfileAvatar type="community" src={community.avatarUrl} name={communityName} className="h-12 w-12" />
             }
             title="Apply"
             description={`@${communityHandle}`}
@@ -537,12 +531,7 @@ export default function CommunityApplyPage() {
         <>
           <PageHeader
             leading={
-              <Avatar className="h-12 w-12">
-                <AvatarImage src={community.avatarUrl ?? undefined} alt={communityName} />
-                <AvatarFallback>
-                  <Users className="size-5 text-muted-foreground" />
-                </AvatarFallback>
-              </Avatar>
+              <ProfileAvatar type="community" src={community.avatarUrl} name={communityName} className="h-12 w-12" />
             }
             title="Apply"
             description={`@${communityHandle}`}
@@ -560,12 +549,7 @@ export default function CommunityApplyPage() {
         <>
           <PageHeader
             leading={
-              <Avatar className="h-12 w-12">
-                <AvatarImage src={community.avatarUrl ?? undefined} alt={communityName} />
-                <AvatarFallback>
-                  <Users className="size-5 text-muted-foreground" />
-                </AvatarFallback>
-              </Avatar>
+              <ProfileAvatar type="community" src={community.avatarUrl} name={communityName} className="h-12 w-12" />
             }
             title="Apply"
             description={`@${communityHandle}`}
@@ -581,10 +565,7 @@ export default function CommunityApplyPage() {
         <Form form={form} onSubmit={handleSubmit} className="gap-10">
           <PageHeader
             leading={
-              <Avatar className="h-12 w-12">
-                <AvatarImage src={community.avatarUrl ?? undefined} alt={communityName} />
-                <AvatarFallback><Users className="size-5 text-muted-foreground" /></AvatarFallback>
-              </Avatar>
+              <ProfileAvatar type="community" src={community.avatarUrl} name={communityName} className="h-12 w-12" />
             }
             title="Apply"
             description={`@${communityHandle}`}

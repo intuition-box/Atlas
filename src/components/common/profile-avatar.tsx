@@ -30,7 +30,7 @@ export function ProfileAvatar({
 
   return (
     <Avatar size={size} className={className}>
-      <AvatarImage src={src ?? undefined} alt={name ?? ""} />
+      <AvatarImage src={src ?? undefined} alt={name ?? ""} referrerPolicy="no-referrer" />
       <AvatarFallback>
         <FallbackIcon
           className={cn("text-muted-foreground", FALLBACK_ICON_SIZE[size])}

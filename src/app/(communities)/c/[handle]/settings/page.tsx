@@ -559,7 +559,7 @@ function ProfileSection({
           <FieldDescription>A photo or image that represents the community across the platform.</FieldDescription>
           <div className="flex justify-center rounded-xl border border-dashed border-border p-6">
             <AvatarDropzone
-              value={String(form.watch("avatarUrl") || "") || null}
+              value={form.watch("avatarUrl") || community?.avatarUrl || null}
               alt="Community avatar"
               fallbackIcon={Users}
               className="flex flex-col items-center text-center"
@@ -569,6 +569,10 @@ function ProfileSection({
                 form.setValue("avatarUrl", url ?? "", { shouldDirty: true, shouldTouch: true })
               }}
               onError={onAvatarError}
+              onDelete={() => {
+                form.clearErrors("root")
+                form.setValue("avatarUrl", "", { shouldDirty: true, shouldTouch: true })
+              }}
             />
           </div>
 

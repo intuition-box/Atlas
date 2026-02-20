@@ -3,8 +3,6 @@
 import * as React from "react"
 import Link from "next/link"
 import { useParams } from "next/navigation"
-import { User } from "lucide-react"
-
 import { apiGet } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
 import { normalizeHandle, validateHandle } from "@/lib/handle"
@@ -22,7 +20,6 @@ import { PageHeader } from "@/components/common/page-header"
 import { PageHeaderMenu } from "@/components/common/page-header-menu"
 import { ProfileAvatar } from "@/components/common/profile-avatar"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -368,10 +365,7 @@ export default function CommunityProfilePage() {
 
                 return (
                   <div key={m.id} className="flex items-center gap-3">
-                    <Avatar className="size-8">
-                      <AvatarImage src={memberAvatar} alt={memberName} />
-                      <AvatarFallback><User className="size-4 text-muted-foreground" /></AvatarFallback>
-                    </Avatar>
+                    <ProfileAvatar type="user" src={memberAvatar} name={memberName} />
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-medium text-foreground">{memberName}</div>
                       {m.handle ? (

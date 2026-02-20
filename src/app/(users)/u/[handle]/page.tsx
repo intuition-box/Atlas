@@ -3,7 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { useParams } from "next/navigation"
-import { ArrowUpRight, User, Wallet } from "lucide-react"
+import { ArrowUpRight, Wallet } from "lucide-react"
 
 import { apiGet } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
@@ -15,7 +15,6 @@ import { AttestationButtons } from "@/components/attestation/buttons"
 import { PageHeader } from "@/components/common/page-header"
 import { ProfileAvatar } from "@/components/common/profile-avatar"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -360,10 +359,7 @@ export default function UserProfilePage() {
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 mt-24 pb-40">
       <PageHeader
         leading={
-          <Avatar className="h-12 w-12">
-            <AvatarImage src={avatarSrc} alt={displayName} />
-            <AvatarFallback><User className="size-5 text-muted-foreground" /></AvatarFallback>
-          </Avatar>
+          <ProfileAvatar type="user" src={avatarSrc} name={displayName} className="h-12 w-12" />
         }
         title={displayName}
         description={`@${handleLabel}`}

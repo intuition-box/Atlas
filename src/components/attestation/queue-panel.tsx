@@ -4,13 +4,12 @@ import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { X, Save, Loader2, Trash2, ExternalLink, User } from "lucide-react";
+import { X, Save, Loader2, Trash2, ExternalLink } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { apiPost } from "@/lib/api/client";
 import { sounds } from "@/lib/sounds";
 import { userAttestationsPath } from "@/lib/routes";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -26,6 +25,7 @@ import {
 } from "@/components/ui/tooltip";
 import { useAttestationQueue, type QueuedAttestation } from "./queue-provider";
 import { AttestationBadge } from "@/components/attestation/badge";
+import { ProfileAvatar } from "@/components/common/profile-avatar";
 
 /* ────────────────────────────
    Helpers
@@ -44,12 +44,7 @@ function QueueItem({
 }) {
   return (
     <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/30 border border-border/30">
-      <Avatar className="size-9 shrink-0">
-        <AvatarImage src={item.toAvatarUrl ?? ""} alt={item.toName} />
-        <AvatarFallback>
-          <User className="size-4 text-muted-foreground" />
-        </AvatarFallback>
-      </Avatar>
+      <ProfileAvatar type="user" src={item.toAvatarUrl} name={item.toName} className="size-9 shrink-0" />
 
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">

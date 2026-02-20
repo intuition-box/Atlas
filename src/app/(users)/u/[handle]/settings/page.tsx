@@ -6,7 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod"
 import { Controller, useFieldArray } from "react-hook-form"
 import { useParams, useRouter } from "next/navigation"
 import { getSession, signIn, useSession } from "next-auth/react"
-import { Loader2, User, X } from "lucide-react"
+import { Loader2, X } from "lucide-react"
 
 import { apiGet, apiPost } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
@@ -18,6 +18,7 @@ import { SKILL_LIST as SKILLS, TOOL_LIST as TOOLS } from "@/lib/attestations/def
 import { AvatarDropzone } from "@/components/common/avatar-dropzone"
 import { HandleField } from "@/components/common/handle-field"
 import { PageHeader } from "@/components/common/page-header"
+import { ProfileAvatar } from "@/components/common/profile-avatar"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import {
   AlertDialog,
@@ -30,7 +31,6 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -381,7 +381,7 @@ function ProfileSection({
 
           <div className="relative overflow-hidden rounded-xl border border-dashed border-border p-6">
             <AvatarDropzone
-              value={String(avatarUrl || "") || null}
+              value={avatarUrl || null}
               alt="Avatar"
               className="flex flex-col items-center text-center"
               uploadType="user.avatar"
@@ -394,21 +394,9 @@ function ProfileSection({
                 }
               }}
               onError={onAvatarError}
+              onDelete={onDeleteAvatar}
+              isDeleting={avatarStatus.type === "deleting"}
             />
-
-            {avatarUrl ? (
-              <div className="flex justify-center mt-3">
-                <Button
-                  type="button"
-                  size="xs"
-                  variant="destructive"
-                  disabled={avatarStatus.type === "deleting"}
-                  onClick={onDeleteAvatar}
-                >
-                  {avatarStatus.type === "deleting" ? "Deleting…" : "Delete avatar"}
-                </Button>
-              </div>
-            ) : null}
 
             {showOverlay ? (
               <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-card/80 backdrop-blur-sm">
@@ -1311,10 +1299,7 @@ export default function UserSettingsPage() {
       <Form form={form} onSubmit={handleSubmit}>
         <PageHeader
           leading={
-            <Avatar className="h-12 w-12">
-              <AvatarImage src={form.watch("avatarUrl") || userData?.avatarUrl || undefined} alt={`@${handle}`} referrerPolicy="no-referrer" />
-              <AvatarFallback><User className="size-5 text-muted-foreground" /></AvatarFallback>
-            </Avatar>
+            <ProfileAvatar type="user" src={form.watch("avatarUrl") || userData?.avatarUrl || undefined} name={`@${handle}`} className="h-12 w-12" />
           }
           title="Account settings"
           description={`@${handle}`}

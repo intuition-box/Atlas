@@ -10,7 +10,6 @@ import {
   Link2,
   Loader2,
   Undo2,
-  User,
   X,
 } from "lucide-react"
 
@@ -24,9 +23,9 @@ import { OnchainBanner } from "@/components/attestation/onchain-banner"
 import { useAttestationQueue } from "@/components/attestation/queue-provider"
 
 import { PageHeader } from "@/components/common/page-header"
+import { ProfileAvatar } from "@/components/common/profile-avatar"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -387,10 +386,7 @@ function AttestationCard({
       <CardHeader className="flex-row items-center gap-3">
         <div className="flex items-center gap-3">
           <Link href={href} onClick={(e) => e.stopPropagation()}>
-            <Avatar className="size-9">
-              <AvatarImage src={otherUser.avatarUrl ?? undefined} alt={displayName} />
-              <AvatarFallback><User className="size-4 text-muted-foreground" /></AvatarFallback>
-            </Avatar>
+            <ProfileAvatar type="user" src={otherUser.avatarUrl} name={displayName} className="size-9" />
           </Link>
           <div className="min-w-0">
             <Link href={href} className="hover:underline" onClick={(e) => e.stopPropagation()}>
@@ -618,10 +614,7 @@ function AttestationRow({
     >
       <div className="flex items-center min-w-0">
         <Link href={href} className="inline-flex min-w-0 items-center gap-3 rounded-md px-1.5 py-1 -mx-1.5 -my-1 transition-colors hover:text-primary" onClick={(e) => e.stopPropagation()}>
-          <Avatar className="h-8 w-8 shrink-0">
-            <AvatarImage src={otherUser.avatarUrl ?? undefined} alt={displayName} />
-            <AvatarFallback><User className="size-4 text-muted-foreground" /></AvatarFallback>
-          </Avatar>
+          <ProfileAvatar type="user" src={otherUser.avatarUrl} name={displayName} className="h-8 w-8 shrink-0" />
           <div className="min-w-0">
             <div className="truncate font-medium">{displayName}</div>
             {otherUser.handle && (
@@ -1160,10 +1153,7 @@ export default function AttestationsPage() {
     <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
       <PageHeader
         leading={
-          <Avatar className="h-12 w-12">
-            <AvatarImage src={avatarSrc} alt={displayName} />
-            <AvatarFallback><User className="size-5 text-muted-foreground" /></AvatarFallback>
-          </Avatar>
+          <ProfileAvatar type="user" src={avatarSrc} name={displayName} className="h-12 w-12" />
         }
         title="Attestations"
         description={`@${handle}`}
