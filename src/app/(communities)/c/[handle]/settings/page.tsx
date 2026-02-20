@@ -545,6 +545,10 @@ function ProfileSection({
   onAvatarError: (message: string) => void
 }) {
   const watchedName = form.watch("name")
+  const watchedAvatar = form.watch("avatarUrl")
+  // Only fall back to the server value when the form field hasn't been touched yet.
+  // Once the user explicitly clears it, watchedAvatar is "" and we must respect that.
+  const avatarValue = watchedAvatar || (form.formState.dirtyFields.avatarUrl ? null : community?.avatarUrl) || null
 
   return (
     <Card>
@@ -559,7 +563,7 @@ function ProfileSection({
           <FieldDescription>A photo or image that represents the community across the platform.</FieldDescription>
           <div className="flex justify-center rounded-xl border border-dashed border-border p-6">
             <AvatarDropzone
-              value={form.watch("avatarUrl") || community?.avatarUrl || null}
+              value={avatarValue}
               alt="Community avatar"
               fallbackIcon={Users}
               className="flex flex-col items-center text-center"
@@ -573,6 +577,7 @@ function ProfileSection({
                 form.clearErrors("root")
                 form.setValue("avatarUrl", "", { shouldDirty: true, shouldTouch: true })
               }}
+              hasImage={!!avatarValue}
             />
           </div>
 

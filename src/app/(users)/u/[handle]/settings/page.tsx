@@ -1160,6 +1160,10 @@ export default function UserSettingsPage() {
   const { skillOptions, skillQuery, setSkillQuery, addSkillOption } = useSkillsState()
   const { toolOptions, toolQuery, setToolQuery, addToolOption } = useToolsState()
 
+  // Track whether the form has been initialized with server data.
+  // Before initialization, we fall back to userData?.avatarUrl for display.
+  const [formReady, setFormReady] = React.useState(false)
+
   // Initialize form when userData loads
   React.useEffect(() => {
     if (!userData) return
@@ -1178,8 +1182,9 @@ export default function UserSettingsPage() {
         avatarUrl: userData.avatarUrl ?? "",
         contactPreference: (userData.contactPreference ?? "") as SettingsValues["contactPreference"],
       },
-      { keepDirty: false }
+      { keepDirty: false },
     )
+    setFormReady(true)
   }, [userData, form])
 
   // Set error from hook
@@ -1189,9 +1194,6 @@ export default function UserSettingsPage() {
     }
   }, [error, form])
 
-  // Avatar is saved to DB immediately on upload (via /api/upload/sign).
-  // The form field tracks the URL for display only — no dirty flag needed.
-
   const [avatarStatus, setAvatarStatus] = React.useState<AvatarStatus>({ type: "idle" })
 
   function handleAvatarError(message: string) {
@@ -1200,7 +1202,7 @@ export default function UserSettingsPage() {
 
   function handleAvatarUploaded(url: string) {
     form.clearErrors("root")
-    form.setValue("avatarUrl", url, { shouldDirty: false })
+    form.setValue("avatarUrl", url, { shouldDirty: true })
     setAvatarStatus({ type: "uploaded", message: "Avatar uploaded" })
     setTimeout(() => setAvatarStatus({ type: "idle" }), 3_000)
   }
@@ -1213,7 +1215,7 @@ export default function UserSettingsPage() {
       const result = await apiPost<{ deleted: boolean }>("/api/user/avatar/delete", {})
 
       if (result.ok) {
-        form.setValue("avatarUrl", "", { shouldDirty: false })
+        form.setValue("avatarUrl", "", { shouldDirty: true })
         setAvatarStatus({ type: "deleted", message: "Avatar deleted" })
         setTimeout(() => setAvatarStatus({ type: "idle" }), 3_000)
         router.refresh()
@@ -1236,6 +1238,9 @@ export default function UserSettingsPage() {
 
     const trimmedHandle = values.handle.trim()
 
+    // The avatar is persisted to the DB immediately by the upload route (/api/upload/sign),
+    // so we only send `image` when the form field was explicitly changed (dirty).
+    const avatarDirty = form.formState.dirtyFields.avatarUrl
     const payload = {
       // Only send handle when it actually changed to avoid re-claiming the same one.
       ...(trimmedHandle !== handle ? { handle: trimmedHandle } : {}),
@@ -1247,13 +1252,32 @@ export default function UserSettingsPage() {
       languages: normalizeStringArray(values.languages),
       skills: normalizeStringArray(values.skills),
       tags: normalizeStringArray(values.tools),
-      image: optionalString(values.avatarUrl) ?? null,
+      ...(avatarDirty ? { image: optionalString(values.avatarUrl) ?? null } : {}),
       contactPreference: values.contactPreference || null,
     }
 
     const result = await apiPost<UpdateUserResponse>("/api/user/update", payload)
 
     if (result.ok) {
+      // Build a clean plain-object snapshot of the current values to reset the form.
+      // `form.getValues()` can carry react-hook-form internal metadata on array fields
+      // (e.g. `links`) that causes `isDirty` to remain `true` after reset.  Constructing
+      // a fresh object from the Zod-resolved `values` avoids this entirely.
+      const cleanValues: SettingsValues = {
+        handle: values.handle,
+        name: values.name,
+        headline: values.headline,
+        bio: values.bio,
+        location: values.location,
+        links: values.links.map((l) => ({ url: l.url })),
+        languages: [...values.languages],
+        skills: [...values.skills],
+        tools: [...values.tools],
+        avatarUrl: values.avatarUrl,
+        contactPreference: values.contactPreference,
+      }
+      form.reset(cleanValues)
+
       const newHandle = result.value.user.handle
       if (newHandle && newHandle !== handle) {
         router.replace(userSettingsPath(newHandle))
@@ -1299,7 +1323,7 @@ export default function UserSettingsPage() {
       <Form form={form} onSubmit={handleSubmit}>
         <PageHeader
           leading={
-            <ProfileAvatar type="user" src={form.watch("avatarUrl") || userData?.avatarUrl || undefined} name={`@${handle}`} className="h-12 w-12" />
+            <ProfileAvatar type="user" src={form.watch("avatarUrl") || (formReady ? undefined : userData?.avatarUrl) || undefined} name={`@${handle}`} className="h-12 w-12" />
           }
           title="Account settings"
           description={`@${handle}`}
@@ -1329,7 +1353,7 @@ export default function UserSettingsPage() {
 
         <ProfileSection
           form={form}
-          avatarUrl={form.watch("avatarUrl") || userData?.avatarUrl || undefined}
+          avatarUrl={form.watch("avatarUrl") || (formReady ? undefined : userData?.avatarUrl) || undefined}
           onAvatarError={handleAvatarError}
           onAvatarUploaded={handleAvatarUploaded}
           onDeleteAvatar={handleDeleteAvatar}

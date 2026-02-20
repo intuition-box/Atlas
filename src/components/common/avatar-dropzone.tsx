@@ -45,6 +45,8 @@ export type AvatarDropzoneProps = {
   onDelete?: () => void
   /** Whether a delete operation is in progress (disables the Delete button and shows "Deleting…"). */
   isDeleting?: boolean
+  /** Whether there is an existing image that can be deleted. Controls the Delete button disabled state directly. */
+  hasImage?: boolean
 }
 
 function defaultAccept() {
@@ -111,7 +113,6 @@ async function defaultUploadViaApi(file: File, uploadType: string): Promise<{ pu
 
   const payload = unwrapUploadPayload(anyJson)
   const { publicUrl, uploadUrl, headers } = extractUploadFields(payload)
-
   // If the route returned a presigned uploadUrl, we complete the PUT here.
   // If the route already uploaded the file server-side, it should omit uploadUrl.
   if (resp.ok) {
@@ -194,6 +195,46 @@ function isProbablyImage(file: File) {
   return file.type ? file.type.startsWith("image/") : true
 }
 
+function DeleteUploadButtons({
+  hasImage,
+  isDeleting,
+  isUploading,
+  onDelete,
+  onUpload,
+}: {
+  hasImage: boolean
+  isDeleting?: boolean
+  isUploading: boolean
+  onDelete: () => void
+  onUpload: () => void
+}) {
+  const uploadDisabled = isUploading || !!isDeleting
+
+  return (
+    <div className="flex justify-center gap-2 mt-2">
+      {hasImage ? (
+        <Button
+          type="button"
+          size="xs"
+          variant="destructive"
+          disabled={!!isDeleting || isUploading}
+          onClick={onDelete}
+        >
+          {isDeleting ? "Deleting…" : "Delete"}
+        </Button>
+      ) : null}
+      <Button
+        type="button"
+        size="xs"
+        disabled={uploadDisabled}
+        onClick={onUpload}
+      >
+        Upload
+      </Button>
+    </div>
+  )
+}
+
 const AvatarDropzone = React.forwardRef<AvatarDropzoneHandle, AvatarDropzoneProps>(function AvatarDropzone({
   value,
   alt,
@@ -210,6 +251,7 @@ const AvatarDropzone = React.forwardRef<AvatarDropzoneHandle, AvatarDropzoneProp
   onError,
   onDelete,
   isDeleting,
+  hasImage,
 }, ref) {
   const inputRef = React.useRef<HTMLInputElement | null>(null)
   const dragCounterRef = React.useRef(0)
@@ -218,6 +260,7 @@ const AvatarDropzone = React.forwardRef<AvatarDropzoneHandle, AvatarDropzoneProp
   const [isHovering, setIsHovering] = React.useState(false)
   const [isUploading, setIsUploading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
+  const [imageLoaded, setImageLoaded] = React.useState(false)
   // Instant local preview via object URL — shown while the remote URL may still be loading/propagating.
   const [localPreview, setLocalPreview] = React.useState<string | null>(null)
   const localPreviewRef = React.useRef<string | null>(null)
@@ -235,6 +278,17 @@ const AvatarDropzone = React.forwardRef<AvatarDropzoneHandle, AvatarDropzoneProp
     if (localPreview) return localPreview
     const s = typeof value === "string" ? value.trim() : ""
     return s.length > 0 ? s : undefined
+  }, [value, localPreview])
+
+  // When the parent clears the value (e.g. delete), discard the local preview.
+  React.useEffect(() => {
+    const s = typeof value === "string" ? value.trim() : ""
+    if (s.length === 0 && localPreview) {
+      setLocalPreview((prev) => {
+        if (prev) URL.revokeObjectURL(prev)
+        return null
+      })
+    }
   }, [value, localPreview])
 
   // Clear error when value changes (successful upload)
@@ -393,6 +447,7 @@ const AvatarDropzone = React.forwardRef<AvatarDropzoneHandle, AvatarDropzoneProp
             alt={alt}
             // Some OAuth avatar hosts (e.g. Google) can be finicky with referrers.
             referrerPolicy="no-referrer"
+            onLoadingStatusChange={(status) => setImageLoaded(status === "loaded")}
           />
           <AvatarFallback>
             <FallbackIcon />
@@ -432,25 +487,13 @@ const AvatarDropzone = React.forwardRef<AvatarDropzoneHandle, AvatarDropzoneProp
       </p>
 
       {onDelete ? (
-        <div className="flex justify-center gap-2">
-          <Button
-            type="button"
-            size="xs"
-            variant="destructive"
-            disabled={!normalizedSrc || isDeleting || isUploading}
-            onClick={onDelete}
-          >
-            {isDeleting ? "Deleting…" : "Delete"}
-          </Button>
-          <Button
-            type="button"
-            size="xs"
-            disabled={isUploading || isDeleting}
-            onClick={openPicker}
-          >
-            Upload
-          </Button>
-        </div>
+        <DeleteUploadButtons
+          hasImage={hasImage !== undefined ? hasImage : imageLoaded}
+          isDeleting={isDeleting}
+          isUploading={isUploading}
+          onDelete={onDelete}
+          onUpload={openPicker}
+        />
       ) : null}
 
       {error ? (

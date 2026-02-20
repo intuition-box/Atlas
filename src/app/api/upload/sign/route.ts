@@ -240,7 +240,21 @@ export async function POST(req: NextRequest) {
       }
 
       // Persist to DB immediately so the avatar survives page refreshes without saving.
-      await cleanupAndPersistAvatar(input.type, ownerId, publicUrl);
+      // NOTE: We already deleted old avatars via deleteR2Prefix above, so we only need
+      // the DB write here — NOT another prefix cleanup (which would delete the file we just uploaded).
+      if (input.type === "user.avatar") {
+        await db.user.update({
+          where: { id: ownerId },
+          data: { avatarUrl: publicUrl, image: publicUrl },
+          select: { id: true },
+        });
+      } else {
+        await db.community.update({
+          where: { id: ownerId },
+          data: { avatarUrl: publicUrl },
+          select: { id: true },
+        });
+      }
 
       return okJson({ publicUrl, upload: { key, publicUrl } });
     }

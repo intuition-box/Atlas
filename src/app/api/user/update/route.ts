@@ -106,7 +106,8 @@ export async function POST(req: NextRequest) {
 
     const csrf = requireCsrf(req);
     if (!csrf.ok) {
-      return errJson({ code: csrf.error.code, message: csrf.error.message, status: csrf.error.status });
+      // Use 419 so apiPost's CSRF retry logic kicks in (it retries once on 419).
+      return errJson({ code: csrf.error.code, message: csrf.error.message, status: 419 });
     }
 
     const raw = await req.json().catch(() => null);
