@@ -7,13 +7,14 @@ import { useParams, useRouter } from "next/navigation"
 import { getSession } from "next-auth/react"
 import { apiGet, apiPost } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
-import { communityPath, communitySettingsPath } from "@/lib/routes"
+import { communityPath, communitySettingsPath, communityMembersPath, communityOrbitPath, communityApplicationsPath } from "@/lib/routes"
 
 import { AvatarDropzone } from "@/components/common/avatar-dropzone"
 import { HandleField } from "@/components/common/handle-field"
 import { PageHeader } from "@/components/common/page-header"
+import { PageHeaderMenu } from "@/components/common/page-header-menu"
+import { ProfileAvatar } from "@/components/common/profile-avatar"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Form, FormActions, FormField, fieldControlProps, useForm } from "@/components/ui/form"
@@ -23,7 +24,6 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
 import { useFieldArray } from "react-hook-form"
-import { UsersIcon } from "@/components/ui/icons"
 
 // === SCHEMAS ===
 
@@ -188,32 +188,68 @@ function useCommunityData(handle: string) {
 
 function SettingsSkeleton() {
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-7 pb-40">
+    <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
+      {/* PageHeader */}
       <div className="w-full flex flex-wrap gap-3 p-5">
         <Skeleton className="size-12 rounded-full" />
         <div className="flex flex-col gap-2">
           <Skeleton className="h-7 w-48" />
           <Skeleton className="h-3 w-24" />
         </div>
-        <div className="flex gap-3 ml-auto sm:align-center sm:justify-end">
-          <Skeleton className="h-9 w-14" />
-          <Skeleton className="h-9 w-14" />
+        <div className="flex gap-2 ml-auto">
+          <Skeleton className="h-9 w-16 rounded-4xl" />
+          <Skeleton className="h-9 w-20 rounded-4xl" />
         </div>
       </div>
 
-      {/* Section skeletons */}
-      {[1, 2, 3, 4].map((i) => (
-        <Card key={i}>
-          <CardContent className="flex flex-col gap-4 px-5">
-            <div className="flex flex-col gap-1">
-              <Skeleton className="h-4 w-24" />
-              <Skeleton className="h-3 w-56" />
-            </div>
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
-          </CardContent>
-        </Card>
-      ))}
+      {/* Profile */}
+      <Card>
+        <CardHeader>
+          <Skeleton className="h-5 w-20" />
+          <Skeleton className="h-4 w-72" />
+        </CardHeader>
+        <CardContent className="flex flex-col gap-6">
+          <Skeleton className="h-32 w-full rounded-xl" />
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-24 w-full" />
+        </CardContent>
+      </Card>
+
+      {/* Privacy & access */}
+      <Card>
+        <CardHeader>
+          <Skeleton className="h-5 w-32" />
+          <Skeleton className="h-4 w-80" />
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <Skeleton className="h-16 w-full rounded-2xl" />
+          <Skeleton className="h-16 w-full rounded-2xl" />
+        </CardContent>
+      </Card>
+
+      {/* Application questions */}
+      <Card>
+        <CardHeader>
+          <Skeleton className="h-5 w-40" />
+          <Skeleton className="h-4 w-96" />
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-9 w-28 rounded-4xl" />
+        </CardContent>
+      </Card>
+
+      {/* Danger zone */}
+      <Card>
+        <CardHeader>
+          <Skeleton className="h-5 w-24" />
+          <Skeleton className="h-4 w-64" />
+        </CardHeader>
+        <CardContent>
+          <Skeleton className="h-28 w-full rounded-2xl" />
+        </CardContent>
+      </Card>
     </div>
   )
 }
@@ -421,25 +457,37 @@ export default function CommunitySettingsPage() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-10 pb-40">
+    <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
       <Form form={form} onSubmit={handleSubmit}>
         <PageHeader
           leading={
-            <Avatar className="h-12 w-12">
-              <AvatarImage src={form.watch("avatarUrl") || community?.avatarUrl || undefined} alt={communityName} />
-              <AvatarFallback><UsersIcon /></AvatarFallback>
-            </Avatar>
+            <ProfileAvatar
+              type="community"
+              src={form.watch("avatarUrl") || community?.avatarUrl}
+              name={communityName}
+              className="h-12 w-12"
+            />
           }
           title="Settings"
           description={`@${communityHandle}`}
           actions={
             <FormActions className="flex items-center gap-3">
-              <Button type="button" variant="secondary" onClick={() => router.replace(communityPath(communityHandle))}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={isLoading || !community || form.formState.isSubmitting}>
+              <Button
+                type="submit"
+                variant="secondary"
+                disabled={!form.formState.isDirty || form.formState.isSubmitting}
+                className={form.formState.isDirty ? "!bg-emerald-500/10 !text-emerald-500 hover:!bg-emerald-500/20" : ""}
+              >
                 {form.formState.isSubmitting ? "Saving…" : "Save"}
               </Button>
+              <PageHeaderMenu
+                items={[
+                  { label: "Profile", href: communityPath(communityHandle) },
+                  { label: "Members", href: communityMembersPath(communityHandle) },
+                  { label: "Orbit", href: communityOrbitPath(communityHandle) },
+                  { label: "Applications", href: communityApplicationsPath(communityHandle) },
+                ]}
+              />
             </FormActions>
           }
         />
@@ -504,10 +552,8 @@ function ProfileSection({
         <CardDescription>Basic details people see on the community page.</CardDescription>
       </CardHeader>
 
-      <CardContent className="flex flex-col gap-6 px-5">
+      <CardContent className="flex flex-col gap-6">
         <Field data-slot="community-settings-avatar" name="avatarUrl" invalid={!!form.formState.errors.avatarUrl}>
-          <FieldLabel>Avatar</FieldLabel>
-
           <div className="flex justify-center rounded-xl border border-dashed border-border p-6">
             <AvatarDropzone
               value={String(form.watch("avatarUrl") || "") || null}
@@ -579,11 +625,9 @@ function PrivacySection({ form }: { form: ReturnType<typeof useForm<CommunitySet
         <CardDescription>Control what non-members can see and whether applications are allowed.</CardDescription>
       </CardHeader>
 
-      <CardContent className="flex flex-col gap-4 px-5">
+      <CardContent className="flex flex-col gap-4">
         <FormField<CommunitySettingsValues, "isPublicDirectory">
           name="isPublicDirectory"
-          label="Public directory"
-          description="If off, only approved members can see the member directory. Non-members see a splash + apply CTA."
           render={({ id, field }) => (
             <div className="flex items-center justify-between gap-3 rounded-2xl border border-border/60 p-4">
               <div className="flex flex-col gap-1">
@@ -599,8 +643,6 @@ function PrivacySection({ form }: { form: ReturnType<typeof useForm<CommunitySet
 
         <FormField<CommunitySettingsValues, "isMembershipOpen">
           name="isMembershipOpen"
-          label="Accepting applications"
-          description="If off, non-members won't see the apply CTA (and we may 404 to avoid leaking closed spaces)."
           render={({ id, field }) => (
             <div className="flex items-center justify-between gap-3 rounded-2xl border border-border/60 p-4">
               <div className="flex flex-col gap-1">
@@ -632,7 +674,7 @@ function ApplicationQuestionsSection({
         <CardDescription>These questions appear on the apply page when applications are open. Keep them short and focused.</CardDescription>
       </CardHeader>
 
-      <CardContent className="flex flex-col gap-4 px-5">
+      <CardContent className="flex flex-col gap-4">
         {questions.fields.length > 0 ? (
           <div className="flex flex-col gap-3">
             {questions.fields.map((q, index) => (
@@ -651,8 +693,8 @@ function ApplicationQuestionsSection({
         )}
 
         <div>
-          <Button type="button" variant="secondary" onClick={onAddQuestion}>
-            + Add question
+          <Button type="button" onClick={onAddQuestion}>
+            Add question
           </Button>
         </div>
       </CardContent>
@@ -796,7 +838,7 @@ function DangerZoneSection({
         <CardDescription>Destructive actions. More actions can be wired later.</CardDescription>
       </CardHeader>
 
-      <CardContent className="px-5">
+      <CardContent>
         <div className="flex flex-col gap-3 rounded-2xl border border-destructive/30 bg-destructive/5 p-4">
           <div className="flex flex-col gap-1">
             <div className="text-sm font-medium">Delete community</div>

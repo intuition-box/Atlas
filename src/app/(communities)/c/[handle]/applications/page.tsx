@@ -7,9 +7,10 @@ import { RefreshCw } from "lucide-react"
 
 import { apiGet, apiPost } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
-import { ROUTES, userPath, communityPath } from "@/lib/routes"
+import { ROUTES, userPath, communityPath, communityMembersPath, communityOrbitPath, communitySettingsPath } from "@/lib/routes"
 
 import { PageHeader } from "@/components/common/page-header"
+import { PageHeaderMenu } from "@/components/common/page-header-menu"
 import { ProfileAvatar } from "@/components/common/profile-avatar"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -541,7 +542,7 @@ function ApplicationDialog({
         }
       }}
     >
-      <DialogContent className="sm:max-w-3xl" showCloseButton={false}>
+      <DialogContent className="sm:max-w-3xl [&_a:focus-visible]:outline-none [&_button:focus-visible]:outline-none [&_a:focus-visible]:ring-0 [&_button:focus-visible]:ring-0" showCloseButton={false} initialFocus={false}>
         <div className="flex items-center gap-3">
           {active && (
             <Link
@@ -611,12 +612,11 @@ function ApplicationDialog({
           </div>
         )}
 
-        <DialogFooter className="mt-6 flex-col-reverse sm:flex-row sm:justify-between gap-3">
+        <DialogFooter className="flex-col-reverse sm:flex-row sm:justify-between gap-3">
           {active && !isBanned ? (
             <Button
               type="button"
               variant="destructive"
-              size="sm"
               disabled={acting !== null}
               onClick={() => onDecide(active, "ban")}
             >
@@ -631,7 +631,6 @@ function ApplicationDialog({
               <Button
                 type="button"
                 variant="destructive"
-                size="sm"
                 disabled={acting !== null}
                 onClick={() => onDecide(active, "reject")}
               >
@@ -764,7 +763,7 @@ export default function CommunityApplicationsPage() {
 
   if (!handle) return null
 
-  if (loading) {
+  if (loading || !data) {
     return <ApplicationsSkeleton />
   }
 
@@ -791,9 +790,14 @@ export default function CommunityApplicationsPage() {
               {refreshing && <RefreshCw className="size-4 animate-spin" />}
               {refreshing ? "Refreshing…" : "Refresh"}
             </Button>
-            <Button type="button" render={<Link href={communityPath(handle)} />}>
-              Profile
-            </Button>
+            <PageHeaderMenu
+              items={[
+                { label: "Profile", href: communityPath(handle) },
+                { label: "Members", href: communityMembersPath(handle) },
+                { label: "Orbit", href: communityOrbitPath(handle) },
+                { label: "Settings", href: communitySettingsPath(handle) },
+              ]}
+            />
           </div>
         }
       />
