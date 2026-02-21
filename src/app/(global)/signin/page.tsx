@@ -57,12 +57,12 @@ export default async function SignInPage({
         <div className="-mt-12 relative w-full aspect-square inset-0 flex items-center justify-center overflow-hidden">
           <OrbitAnimation className="" avatarUrls={avatarUrls} />
           <div className="absolute inset-0 flex items-center justify-center">
-            <Logo />
+            <Logo className="size-12"/>
           </div>
         </div>
 
         <div className="relative -mt-12 px-6 pb-6">
-          <p className="font-display pb-4 pt-8 text-center uppercase text-xl">
+          <p className="font-display pb-4 pt-8 text-center text-xl">
             Sign in to join communities
           </p>
 

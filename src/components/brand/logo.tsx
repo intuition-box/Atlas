@@ -12,6 +12,8 @@ type LogoProps = {
 export function Logo({ className }: LogoProps) {
   return (
     <svg
+      width="100%"
+      height="100%"
       className={cn("pointer-events-none", className)}
       fill="none"
       viewBox="0 0 512 456"
