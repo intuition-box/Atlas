@@ -4,10 +4,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { OrbitScene, type OrbitCommunity, type OrbitLink } from "@/components/orbit/scene";
+import { UniverseView } from "@/components/orbit/universe";
+import type { OrbitCommunity, OrbitLink } from "@/components/orbit/types";
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from "@/components/ui/empty";
 import { apiGet } from "@/lib/api/client";
-import { ROUTES, userPath } from "@/lib/routes";
+import { ROUTES, communityOrbitPath } from "@/lib/routes";
 import { Spinner } from "@/components/ui/spinner";
 
 type OrbitUniverseResponse = {
@@ -58,10 +59,10 @@ export default function Home() {
 
   return (
     <>
-      <OrbitScene
+      <UniverseView
         communities={communities}
         links={links}
-        onMemberClick={(memberId) => router.push(userPath(memberId))}
+        onCommunityClick={(handle) => router.push(communityOrbitPath(handle))}
       />
 
       {/* Status */}

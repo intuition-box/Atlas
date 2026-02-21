@@ -74,3 +74,24 @@ export const INTERACTION = {
   /** ms to wait before resuming orbit rotation after interaction */
   RESUME_ROTATION_DELAY: 3000,
 } as const;
+
+/* ────────────────────────────
+   Universe (HOMEPAGE, community bubbles)
+──────────────────────────── */
+
+export const UNIVERSE = {
+  /** Smallest community bubble radius (world px) */
+  MIN_RADIUS: 14,
+  /** Largest community bubble radius (world px) */
+  MAX_RADIUS: 44,
+  /** Zoom-in animation duration (ms) */
+  ZOOM_DURATION: 800,
+} as const;
+
+/** Maps dominant orbit level to community bubble color */
+export const UNIVERSE_COLORS: Record<string, string> = {
+  advocates: "#3b82f6",
+  contributors: "#60a5fa",
+  participants: "#ffffff",
+  explorers: "#9ca3af",
+};

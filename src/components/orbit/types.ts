@@ -28,6 +28,35 @@ export type MemberLink = {
 };
 
 /* ────────────────────────────
+   Universe Types
+──────────────────────────── */
+
+/** Community bubble data for the universe view */
+export type OrbitCommunity = {
+  id: string;
+  handle: string;
+  name: string;
+  avatarUrl?: string | null;
+  memberCount: number;
+  isPublic: boolean;
+  isMembershipOpen: boolean;
+  orbitStats: {
+    advocates: number;
+    contributors: number;
+    participants: number;
+    explorers: number;
+    dominantLevel: "advocates" | "contributors" | "participants" | "explorers";
+  };
+};
+
+/** Link between two communities (shared members) */
+export type OrbitLink = {
+  source: string;
+  target: string;
+  sharedMembers: number;
+};
+
+/* ────────────────────────────
    Simulation Types
 ──────────────────────────── */
 
