@@ -60,6 +60,20 @@ export interface SimulatedLink extends SimulationLinkDatum<SimulatedNode> {
    Component Props Types
 ──────────────────────────── */
 
+/** Community data shown in the center avatar popover */
+export type OrbitCommunityData = {
+  id: string;
+  handle: string;
+  name: string;
+  avatarUrl?: string | null;
+  description?: string | null;
+  memberCount: number;
+  isPublic: boolean;
+  isMembershipOpen: boolean;
+  isAdmin?: boolean;
+  viewerMembership?: { status: string; role: string } | null;
+};
+
 export type OrbitViewProps = {
   members: OrbitMember[];
   links?: MemberLink[];
@@ -69,6 +83,10 @@ export type OrbitViewProps = {
   centerName?: string;
   isMembershipOpen?: boolean;
   isPublicDirectory?: boolean;
+  /** Community data for the center avatar popover */
+  community?: OrbitCommunityData;
+  /** When true, nodes start at center and expand outward */
+  startFromCenter?: boolean;
   /** Called when a member node is clicked */
   onMemberClick?: (memberId: string) => void;
   className?: string;

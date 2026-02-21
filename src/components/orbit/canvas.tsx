@@ -62,6 +62,11 @@ function findNodeAtWorld(
   return null;
 }
 
+function isCenterHit(wx: number, wy: number, hitMultiplier = 1.3): boolean {
+  const hitRadius = CENTER_LOGO_RADIUS * hitMultiplier;
+  return wx * wx + wy * wy <= hitRadius * hitRadius;
+}
+
 /* ────────────────────────────
    Drag state
 ──────────────────────────── */
@@ -86,6 +91,8 @@ type DragState =
 class AvatarImageCache {
   private cache = new Map<string, HTMLImageElement | null>();
   private loading = new Set<string>();
+  /** Callback invoked when any image finishes loading (success or failure) */
+  onLoad: (() => void) | null = null;
 
   /** Returns loaded image, null (failed/missing), or undefined (still loading) */
   get(url: string | null): HTMLImageElement | null | undefined {
@@ -102,10 +109,12 @@ class AvatarImageCache {
     img.onload = () => {
       this.loading.delete(url);
       this.cache.set(url, img);
+      this.onLoad?.();
     };
     img.onerror = () => {
       this.loading.delete(url);
       this.cache.set(url, null);
+      this.onLoad?.();
     };
 
     return undefined;
@@ -118,6 +127,9 @@ class AvatarImageCache {
 
 const CENTER_LOGO_RADIUS = 32;
 
+/** Screen position for tooltip/popover anchoring */
+type ScreenPos = { x: number; y: number; screenRadius: number };
+
 export interface OrbitCanvasProps {
   width: number;
   height: number;
@@ -126,8 +138,14 @@ export interface OrbitCanvasProps {
   centerName?: string;
   onDrag: (id: string, x: number, y: number) => void;
   onDragEnd: (id: string) => void;
-  onNodeHover?: (node: SimulatedNode | null, screenPos: { x: number; y: number; screenRadius: number }) => void;
-  onNodeClick?: (node: SimulatedNode, screenPos: { x: number; y: number; screenRadius: number }) => void;
+  /** Called when a node drag begins (before onDrag). Use to clear tooltips. */
+  onDragStart?: () => void;
+  onNodeHover?: (node: SimulatedNode | null, screenPos: ScreenPos) => void;
+  onNodeClick?: (node: SimulatedNode, screenPos: ScreenPos) => void;
+  /** Called when the center logo/avatar hover state changes */
+  onCenterHover?: (hovered: boolean, screenPos: ScreenPos) => void;
+  /** Called when the center logo/avatar area is clicked */
+  onCenterClick?: (screenPos: ScreenPos) => void;
 }
 
 export function OrbitCanvas({
@@ -138,17 +156,19 @@ export function OrbitCanvas({
   centerName,
   onDrag,
   onDragEnd,
+  onDragStart,
   onNodeHover,
   onNodeClick,
+  onCenterHover,
+  onCenterClick,
 }: OrbitCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>(0);
 
-  // Gate for the render loop.
-  // When false, the rAF loop stays alive but skips draw work.
-  const needsRedrawRef = useRef(true);
-  // Offscreen canvas for static geometry (rings, center logo, label)
+  // Offscreen canvas for static geometry (rings only — center avatar drawn per-frame for hover state)
   const staticCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  // Flag to invalidate and rebuild the static layer
+  const staticDirtyRef = useRef(true);
 
   // Mutable refs so the rAF loop reads fresh values
   const nodesRef = useRef(nodes);
@@ -159,7 +179,7 @@ export function OrbitCanvas({
   useEffect(() => { nodesRef.current = nodes; }, [nodes]);
   useEffect(() => {
     sizeRef.current = { width, height };
-    needsRedrawRef.current = true;
+    staticDirtyRef.current = true;
   }, [width, height]);
   useEffect(() => { centerNameRef.current = centerName; }, [centerName]);
   useEffect(() => { centerLogoUrlRef.current = centerLogoUrl; }, [centerLogoUrl]);
@@ -182,7 +202,6 @@ export function OrbitCanvas({
       t.x = width / 2;
       t.y = height / 2;
     }
-    needsRedrawRef.current = true;
   }, [width, height]);
 
   // Drag + pan state
@@ -191,40 +210,67 @@ export function OrbitCanvas({
   const onDragEndRef = useRef(onDragEnd);
   const onNodeHoverRef = useRef(onNodeHover);
   const onNodeClickRef = useRef(onNodeClick);
+  const onCenterHoverRef = useRef(onCenterHover);
+  const onDragStartRef = useRef(onDragStart);
+  const onCenterClickRef = useRef(onCenterClick);
   const hoveredNodeIdRef = useRef<string | null>(null);
-  const lastHoverCheckRef = useRef(0);
+  const hoveredCenterRef = useRef(false);
 
   useEffect(() => { onDragRef.current = onDrag; }, [onDrag]);
   useEffect(() => { onDragEndRef.current = onDragEnd; }, [onDragEnd]);
   useEffect(() => { onNodeHoverRef.current = onNodeHover; }, [onNodeHover]);
   useEffect(() => { onNodeClickRef.current = onNodeClick; }, [onNodeClick]);
+  useEffect(() => { onCenterHoverRef.current = onCenterHover; }, [onCenterHover]);
+  useEffect(() => { onDragStartRef.current = onDragStart; }, [onDragStart]);
+  useEffect(() => { onCenterClickRef.current = onCenterClick; }, [onCenterClick]);
 
   /* ────────────────────────────
      Render loop
+
+     Draws every frame unconditionally so the canvas stays
+     in sync with the D3 simulation which mutates node.x/y
+     in-place (including orbital rotation).
+
+     Static geometry (rings) is cached in an offscreen canvas.
+     Center avatar is drawn per-frame because its border
+     changes with hover state.
   ──────────────────────────── */
 
   useEffect(() => {
-    needsRedrawRef.current = true;
     let running = true;
+    const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+
+    // Configure canvas for HiDPI once
+    const canvas = canvasRef.current;
+    if (canvas) {
+      const ctx = canvas.getContext("2d");
+      if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    // Rebuild static layer when images load (e.g. center logo)
+    imageCacheRef.current.onLoad = () => {
+      staticDirtyRef.current = true;
+    };
 
     function rebuildStaticLayer(
       w: number,
       h: number,
-      transform: Transform
+      transform: Transform,
     ) {
       const staticCanvas = document.createElement("canvas");
-      staticCanvas.width = w;
-      staticCanvas.height = h;
+      staticCanvas.width = Math.round(w * dpr);
+      staticCanvas.height = Math.round(h * dpr);
 
       const sctx = staticCanvas.getContext("2d");
       if (!sctx) return;
 
+      sctx.scale(dpr, dpr);
       sctx.clearRect(0, 0, w, h);
       sctx.save();
       sctx.translate(transform.x, transform.y);
       sctx.scale(transform.k, transform.k);
 
-      // Rings
+      // Rings only — center avatar drawn per-frame
       for (const level of RING_LEVELS) {
         const rx = RING_RADII[level];
         const ry = rx * PERSPECTIVE_RATIO;
@@ -235,56 +281,13 @@ export function OrbitCanvas({
         sctx.stroke();
       }
 
-      // Center logo
-      const imageCache = imageCacheRef.current;
-      const logoUrl = centerLogoUrlRef.current;
-      const logoImg = logoUrl ? imageCache.get(logoUrl) : null;
-      const r = CENTER_LOGO_RADIUS;
-
-      if (logoImg && logoImg.complete && logoImg.naturalWidth > 0) {
-        sctx.save();
-        sctx.beginPath();
-        sctx.arc(0, 0, r, 0, Math.PI * 2);
-        sctx.clip();
-        sctx.drawImage(logoImg, -r, -r, r * 2, r * 2);
-        sctx.restore();
-
-        sctx.beginPath();
-        sctx.arc(0, 0, r, 0, Math.PI * 2);
-        sctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
-        sctx.lineWidth = 2 / transform.k;
-        sctx.stroke();
-      } else {
-        sctx.beginPath();
-        sctx.arc(0, 0, r, 0, Math.PI * 2);
-        sctx.fillStyle = "#3b82f6";
-        sctx.fill();
-        sctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
-        sctx.lineWidth = 2 / transform.k;
-        sctx.stroke();
-      }
-
-      const name = centerNameRef.current;
-      if (name) {
-        sctx.font = `500 ${12 / transform.k}px system-ui, sans-serif`;
-        sctx.fillStyle = "rgba(255, 255, 255, 0.8)";
-        sctx.textAlign = "center";
-        sctx.textBaseline = "top";
-        sctx.fillText(name, 0, r + 14 / transform.k);
-      }
-
       sctx.restore();
       staticCanvasRef.current = staticCanvas;
+      staticDirtyRef.current = false;
     }
 
     function frame() {
       if (!running) return;
-
-      if (!needsRedrawRef.current) {
-        rafRef.current = requestAnimationFrame(frame);
-        return;
-      }
-      needsRedrawRef.current = false;
 
       const { width: w, height: h } = sizeRef.current;
       const ctx = canvasRef.current?.getContext("2d");
@@ -296,20 +299,68 @@ export function OrbitCanvas({
 
       const transform = transformRef.current;
       const hoveredId = hoveredNodeIdRef.current;
+      const isAvatarHovered = hoveredCenterRef.current;
 
-      if (!staticCanvasRef.current) {
+      // Rebuild static layer when dirty (size/transform change)
+      if (staticDirtyRef.current || !staticCanvasRef.current) {
         rebuildStaticLayer(w, h, transform);
       }
-      ctx.clearRect(0, 0, w, h);
+
+      // Clear + draw static layer (rings)
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, Math.round(w * dpr), Math.round(h * dpr));
       const staticCanvas = staticCanvasRef.current;
       if (staticCanvas) {
         ctx.drawImage(staticCanvas, 0, 0);
       }
+      ctx.restore();
+
+      // Draw dynamic elements in world space
       ctx.save();
       ctx.translate(transform.x, transform.y);
       ctx.scale(transform.k, transform.k);
 
-      // Draw nodes
+      // ── Center avatar (drawn per-frame for hover border) ──
+      const imageCache = imageCacheRef.current;
+      const logoUrl = centerLogoUrlRef.current;
+      const logoImg = logoUrl ? imageCache.get(logoUrl) : null;
+      const r = CENTER_LOGO_RADIUS;
+
+      if (logoImg && logoImg.complete && logoImg.naturalWidth > 0) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, Math.PI * 2);
+        ctx.clip();
+        ctx.drawImage(logoImg, -r, -r, r * 2, r * 2);
+        ctx.restore();
+      } else {
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, Math.PI * 2);
+        ctx.fillStyle = "#3b82f6";
+        ctx.fill();
+      }
+
+      // Center border — brighter + thicker on hover (matches scene.tsx)
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, Math.PI * 2);
+      ctx.strokeStyle = isAvatarHovered
+        ? "rgba(255, 255, 255, 1)"
+        : "rgba(255, 255, 255, 0.3)";
+      ctx.lineWidth = (isAvatarHovered ? 3 : 2) / transform.k;
+      ctx.stroke();
+
+      // Center name below logo
+      const name = centerNameRef.current;
+      if (name) {
+        ctx.font = `500 ${12 / transform.k}px system-ui, sans-serif`;
+        ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        ctx.fillText(name, 0, r + 14 / transform.k);
+      }
+
+      // ── Member nodes ──
       const currentNodes = nodesRef.current;
       const { width: cw, height: ch } = sizeRef.current;
       const simCx = cw / 2;
@@ -327,7 +378,7 @@ export function OrbitCanvas({
         ctx.fill();
 
         // Avatar image (if available)
-        const avatarImg = imageCacheRef.current.get(node.avatarUrl ?? null);
+        const avatarImg = imageCache.get(node.avatarUrl ?? null);
         if (avatarImg && avatarImg.complete && avatarImg.naturalWidth > 0) {
           ctx.save();
           ctx.beginPath();
@@ -355,6 +406,7 @@ export function OrbitCanvas({
     return () => {
       running = false;
       cancelAnimationFrame(rafRef.current);
+      imageCacheRef.current.onLoad = null;
     };
   }, []);
 
@@ -388,12 +440,25 @@ export function OrbitCanvas({
         y: mouseY - (mouseY - t.y) * ratio,
         k: newK,
       };
-      needsRedrawRef.current = true;
+      staticDirtyRef.current = true;
     }
 
     canvas.addEventListener("wheel", handleWheel, { passive: false });
     return () => canvas.removeEventListener("wheel", handleWheel);
   }, []);
+
+  /* ────────────────────────────
+     Helper: compute center screen position
+  ──────────────────────────── */
+
+  function getCenterScreenPos(rect: DOMRect): ScreenPos {
+    const t = transformRef.current;
+    return {
+      x: t.x + rect.left,
+      y: t.y + rect.top,
+      screenRadius: CENTER_LOGO_RADIUS * t.k + 1.5,
+    };
+  }
 
   /* ────────────────────────────
      Pointer events
@@ -417,12 +482,16 @@ export function OrbitCanvas({
     if (hitNode) {
       canvas.setPointerCapture(e.pointerId);
       dragRef.current = { type: "node", nodeId: hitNode.id, pointerId: e.pointerId, didMove: false };
+      // Clear tooltips on drag start (matches scene.tsx line 1586-1587)
+      onDragStartRef.current?.();
       onDragRef.current(hitNode.id, world.x + simCx, world.y + simCy);
       return;
     }
 
     // No node hit → pan
     canvas.setPointerCapture(e.pointerId);
+    // Clear tooltips on pan start (matches scene.tsx line 1602)
+    onDragStartRef.current?.();
     const t = transformRef.current;
     dragRef.current = {
       type: "pan",
@@ -447,7 +516,6 @@ export function OrbitCanvas({
       const world = screenToWorld(screenX, screenY, transformRef.current);
       const { width: cw, height: ch } = sizeRef.current;
       onDragRef.current(drag.nodeId, world.x + cw / 2, world.y + ch / 2);
-      needsRedrawRef.current = true;
       return;
     }
 
@@ -459,14 +527,9 @@ export function OrbitCanvas({
         x: drag.startTx + dx,
         y: drag.startTy + dy,
       };
-      needsRedrawRef.current = true;
+      staticDirtyRef.current = true;
       return;
     }
-
-    // Throttle hover hit-testing to reduce CPU without affecting perceived responsiveness
-    const now = performance.now();
-    if (now - lastHoverCheckRef.current < 60) return;
-    lastHoverCheckRef.current = now;
 
     // Not dragging → hover detection
     const canvas = canvasRef.current;
@@ -480,13 +543,13 @@ export function OrbitCanvas({
     const simCx = cw / 2;
     const simCy = ch / 2;
 
+    // 1. Check member node hover
     const hitNode = findNodeAtWorld(nodesRef.current, world.x, world.y, simCx, simCy);
     const prevId = hoveredNodeIdRef.current;
     const newId = hitNode?.id ?? null;
 
     if (newId !== prevId) {
       hoveredNodeIdRef.current = newId;
-      canvas.style.cursor = hitNode ? "pointer" : "grab";
 
       if (onNodeHoverRef.current) {
         if (hitNode) {
@@ -498,7 +561,25 @@ export function OrbitCanvas({
           onNodeHoverRef.current(null, { x: 0, y: 0, screenRadius: 0 });
         }
       }
-      needsRedrawRef.current = true;
+    }
+
+    // 2. Check center avatar hover (independent of node hover, matches scene.tsx)
+    if (!hitNode) {
+      const overCenter = isCenterHit(world.x, world.y);
+      const wasHovered = hoveredCenterRef.current;
+
+      if (overCenter !== wasHovered) {
+        hoveredCenterRef.current = overCenter;
+        if (onCenterHoverRef.current) {
+          onCenterHoverRef.current(overCenter, getCenterScreenPos(rect));
+        }
+      }
+    } else if (hoveredCenterRef.current) {
+      // Node takes priority — clear center hover
+      hoveredCenterRef.current = false;
+      if (onCenterHoverRef.current) {
+        onCenterHoverRef.current(false, getCenterScreenPos(rect));
+      }
     }
   }, []);
 
@@ -530,8 +611,25 @@ export function OrbitCanvas({
       }
     }
 
+    // Pan without movement = click on empty space — check center avatar hit
+    if (drag.type === "pan" && onCenterClickRef.current && canvas) {
+      const dx = e.clientX - drag.startX;
+      const dy = e.clientY - drag.startY;
+      const movedDist = Math.sqrt(dx * dx + dy * dy);
+
+      if (movedDist < 4) {
+        const rect = canvas.getBoundingClientRect();
+        const screenX = e.clientX - rect.left;
+        const screenY = e.clientY - rect.top;
+        const world = screenToWorld(screenX, screenY, transformRef.current);
+
+        if (isCenterHit(world.x, world.y)) {
+          onCenterClickRef.current(getCenterScreenPos(rect));
+        }
+      }
+    }
+
     dragRef.current = { type: "none" };
-    needsRedrawRef.current = true;
   }, []);
 
   const handlePointerLeave = useCallback(() => {
@@ -539,14 +637,23 @@ export function OrbitCanvas({
       hoveredNodeIdRef.current = null;
       onNodeHoverRef.current?.(null, { x: 0, y: 0, screenRadius: 0 });
     }
+    if (hoveredCenterRef.current) {
+      hoveredCenterRef.current = false;
+      onCenterHoverRef.current?.(false, { x: 0, y: 0, screenRadius: 0 });
+    }
   }, []);
+
+  // Compute DPR-scaled canvas dimensions
+  const dpr = typeof window !== "undefined"
+    ? Math.max(1, Math.min(2, window.devicePixelRatio || 1))
+    : 1;
 
   return (
     <canvas
       ref={canvasRef}
-      width={width}
-      height={height}
-      style={{ width, height, cursor: "grab" }}
+      width={Math.round(width * dpr)}
+      height={Math.round(height * dpr)}
+      style={{ display: "block", width, height, touchAction: "none" }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}

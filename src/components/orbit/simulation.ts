@@ -153,6 +153,13 @@ function forceOrbitTargets(
 
 /* ────────────────────────────
    Hook
+
+   Mirrors scene.tsx orbit lifecycle exactly:
+   - alphaDecay = SIMULATION.ALPHA_DECAY (0.02)
+   - Separate rotation rAF loop (only runs when unpaused)
+   - Rotation tick re-warms simulation: sim.alpha(max(alpha, 0.3)).restart()
+   - Drag warms simulation: sim.alpha(DRAG_ALPHA).restart()
+   - Pause stops rotation loop; unpause restarts it
 ──────────────────────────── */
 
 export function useOrbitSimulation(
@@ -160,6 +167,8 @@ export function useOrbitSimulation(
   links: MemberLink[],
   centerX: number,
   centerY: number,
+  /** When true, nodes start at center and expand outward via the force simulation */
+  startFromCenter = false,
 ) {
   const simRef = useRef<Simulation<SimulatedNode, SimulatedLink> | null>(null);
   const nodesRef = useRef<SimulatedNode[]>([]);
@@ -168,11 +177,65 @@ export function useOrbitSimulation(
   // Rotation state in t-space (0–1 per full revolution)
   const ringRotationRef = useRef<Record<string, number>>({});
   const pausedRef = useRef(false);
-  const rafRef = useRef<number>(0);
+  // Rotation rAF — separate from d3's internal timer (matches scene.tsx)
+  const rotationRafRef = useRef<number>(0);
+  // Track if the component is still mounted
+  const runningRef = useRef(true);
 
   const memberIds = useMemo(() => members.map((m) => m.id).join(","), [members]);
 
+  /* ── Start rotation loop (matches scene.tsx startOrbitRotation) ── */
+
+  const startRotationLoop = useCallback(() => {
+    // Don't start if already running
+    if (rotationRafRef.current) return;
+
+    let lastTick = performance.now();
+
+    const tick = (now: number) => {
+      rotationRafRef.current = 0;
+      if (!runningRef.current) return;
+
+      const sim = simRef.current;
+      if (!sim) return;
+
+      if (!pausedRef.current) {
+        const dt = (now - lastTick) / 1000;
+        for (const level of Object.keys(ORBIT_ROTATION.SPEED_MULTIPLIER) as OrbitLevel[]) {
+          ringRotationRef.current[level] ??= 0;
+          ringRotationRef.current[level] +=
+            dt * (ORBIT_ROTATION.BASE_SPEED / (Math.PI * 2)) * ORBIT_ROTATION.SPEED_MULTIPLIER[level];
+        }
+
+        // Re-warm simulation so nodes follow new rotation targets
+        // (matches scene.tsx line 685-688)
+        sim.alpha(Math.max(sim.alpha(), 0.3));
+        sim.restart();
+      }
+
+      lastTick = now;
+
+      // Keep running while unpaused (matches scene.tsx line 693-695)
+      if (runningRef.current && !pausedRef.current) {
+        rotationRafRef.current = requestAnimationFrame(tick);
+      }
+    };
+
+    rotationRafRef.current = requestAnimationFrame(tick);
+  }, []);
+
+  const stopRotationLoop = useCallback(() => {
+    if (rotationRafRef.current) {
+      cancelAnimationFrame(rotationRafRef.current);
+      rotationRafRef.current = 0;
+    }
+  }, []);
+
+  /* ── Create simulation ── */
+
   useEffect(() => {
+    runningRef.current = true;
+
     if (members.length === 0 || centerX === 0 || centerY === 0) {
       nodesRef.current = [];
       setNodes([]);
@@ -181,25 +244,35 @@ export function useOrbitSimulation(
 
     const created = createNodes(members);
 
-    // Set initial positions on ellipse (no rotation yet)
-    for (const n of created) {
-      const rx = RING_RADII[n.orbitLevel];
-      const ry = rx * PERSPECTIVE_RATIO;
-      const table = getArcTable(rx);
-      const angle = table.tToAngle(n.baseT);
-      n.x = centerX + Math.cos(angle) * rx;
-      n.y = centerY + Math.sin(angle) * ry;
+    if (startFromCenter) {
+      // Start all nodes at center — force simulation pulls them outward (expansion effect)
+      for (const n of created) {
+        n.x = centerX;
+        n.y = centerY;
+      }
+    } else {
+      // Set initial positions on ellipse (no rotation yet)
+      for (const n of created) {
+        const rx = RING_RADII[n.orbitLevel];
+        const ry = rx * PERSPECTIVE_RATIO;
+        const table = getArcTable(rx);
+        const angle = table.tToAngle(n.baseT);
+        n.x = centerX + Math.cos(angle) * rx;
+        n.y = centerY + Math.sin(angle) * ry;
+      }
     }
 
     nodesRef.current = created;
     setNodes(created);
+    ringRotationRef.current = {};
 
     // Stop previous
     simRef.current?.stop();
-    cancelAnimationFrame(rafRef.current);
+    stopRotationLoop();
 
+    // Create simulation (matches scene.tsx startOrbitSimulation lines 744-762)
     const sim = forceSimulation<SimulatedNode>(created)
-      .alphaDecay(0)
+      .alphaDecay(SIMULATION.ALPHA_DECAY)
       .alpha(1)
       .velocityDecay(SIMULATION.VELOCITY_DECAY)
       .force(
@@ -225,58 +298,51 @@ export function useOrbitSimulation(
 
     simRef.current = sim;
 
-    // Animation loop: advance rotation in t-space + keep simulation warm
-    let last = performance.now();
-
-    function tick(now: number) {
-      const dt = (now - last) / 1000;
-      last = now;
-
-      if (!pausedRef.current) {
-        // Rotation is in t-space: radians/sec ÷ 2π = revolutions/sec = Δt/sec
-        for (const level of Object.keys(ORBIT_ROTATION.SPEED_MULTIPLIER) as OrbitLevel[]) {
-          ringRotationRef.current[level] ??= 0;
-          ringRotationRef.current[level] =
-            (ringRotationRef.current[level] +
-              dt *
-                (ORBIT_ROTATION.BASE_SPEED / (Math.PI * 2)) *
-                ORBIT_ROTATION.SPEED_MULTIPLIER[level]) % 1;
-        }
-      }
-
-      if (!pausedRef.current) {
-        sim.alphaTarget(0.2);
-      } else {
-        sim.alphaTarget(0);
-      }
-
-      if (pausedRef.current && sim.alpha() < 0.005) {
-        sim.stop();
-      }
-
-      if (!pausedRef.current || sim.alpha() > 0.005) {
-        rafRef.current = requestAnimationFrame(tick);
-      }
+    // Start rotation loop (separate rAF, matches scene.tsx line 768)
+    if (!pausedRef.current) {
+      startRotationLoop();
     }
 
-    rafRef.current = requestAnimationFrame(tick);
-
     return () => {
+      runningRef.current = false;
       sim.stop();
-      cancelAnimationFrame(rafRef.current);
+      stopRotationLoop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [memberIds, links, centerX, centerY]);
+  }, [memberIds, links, centerX, centerY, startRotationLoop, stopRotationLoop]);
+
+  /* ── Pause/resume (matches scene.tsx mouseEnter/mouseLeave + popover close) ── */
 
   const setPaused = useCallback((paused: boolean) => {
+    const wasPaused = pausedRef.current;
     pausedRef.current = paused;
-  }, []);
+
+    if (paused && !wasPaused) {
+      // Pause: stop rotation loop (simulation cools via alphaDecay)
+      stopRotationLoop();
+    } else if (!paused && wasPaused) {
+      // Unpause: restart rotation loop + warm simulation
+      if (simRef.current) {
+        simRef.current.alpha(0.3).restart();
+      }
+      startRotationLoop();
+    }
+  }, [startRotationLoop, stopRotationLoop]);
+
+  /* ── Drag: warm simulation so nodes respond to fx/fy ── */
 
   const updateNodePosition = useCallback((id: string, x: number, y: number) => {
     const node = nodesRef.current.find((n) => n.id === id);
     if (!node) return;
     node.fx = x;
     node.fy = y;
+
+    // Warm simulation during drag (matches scene.tsx line 1440-1443 + 1585)
+    const sim = simRef.current;
+    if (sim) {
+      sim.alpha(Math.max(sim.alpha(), SIMULATION.DRAG_ALPHA));
+      sim.restart();
+    }
   }, []);
 
   const releaseNode = useCallback((id: string) => {
