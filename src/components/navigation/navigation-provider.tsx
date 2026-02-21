@@ -15,18 +15,11 @@ export type NavigationControls = {
   [K in NavigationSlot]?: NavigationItem[];
 };
 
-export type NavigationBreadcrumb = {
-  label: string;
-  onBack: () => void;
-};
-
 type NavigationContextValue = {
   controls: NavigationControls;
   setControls: (slot: NavigationSlot, items: NavigationItem[]) => void;
   clearControls: (slot: NavigationSlot) => void;
   clearAllControls: () => void;
-  breadcrumb: NavigationBreadcrumb | null;
-  setBreadcrumb: (breadcrumb: NavigationBreadcrumb | null) => void;
   isVisible: boolean;
   setIsVisible: (visible: boolean) => void;
 };
@@ -43,7 +36,6 @@ const NavigationContext = React.createContext<NavigationContextValue | null>(nul
 
 export function NavigationProvider({ children }: { children: React.ReactNode }) {
   const [controls, setControlsState] = React.useState<NavigationControls>({});
-  const [breadcrumb, setBreadcrumb] = React.useState<NavigationBreadcrumb | null>(null);
   const [isVisible, setIsVisible] = React.useState(true);
 
   const setControls = React.useCallback((slot: NavigationSlot, items: NavigationItem[]) => {
@@ -68,12 +60,10 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
       setControls,
       clearControls,
       clearAllControls,
-      breadcrumb,
-      setBreadcrumb,
       isVisible,
       setIsVisible,
     }),
-    [controls, setControls, clearControls, clearAllControls, breadcrumb, isVisible]
+    [controls, setControls, clearControls, clearAllControls, isVisible]
   );
 
   return (

@@ -32,7 +32,7 @@ import { ProfileAvatar } from "@/components/common/profile-avatar"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardAction, CardContent, CardHeader } from "@/components/ui/card"
 import { InfiniteScroll } from "@/components/ui/infinite-scroll"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -699,46 +699,54 @@ function AttestationRow({
 
 function AttestationsSkeleton() {
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-7 pb-40">
-      <div className="w-full flex flex-wrap gap-3 p-5">
-        <Skeleton className="size-12 rounded-full" />
-        <div className="flex flex-col gap-2">
-          <Skeleton className="h-7 w-48" />
-          <Skeleton className="h-3 w-24" />
+    <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
+      {/* PageHeader skeleton */}
+      <div className="w-full p-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <Skeleton className="size-12 rounded-full shrink-0" />
+          <div className="flex flex-col gap-1.5">
+            <Skeleton className="h-7 w-36" />
+            <Skeleton className="h-4 w-20" />
+          </div>
         </div>
-        <div className="flex gap-3 ml-auto sm:align-center sm:justify-end">
-          <Skeleton className="h-9 w-24" />
-          <Skeleton className="h-9 w-24" />
-          <Skeleton className="h-9 w-20" />
+        <div className="flex items-center gap-2">
+          <Skeleton className="h-9 w-24 rounded-lg" />
+          <Skeleton className="h-9 w-20 rounded-lg" />
+          <Skeleton className="h-9 w-20 rounded-lg" />
+          <Skeleton className="h-9 w-9 rounded-lg" />
         </div>
       </div>
 
-      <Card>
-        <CardHeader className="gap-4">
-          <CardTitle><Skeleton className="h-5 w-48" /></CardTitle>
-          <CardDescription><Skeleton className="h-4 w-86" /></CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col items-center gap-4">
-          <Skeleton className="h-4 w-64" />
-          <Skeleton className="h-4 w-48" />
-          <Skeleton className="h-9 w-32" />
-        </CardContent>
-      </Card>
+      {/* OnchainBanner skeleton */}
+      <div className="rounded-2xl border border-border/60 bg-gradient-to-b from-card/80 via-card/60 to-primary/5 p-6">
+        <div className="flex flex-col items-center gap-4 text-center">
+          <div className="flex flex-col items-center gap-1.5">
+            <Skeleton className="h-6 w-72" />
+            <Skeleton className="h-4 w-36" />
+          </div>
+          <Skeleton className="h-4 w-96 max-w-full" />
+          <Skeleton className="h-4 w-80 max-w-full" />
+          <div className="flex items-center gap-4">
+            <Skeleton className="h-4 w-40" />
+            <Skeleton className="h-4 w-44" />
+            <Skeleton className="h-4 w-36" />
+          </div>
+        </div>
+        <div className="mt-6 flex flex-col items-center gap-4 border-t border-border/40 pt-4">
+          <div className="flex items-center gap-4">
+            <Skeleton className="h-4 w-28" />
+            <Skeleton className="h-4 w-32" />
+          </div>
+          <Skeleton className="h-9 w-24 rounded-lg" />
+        </div>
+      </div>
 
-      <Card>
-        <CardHeader className="gap-4">
-          <CardTitle><Skeleton className="h-5 w-24" /></CardTitle>
-          <CardDescription><Skeleton className="h-4 w-86" /></CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-3 sm:grid-cols-2">
-          <Skeleton className="h-19 w-full" />
-          <Skeleton className="h-19 w-full" />
-          <Skeleton className="h-19 w-full" />
-          <Skeleton className="h-19 w-full" />
-          <Skeleton className="h-19 w-full col-span-2" />
-          <Skeleton className="h-19 w-full col-span-2" />
-        </CardContent>
-      </Card>
+      {/* Attestation cards grid skeleton */}
+      <div className="grid gap-4 sm:grid-cols-2">
+        {Array.from({ length: 6 }, (_, i) => (
+          <AttestationCardSkeleton key={i} />
+        ))}
+      </div>
     </div>
   )
 }

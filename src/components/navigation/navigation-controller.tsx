@@ -8,7 +8,7 @@ import { Eye, EyeOff, LogIn, LogOut, Settings, Volume2, VolumeX } from "lucide-r
 import { cn } from "@/lib/utils";
 import { useSounds } from "@/lib/sounds";
 import { ROUTES, userSettingsPath } from "@/lib/routes";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Logo } from "@/components/brand/logo";
 import {
   Tooltip,
   TooltipContent,
@@ -28,10 +28,6 @@ import { AttestationQueuePanel } from "@/components/attestation/queue-panel";
 ──────────────────────────── */
 
 type NavigationControllerProps = {
-  /** Logo URL for top-left corner */
-  logoUrl?: string | null;
-  /** App/site name for logo fallback */
-  siteName?: string;
   className?: string;
 };
 
@@ -40,13 +36,11 @@ type NavigationControllerProps = {
 ──────────────────────────── */
 
 export function NavigationController({
-  logoUrl,
-  siteName = "Atlas",
   className,
 }: NavigationControllerProps) {
   const { data: session, status } = useSession();
   const pathname = usePathname();
-  const { controls, breadcrumb, isVisible } = useNavigationContext();
+  const { controls, isVisible } = useNavigationContext();
   const { toggle } = useNavigationVisibility();
   const { isEnabled: isSoundEnabled, toggle: toggleSound } = useSounds();
 
@@ -70,62 +64,29 @@ export function NavigationController({
         className
       )}
     >
-      {/* Top Left - Logo/Home + Breadcrumb */}
-      <div className="absolute top-4 left-4 sm:top-6 sm:left-6 pointer-events-auto">
-        {showControls && (
-          <div className="flex items-center gap-2">
-            <Tooltip>
-              <TooltipTrigger>
-                {breadcrumb ? (
-                  <button
-                    onClick={breadcrumb.onBack}
-                    className={cn(
-                      "flex items-center justify-center",
-                      "size-10 rounded-full",
-                      "bg-background/50 hover:bg-background/80",
-                      "backdrop-blur-sm",
-                      "border border-border/30 hover:border-border/50",
-                      "transition-all duration-200",
-                      "focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                    )}
-                  >
-                    <Avatar className="size-8">
-                      <AvatarImage src={logoUrl ?? ""} alt={siteName} />
-                      <AvatarFallback className="text-xs font-semibold bg-transparent">
-                        {siteName.slice(0, 2).toUpperCase()}
-                      </AvatarFallback>
-                    </Avatar>
-                  </button>
-                ) : (
-                  <Link
-                    href={ROUTES.home}
-                    className={cn(
-                      "flex items-center justify-center",
-                      "size-10 rounded-full",
-                      "bg-background/50 hover:bg-background/80",
-                      "backdrop-blur-sm",
-                      "border border-border/30 hover:border-border/50",
-                      "transition-all duration-200",
-                      "focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                    )}
-                  >
-                    <Avatar className="size-8">
-                      <AvatarImage src={logoUrl ?? ""} alt={siteName} />
-                      <AvatarFallback className="text-xs font-semibold bg-transparent">
-                        {siteName.slice(0, 2).toUpperCase()}
-                      </AvatarFallback>
-                    </Avatar>
-                  </Link>
+      {/* Top Left - Logo/Home */}
+      {showControls && (
+        <div className="absolute top-4 left-4 sm:top-6 sm:left-6 pointer-events-auto">
+          <Tooltip>
+            <TooltipTrigger>
+              <Link
+                href={ROUTES.home}
+                className={cn(
+                  "flex items-center justify-center",
+                  "p-1 size-10 rounded-full",
+                  "hover:bg-background/80 backdrop-blur-sm",
+                  "transition-all duration-200",
                 )}
-              </TooltipTrigger>
-              <TooltipContent side="right" sideOffset={8}>
-                <p className="text-xs">{breadcrumb ? "Back" : "Home"}</p>
-              </TooltipContent>
-            </Tooltip>
-
-          </div>
-        )}
-      </div>
+              >
+                <Logo />
+              </Link>
+            </TooltipTrigger>
+            <TooltipContent side="right" sideOffset={8}>
+              <p className="text-xs">Atlas homepage</p>
+            </TooltipContent>
+          </Tooltip>
+        </div>
+      )}
 
       {/* Top Right - Global Controls */}
       <div className="absolute top-4 right-4 sm:top-6 sm:right-6 pointer-events-auto">

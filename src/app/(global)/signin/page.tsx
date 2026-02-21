@@ -5,7 +5,7 @@ import { ROUTES } from "@/lib/routes";
 import { db } from "@/lib/db/client";
 
 import { Button } from "@/components/ui/button";
-import Logo from "@/components/brand/logo";
+import { Logo } from "@/components/brand/logo";
 import OrbitAnimation from "../../../components/users/signin-animation";
 
 export const dynamic = "force-dynamic";
@@ -56,7 +56,9 @@ export default async function SignInPage({
       <div className="overflow-hidden w-full max-w-[460px] border rounded-[40px]">
         <div className="-mt-12 relative w-full aspect-square inset-0 flex items-center justify-center overflow-hidden">
           <OrbitAnimation className="" avatarUrls={avatarUrls} />
-          <Logo className="absolute inset-0 flex items-center justify-center" />
+          <div className="absolute inset-0 flex items-center justify-center">
+            <Logo />
+          </div>
         </div>
 
         <div className="relative -mt-12 px-6 pb-6">
