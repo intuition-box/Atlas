@@ -13,6 +13,7 @@ import { userPath, userSettingsPath, userAttestationsPath } from "@/lib/routes"
 import { AttestationBadge } from "@/components/attestation/badge"
 import { AttestationButtons } from "@/components/attestation/buttons"
 import { PageHeader } from "@/components/common/page-header"
+import { PageHeaderMenu } from "@/components/common/page-header-menu"
 import { ProfileAvatar } from "@/components/common/profile-avatar"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -363,14 +364,15 @@ export default function UserProfilePage() {
         }
         title={displayName}
         description={`@${handleLabel}`}
-        actions={
-          isSelf ? (
-            <Button render={<Link href={userSettingsPath(handleLabel)} />}>
-              Edit profile
-            </Button>
-          ) : null
-        }
         actionsAsFormActions={false}
+        actions={
+          <PageHeaderMenu
+            items={[
+              { label: "Settings", href: userSettingsPath(handleLabel) },
+              { label: "Attestations", href: userAttestationsPath(handleLabel) },
+            ]}
+          />
+        }
       />
 
       <SocialsCard user={user} />

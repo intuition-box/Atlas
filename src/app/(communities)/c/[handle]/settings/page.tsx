@@ -17,7 +17,7 @@ import { ProfileAvatar } from "@/components/common/profile-avatar"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Form, FormActions, FormField, fieldControlProps, useForm } from "@/components/ui/form"
+import { Form, FormField, fieldControlProps, useForm } from "@/components/ui/form"
 import { Users } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -372,6 +372,25 @@ export default function CommunitySettingsPage() {
     const result = await apiPost<CommunityUpdateResponse>("/api/community/update", payload)
 
     if (result.ok) {
+      // Reset form with current values so isDirty becomes false
+      const cleanValues: CommunitySettingsValues = {
+        handle: values.handle,
+        name: values.name,
+        description: values.description,
+        avatarUrl: values.avatarUrl,
+        isPublicDirectory: values.isPublicDirectory,
+        isMembershipOpen: values.isMembershipOpen,
+        applicationQuestions: values.applicationQuestions.map((q) => ({
+          id: q.id,
+          label: q.label,
+          type: q.type,
+          required: q.required,
+          placeholder: q.placeholder,
+          help: q.help,
+        })),
+      }
+      form.reset(cleanValues)
+
       const newHandle = result.value.community.handle
       if (newHandle && newHandle !== communityHandle) {
         router.replace(communitySettingsPath(newHandle))
@@ -459,40 +478,42 @@ export default function CommunitySettingsPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
-      <Form form={form} onSubmit={handleSubmit}>
-        <PageHeader
-          leading={
-            <ProfileAvatar
-              type="community"
-              src={form.watch("avatarUrl") || community?.avatarUrl}
-              name={communityName}
-              className="h-12 w-12"
+      <PageHeader
+        leading={
+          <ProfileAvatar
+            type="community"
+            src={form.watch("avatarUrl") || community?.avatarUrl}
+            name={communityName}
+            className="h-12 w-12"
+          />
+        }
+        title="Settings"
+        description={`@${communityHandle}`}
+        actionsAsFormActions={false}
+        actions={
+          <div className="flex items-center gap-3">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={!form.formState.isDirty || form.formState.isSubmitting}
+              className={form.formState.isDirty ? "!bg-emerald-500/10 !text-emerald-500 hover:!bg-emerald-500/20" : ""}
+              onClick={() => form.handleSubmit(handleSubmit)()}
+            >
+              {form.formState.isSubmitting ? "Saving…" : "Save"}
+            </Button>
+            <PageHeaderMenu
+              items={[
+                { label: "Profile", href: communityPath(communityHandle) },
+                { label: "Members", href: communityMembersPath(communityHandle) },
+                { label: "Orbit", href: communityOrbitPath(communityHandle) },
+                { label: "Applications", href: communityApplicationsPath(communityHandle) },
+              ]}
             />
-          }
-          title="Settings"
-          description={`@${communityHandle}`}
-          actions={
-            <FormActions className="flex items-center gap-3">
-              <Button
-                type="submit"
-                variant="secondary"
-                disabled={!form.formState.isDirty || form.formState.isSubmitting}
-                className={form.formState.isDirty ? "!bg-emerald-500/10 !text-emerald-500 hover:!bg-emerald-500/20" : ""}
-              >
-                {form.formState.isSubmitting ? "Saving…" : "Save"}
-              </Button>
-              <PageHeaderMenu
-                items={[
-                  { label: "Profile", href: communityPath(communityHandle) },
-                  { label: "Members", href: communityMembersPath(communityHandle) },
-                  { label: "Orbit", href: communityOrbitPath(communityHandle) },
-                  { label: "Applications", href: communityApplicationsPath(communityHandle) },
-                ]}
-              />
-            </FormActions>
-          }
-        />
+          </div>
+        }
+      />
 
+      <Form form={form} onSubmit={handleSubmit}>
         {rootError ? (
           <Alert variant="destructive">
             <AlertDescription>{rootError}</AlertDescription>

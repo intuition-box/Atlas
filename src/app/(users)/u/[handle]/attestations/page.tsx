@@ -1221,7 +1221,6 @@ export default function AttestationsPage() {
             <PageHeaderMenu
               items={[
                 { label: "Profile", href: userPath(handle) },
-                { label: "Attestations", href: userAttestationsPath(handle) },
                 { label: "Settings", href: userSettingsPath(handle) },
               ]}
             />

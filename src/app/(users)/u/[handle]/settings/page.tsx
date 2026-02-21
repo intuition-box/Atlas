@@ -45,7 +45,7 @@ import {
   ComboboxList,
 } from "@/components/ui/combobox"
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
-import { Form, FormActions, FormField, fieldControlProps, useForm } from "@/components/ui/form"
+import { Form, FormField, fieldControlProps, useForm } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { EncryptedText } from "@/components/ui/encrypted-text"
@@ -1246,9 +1246,9 @@ export default function UserSettingsPage() {
       // Only send handle when it actually changed to avoid re-claiming the same one.
       ...(trimmedHandle !== handle ? { handle: trimmedHandle } : {}),
       name: optionalString(values.name)!,
-      headline: optionalString(values.headline),
-      bio: optionalString(values.bio),
-      location: optionalString(values.location),
+      headline: optionalString(values.headline) ?? null,
+      bio: optionalString(values.bio) ?? null,
+      location: optionalString(values.location) ?? null,
       links: normalizeLinks(values.links),
       languages: normalizeStringArray(values.languages),
       skills: normalizeStringArray(values.skills),
@@ -1321,34 +1321,36 @@ export default function UserSettingsPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
-      <Form form={form} onSubmit={handleSubmit}>
-        <PageHeader
-          leading={
-            <ProfileAvatar type="user" src={form.watch("avatarUrl") || (formReady ? undefined : userData?.avatarUrl) || undefined} name={`@${handle}`} className="h-12 w-12" />
-          }
-          title="Settings"
-          description={`@${handle}`}
-          actions={
-            <FormActions className="flex items-center gap-3">
-              <Button
-                type="submit"
-                variant="secondary"
-                disabled={!form.formState.isDirty || form.formState.isSubmitting}
-                className={form.formState.isDirty ? "!bg-emerald-500/10 !text-emerald-500 hover:!bg-emerald-500/20" : ""}
-              >
-                {form.formState.isSubmitting ? "Saving…" : "Save"}
-              </Button>
-              <PageHeaderMenu
-                items={[
-                  { label: "Profile", href: userPath(handle) },
-                  { label: "Attestations", href: userAttestationsPath(handle) },
-                  { label: "Settings", href: userSettingsPath(handle) },
-                ]}
-              />
-            </FormActions>
-          }
-        />
+      <PageHeader
+        leading={
+          <ProfileAvatar type="user" src={form.watch("avatarUrl") || (formReady ? undefined : userData?.avatarUrl) || undefined} name={`@${handle}`} className="h-12 w-12" />
+        }
+        title="Settings"
+        description={`@${handle}`}
+        actionsAsFormActions={false}
+        actions={
+          <div className="flex items-center gap-3">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={!form.formState.isDirty || form.formState.isSubmitting}
+              className={form.formState.isDirty ? "!bg-emerald-500/10 !text-emerald-500 hover:!bg-emerald-500/20" : ""}
+              onClick={() => form.handleSubmit(handleSubmit)()}
+            >
+              {form.formState.isSubmitting ? "Saving…" : "Save"}
+            </Button>
+            <PageHeaderMenu
+              items={[
+                { label: "Profile", href: userPath(handle) },
+                { label: "Attestations", href: userAttestationsPath(handle) },
+                { label: "Settings", href: userSettingsPath(handle) },
+              ]}
+            />
+          </div>
+        }
+      />
 
+      <Form form={form} onSubmit={handleSubmit}>
         {rootError ? (
           <Alert variant="destructive">
             <AlertDescription>{rootError}</AlertDescription>
