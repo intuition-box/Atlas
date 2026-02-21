@@ -17,6 +17,7 @@ import {
   type SimulationLinkDatum,
 } from "d3-force";
 
+import { apiGet } from "@/lib/api/client";
 import { sounds } from "@/lib/sounds";
 
 import {
@@ -58,7 +59,7 @@ type CommunityTooltipData = {
   screenRadius: number;
 };
 
-type UniverseMode = "idle" | "zoom-in";
+type UniverseMode = "idle" | "zoom-in" | "waiting";
 
 /* ────────────────────────────
    Helpers
@@ -174,6 +175,9 @@ export function UniverseView({
 
     // Image cache
     imageCache: new ImageCache(),
+
+    // Prefetch
+    fetchDone: false,
 
     // Pointer
     draggedNode: null as UniverseNode | null,
@@ -388,7 +392,25 @@ export function UniverseView({
       };
 
       s.mode = "zoom-in";
+      s.fetchDone = false;
       sounds.play("whoosh", { volume: 0.3 });
+
+      // Fire fetch now — it runs during the zoom animation.
+      // Store result on window so the orbit page can grab it without re-fetching.
+      apiGet("/api/community/get", { handle: community.handle }).then((result) => {
+        if (result.ok) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (window as any).__orbitPrefetch = {
+            handle: community.handle,
+            data: result.value,
+          };
+        }
+        s.fetchDone = true;
+        // If zoom already finished and we're waiting, navigate now
+        if (s.mode === "waiting") {
+          onCommunityClickRef.current?.(s.transition.targetHandle);
+        }
+      });
 
       // Clear tooltip
       s.hoveredNode = null;
@@ -421,8 +443,19 @@ export function UniverseView({
         drawRef.current?.();
 
         if (rawT >= 1) {
-          // Zoom complete — navigate
-          onCommunityClickRef.current?.(s.transition.targetHandle);
+          if (s.fetchDone) {
+            // Both zoom and fetch done — navigate immediately
+            onCommunityClickRef.current?.(s.transition.targetHandle);
+          } else {
+            // Zoom done, waiting for fetch — keep pulsing
+            s.mode = "waiting";
+            const pulse = () => {
+              if (s.mode !== "waiting") return;
+              drawRef.current?.();
+              transitionRafRef.current = requestAnimationFrame(pulse);
+            };
+            transitionRafRef.current = requestAnimationFrame(pulse);
+          }
           return;
         }
 
@@ -482,8 +515,8 @@ export function UniverseView({
       ctx.translate(t.x, t.y);
       ctx.scale(t.k, t.k);
 
-      // ── Links (hidden during zoom-in) ──
-      if (bridgeProgress > 0 && mode !== "zoom-in") {
+      // ── Links (hidden during zoom-in / waiting) ──
+      if (bridgeProgress > 0 && mode !== "zoom-in" && mode !== "waiting") {
         ctx.globalAlpha = 1;
         for (let i = 0; i < s.links.length; i++) {
           const link = s.links[i];
@@ -525,14 +558,23 @@ export function UniverseView({
         const radius = n.radius;
 
         // During zoom-in, fade out non-target nodes
-        if (mode === "zoom-in" && s.transition.targetNode) {
+        if ((mode === "zoom-in" || mode === "waiting") && s.transition.targetNode) {
           const isTarget = n.id === s.transition.targetNode.id;
           if (!isTarget) {
-            const zoomElapsed = now - s.transition.startTime;
-            const fadeT = Math.min(1, zoomElapsed / (UNIVERSE.ZOOM_DURATION * 0.5));
-            ctx.globalAlpha = bubbleOpacity * (1 - fadeT);
+            if (mode === "waiting") {
+              continue;
+            } else {
+              const zoomElapsed = now - s.transition.startTime;
+              const fadeT = Math.min(1, zoomElapsed / (UNIVERSE.ZOOM_DURATION * 0.5));
+              ctx.globalAlpha = bubbleOpacity * (1 - fadeT);
+            }
           } else {
-            ctx.globalAlpha = bubbleOpacity;
+            // Pulse the target bubble while waiting for fetch
+            if (mode === "waiting") {
+              ctx.globalAlpha = 0.5 + 0.5 * Math.sin(now / 200);
+            } else {
+              ctx.globalAlpha = bubbleOpacity;
+            }
           }
         }
 

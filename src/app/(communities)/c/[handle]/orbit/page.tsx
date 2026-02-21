@@ -97,15 +97,37 @@ function toCommunityData(
 
 // === PAGE ===
 
+// Check for prefetched data from universe zoom (set on window before navigation)
+function consumePrefetch(handle: string): CommunityGetResponse | null {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const w = window as any
+  const pf = w.__orbitPrefetch as { handle: string; data: CommunityGetResponse } | undefined
+  if (pf?.handle === handle) {
+    delete w.__orbitPrefetch
+    return pf.data
+  }
+  delete w.__orbitPrefetch
+  return null
+}
+
 export default function CommunityOrbitPage() {
   const router = useRouter()
   const params = useParams<{ handle: string }>()
   const rawHandle = String(params?.handle ?? "")
   const handle = React.useMemo(() => normalizeHandle(rawHandle), [rawHandle])
 
-  const [state, setState] = React.useState<LoadState>({ status: "idle" })
+  const [state, setState] = React.useState<LoadState>(() => {
+    const prefetched = consumePrefetch(handle)
+    if (prefetched) return { status: "ready", data: prefetched }
+    return { status: "idle" }
+  })
+
+  const hasPrefetch = state.status === "ready"
 
   React.useEffect(() => {
+    // Skip fetch if we already have data from prefetch
+    if (hasPrefetch) return
+
     const parsed = validateHandle(handle)
     if (!parsed.ok) {
       setState({ status: "not-found" })
@@ -144,6 +166,7 @@ export default function CommunityOrbitPage() {
     })()
 
     return () => controller.abort()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handle])
 
   const handleMemberClick = React.useCallback(
@@ -211,8 +234,8 @@ export default function CommunityOrbitPage() {
         />
       ) : null}
 
-      {/* Loading skeleton — rings + pulsing center matching orbit geometry */}
-      {!isReady ? (
+      {/* Loading skeleton — only for direct navigation */}
+      {state.status === "loading" ? (
         <OrbitSkeleton className="pointer-events-none absolute inset-0" />
       ) : null}
 
