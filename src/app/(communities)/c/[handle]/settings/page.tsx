@@ -503,10 +503,10 @@ export default function CommunitySettingsPage() {
             </Button>
             <PageHeaderMenu
               items={[
-                { label: "Profile", href: communityPath(communityHandle) },
-                { label: "Members", href: communityMembersPath(communityHandle) },
                 { label: "Orbit", href: communityOrbitPath(communityHandle) },
                 { label: "Applications", href: communityApplicationsPath(communityHandle) },
+                { label: "Members", href: communityMembersPath(communityHandle) },
+                { label: "Profile", href: communityPath(communityHandle) },
               ]}
             />
           </div>

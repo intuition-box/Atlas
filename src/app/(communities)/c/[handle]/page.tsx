@@ -268,13 +268,13 @@ export default function CommunityProfilePage() {
             ) : null}
             <PageHeaderMenu
               items={[
-                { label: "Members", href: communityMembersPath(handleLabel) },
                 { label: "Orbit", href: communityOrbitPath(handleLabel) },
                 ...(isAdmin
-                  ? [
-                      { label: "Applications", href: communityApplicationsPath(handleLabel) },
-                      { label: "Settings", href: communitySettingsPath(handleLabel) },
-                    ]
+                  ? [{ label: "Applications", href: communityApplicationsPath(handleLabel) }]
+                  : []),
+                { label: "Members", href: communityMembersPath(handleLabel) },
+                ...(isAdmin
+                  ? [{ label: "Settings", href: communitySettingsPath(handleLabel) }]
                   : []),
               ]}
             />

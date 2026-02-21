@@ -5,7 +5,7 @@ import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 
 import { apiGet } from "@/lib/api/client"
-import { ROUTES, userPath, communityPath } from "@/lib/routes"
+import { ROUTES, userPath, communityPath, communityOrbitPath } from "@/lib/routes"
 import { COUNTRIES } from "@/config/countries"
 import { SKILL_LIST as SKILLS, TOOL_LIST as TOOLS } from "@/lib/attestations/definitions"
 
@@ -27,6 +27,7 @@ import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Separator } from "@/components/ui/separator"
 import { PageHeader } from "@/components/common/page-header"
+import { PageHeaderMenu } from "@/components/common/page-header-menu"
 import { ProfileAvatar } from "@/components/common/profile-avatar"
 import { Spinner } from "@/components/ui/spinner"
 
@@ -909,6 +910,12 @@ export default function CommunityMembersPage() {
               <TabsContent value="cards" />
               <TabsContent value="list" />
             </Tabs>
+            <PageHeaderMenu
+              items={[
+                { label: "Orbit", href: communityOrbitPath(communityHandle) },
+                { label: "Profile", href: communityPath(communityHandle) },
+              ]}
+            />
           </div>
         }
       />

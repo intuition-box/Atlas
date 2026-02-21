@@ -792,9 +792,9 @@ export default function CommunityApplicationsPage() {
             </Button>
             <PageHeaderMenu
               items={[
-                { label: "Profile", href: communityPath(handle) },
-                { label: "Members", href: communityMembersPath(handle) },
                 { label: "Orbit", href: communityOrbitPath(handle) },
+                { label: "Members", href: communityMembersPath(handle) },
+                { label: "Profile", href: communityPath(handle) },
                 { label: "Settings", href: communitySettingsPath(handle) },
               ]}
             />
