@@ -783,12 +783,12 @@ export default function CommunityApplicationsPage() {
         actionsAsFormActions={false}
         actions={
           <div className="flex items-center gap-2">
-            <Button type="button" variant="secondary" onClick={() => setIsFiltersOpen((v) => !v)}>
-              {isFiltersOpen ? "Hide filters" : "Show filters"}
-            </Button>
             <Button type="button" variant="secondary" disabled={refreshing} onClick={handleRefresh}>
               {refreshing && <RefreshCw className="size-4 animate-spin" />}
               {refreshing ? "Refreshing…" : "Refresh"}
+            </Button>
+            <Button type="button" variant={isFiltersOpen ? "default" : "secondary"} onClick={() => setIsFiltersOpen((v) => !v)}>
+              Filters
             </Button>
             <PageHeaderMenu
               items={[

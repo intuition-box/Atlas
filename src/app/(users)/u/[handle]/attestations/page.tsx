@@ -72,7 +72,7 @@ type AttestationsResponse = {
 type FilterState = {
   q: string
   type: AttestationType | ""
-  direction: "received" | "given" | "all"
+  direction: "received" | "given" | ""
 }
 
 // === UTILITY FUNCTIONS ===
@@ -120,7 +120,7 @@ function mergeAttestationsUnique(prev: Attestation[], next: Attestation[]): Atte
 }
 
 function hasActiveFilters(filters: FilterState): boolean {
-  return Boolean(filters.q || filters.type)
+  return Boolean(filters.q || filters.type || filters.direction)
 }
 
 // === CUSTOM HOOKS ===
@@ -198,7 +198,7 @@ function useAttestationsData(
     } else if (filters.direction === "given") {
       params.fromHandle = handle
     } else {
-      // "all" - we'll need to make two requests or just default to received
+      // "" (all) - we'll need to make two requests or just default to received
       params.toHandle = handle
     }
 
@@ -227,8 +227,8 @@ function useAttestationsData(
       }
 
       try {
-        // For "all" direction, we need to fetch both received and given
-        if (filters.direction === "all") {
+        // For "" (all) direction, we need to fetch both received and given
+        if (!filters.direction) {
           const [receivedRes, givenRes] = await Promise.all([
             apiGet<AttestationsResponse>("/api/attestation/list", {
               toHandle: handle,
@@ -804,15 +804,15 @@ function FiltersPanel({
         <div className="flex flex-col gap-2">
           <div className="text-xs font-medium text-foreground/70">Direction</div>
           <Select
-            value={filters.direction}
-            onValueChange={(v) => onFiltersChange({ direction: (v ?? "all") as FilterState["direction"] })}
+            value={filters.direction || null}
+            onValueChange={(v) => onFiltersChange({ direction: (v ?? "") as FilterState["direction"] })}
           >
             <SelectTrigger className="w-full">
               <SelectValue>{(v: string | null) => v === "given" ? "Given" : v === "received" ? "Received" : "All"}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
-                <SelectItem value="all">All</SelectItem>
+                <SelectItem value={null as unknown as string}>All</SelectItem>
                 <SelectItem value="received">Received</SelectItem>
                 <SelectItem value="given">Given</SelectItem>
               </SelectGroup>
@@ -957,7 +957,7 @@ export default function AttestationsPage() {
   const [filters, setFilters] = React.useState<FilterState>({
     q: "",
     type: "",
-    direction: "all",
+    direction: "",
   })
 
   // Reset cursor when cart saves to force fresh fetch from page 1
@@ -1124,7 +1124,7 @@ export default function AttestationsPage() {
 
   React.useEffect(() => {
     // Only update stats when we have the viewer's given attestations in the list
-    // (direction "all" or "given"), or on the very first load
+    // (direction "" meaning all, or "given"), or on the very first load
     if (filters.direction === "received") return
 
     const total = localItems.filter((a) => a.fromUser.id === viewerId).length
@@ -1162,7 +1162,7 @@ export default function AttestationsPage() {
     setFilters({
       q: "",
       type: "",
-      direction: "all",
+      direction: "",
     })
   }
 

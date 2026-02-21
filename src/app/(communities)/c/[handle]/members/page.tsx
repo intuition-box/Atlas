@@ -9,6 +9,8 @@ import { ROUTES, userPath, communityPath } from "@/lib/routes"
 import { COUNTRIES } from "@/config/countries"
 import { SKILL_LIST as SKILLS, TOOL_LIST as TOOLS } from "@/lib/attestations/definitions"
 
+import { LayoutGrid, List, RefreshCw } from "lucide-react"
+
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -23,9 +25,9 @@ import {
 import { InfiniteScroll } from "@/components/ui/infinite-scroll"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Separator } from "@/components/ui/separator"
 import { PageHeader } from "@/components/common/page-header"
 import { ProfileAvatar } from "@/components/common/profile-avatar"
-import { RefreshButton } from "@/components/common/refresh-button"
 import { Spinner } from "@/components/ui/spinner"
 
 // === CONSTANTS ===
@@ -555,55 +557,22 @@ function LoadingState() {
   )
 }
 
-function ActiveFiltersBar({
-  filters,
-  memberCount,
-  hasMorePages,
-  onRemoveRole,
-  onRemoveCountry,
-  onRemoveSkill,
-  onRemoveTool,
-}: {
-  filters: FilterState
-  memberCount: number
-  hasMorePages: boolean
-  onRemoveRole: () => void
-  onRemoveCountry: () => void
-  onRemoveSkill: (skill: string) => void
-  onRemoveTool: (tool: string) => void
-}) {
-  return (
-    <div className="-mt-2 flex flex-wrap items-center gap-2">
-      <Badge variant="secondary">
-        {memberCount}
-        {hasMorePages ? "+" : ""} members
-      </Badge>
-      {filters.role && <Chip onRemove={onRemoveRole}>Role: {filters.role}</Chip>}
-      {filters.country && <Chip onRemove={onRemoveCountry}>Country: {filters.country}</Chip>}
-      {filters.skills.map((s) => (
-        <Chip key={s} onRemove={() => onRemoveSkill(s)}>
-          Skill: {s}
-        </Chip>
-      ))}
-      {filters.tools.map((t) => (
-        <Chip key={t} onRemove={() => onRemoveTool(t)}>
-          Tool: {t}
-        </Chip>
-      ))}
-    </div>
-  )
-}
-
 function FiltersPanel({
   filters,
   onFiltersChange,
   onAddSkill,
   onAddTool,
+  onClearAll,
+  memberCount,
+  hasMorePages,
 }: {
   filters: FilterState
   onFiltersChange: (updates: Partial<FilterState>) => void
   onAddSkill: (skill: string) => void
   onAddTool: (tool: string) => void
+  onClearAll: () => void
+  memberCount: number
+  hasMorePages: boolean
 }) {
   const [skillQuery, setSkillQuery] = React.useState("")
   const [toolQuery, setToolQuery] = React.useState("")
@@ -756,6 +725,20 @@ function FiltersPanel({
             )}
           </div>
         </div>
+
+        {hasActiveFilters(filters) && (
+          <>
+            <Separator className="lg:col-span-3" />
+            <div className="flex items-center justify-center gap-2 lg:col-span-3">
+              <Badge variant="secondary">
+                {memberCount}{hasMorePages ? "+" : ""} members
+              </Badge>
+              <Button type="button" variant="destructive" size="sm" onClick={onClearAll}>
+                Clear filters
+              </Button>
+            </div>
+          </>
+        )}
       </div>
     </section>
   )
@@ -815,6 +798,8 @@ export default function CommunityMembersPage() {
   const [view, setView] = React.useState<"cards" | "list">("cards")
   const [cursor, setCursor] = React.useState<string | null>(null)
   const [isFiltersOpen, setIsFiltersOpen] = React.useState(false)
+  const [refreshing, setRefreshing] = React.useState(false)
+  const refreshStartedRef = React.useRef(false)
 
   const [filters, setFilters] = React.useState<FilterState>({
     q: "",
@@ -876,6 +861,23 @@ export default function CommunityMembersPage() {
     setFilters((prev) => ({ ...prev, tools: prev.tools.filter((t) => t !== tool) }))
   }
 
+  function handleRefresh() {
+    setRefreshing(true)
+    refreshStartedRef.current = false
+    setCursor(null)
+  }
+
+  // Clear refreshing once the fetch cycle completes (loading: false→true→false)
+  React.useEffect(() => {
+    if (!refreshing) return
+    if (loading) {
+      refreshStartedRef.current = true
+    } else if (refreshStartedRef.current) {
+      setRefreshing(false)
+      refreshStartedRef.current = false
+    }
+  }, [refreshing, loading])
+
   if (!communityHandle) return null
 
   return (
@@ -888,38 +890,27 @@ export default function CommunityMembersPage() {
         description={communityPath(communityHandle)}
         actions={
           <div className="flex items-center gap-2">
+            <Button type="button" variant="secondary" disabled={refreshing} onClick={handleRefresh}>
+              {refreshing && <RefreshCw className="size-4 animate-spin" />}
+              {refreshing ? "Refreshing…" : "Refresh"}
+            </Button>
+            <Button type="button" variant={isFiltersOpen ? "default" : "secondary"} onClick={() => setIsFiltersOpen((v) => !v)}>
+              Filters
+            </Button>
             <Tabs className="gap-0" value={view} onValueChange={(v) => setView(v === "list" ? "list" : "cards")}>
               <TabsList>
-                <TabsTrigger value="cards">Cards</TabsTrigger>
-                <TabsTrigger value="list">List</TabsTrigger>
+                <TabsTrigger value="cards" aria-label="Cards view" className="cursor-pointer px-3 !border-transparent data-active:!bg-primary data-active:!text-primary-foreground">
+                  <LayoutGrid className="size-4" />
+                </TabsTrigger>
+                <TabsTrigger value="list" aria-label="List view" className="cursor-pointer px-3 !border-transparent data-active:!bg-primary data-active:!text-primary-foreground">
+                  <List className="size-4" />
+                </TabsTrigger>
               </TabsList>
               <TabsContent value="cards" />
               <TabsContent value="list" />
             </Tabs>
-
-            <Button type="button" variant="secondary" onClick={() => setIsFiltersOpen((v) => !v)}>
-              {isFiltersOpen ? "Hide filters" : "Show filters"}
-            </Button>
-
-            <RefreshButton />
-
-            {activeFilters && (
-              <Button type="button" variant="ghost" onClick={handleClearAll}>
-                Reset
-              </Button>
-            )}
           </div>
         }
-      />
-
-      <ActiveFiltersBar
-        filters={filters}
-        memberCount={items.length}
-        hasMorePages={!!data?.page?.nextCursor}
-        onRemoveRole={() => handleFiltersChange({ role: "" })}
-        onRemoveCountry={() => handleFiltersChange({ country: "" })}
-        onRemoveSkill={handleRemoveSkill}
-        onRemoveTool={handleRemoveTool}
       />
 
       {isFiltersOpen && (
@@ -928,6 +919,9 @@ export default function CommunityMembersPage() {
           onFiltersChange={handleFiltersChange}
           onAddSkill={handleAddSkill}
           onAddTool={handleAddTool}
+          onClearAll={handleClearAll}
+          memberCount={items.length}
+          hasMorePages={!!data?.page?.nextCursor}
         />
       )}
 

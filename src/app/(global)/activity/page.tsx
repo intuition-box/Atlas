@@ -7,6 +7,7 @@ import {
   ArrowUpRight,
   CalendarIcon,
   Globe,
+  RefreshCw,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -26,6 +27,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
@@ -427,10 +429,16 @@ function DateRangePicker({
 function FiltersPanel({
   filters,
   onFiltersChange,
+  onClearAll,
+  resultCount,
 }: {
   filters: FilterState
   onFiltersChange: (updates: Partial<FilterState>) => void
+  onClearAll: () => void
+  resultCount: number
 }) {
+  const active = hasActiveFilters(filters)
+
   return (
     <Card aria-label="Activity filters" className="bg-card/30 border-border/30">
       <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -545,6 +553,20 @@ function FiltersPanel({
             </SelectContent>
           </Select>
         </div>
+
+        {active && (
+          <>
+            <Separator className="sm:col-span-2 lg:col-span-3" />
+            <div className="flex items-center justify-center gap-2 sm:col-span-2 lg:col-span-3">
+              <Badge variant="secondary">
+                {resultCount} results
+              </Badge>
+              <Button type="button" variant="destructive" size="sm" onClick={onClearAll}>
+                Clear filters
+              </Button>
+            </div>
+          </>
+        )}
       </CardContent>
     </Card>
   )
@@ -734,6 +756,8 @@ export default function ActivityPage() {
   const [isFiltersOpen, setIsFiltersOpen] = React.useState(false)
   const [filters, setFilters] = React.useState<FilterState>(EMPTY_FILTERS)
   const [refreshKey, setRefreshKey] = React.useState(0)
+  const [refreshing, setRefreshing] = React.useState(false)
+  const refreshStartedRef = React.useRef(false)
 
   // Debounce only the text search; other filters apply immediately
   const debouncedQ = useDebouncedValue(filters.q, 300)
@@ -755,9 +779,22 @@ export default function ActivityPage() {
   }
 
   function handleRefresh() {
+    setRefreshing(true)
+    refreshStartedRef.current = false
     refresh()
     setRefreshKey((k) => k + 1)
   }
+
+  // Clear refreshing once the fetch cycle completes (loading: false→true→false)
+  React.useEffect(() => {
+    if (!refreshing) return
+    if (loading) {
+      refreshStartedRef.current = true
+    } else if (refreshStartedRef.current) {
+      setRefreshing(false)
+      refreshStartedRef.current = false
+    }
+  }, [refreshing, loading])
 
   if (loading && !hasActiveFilters(apiFilters)) {
     return <ActivitySkeleton />
@@ -777,21 +814,15 @@ export default function ActivityPage() {
           actionsAsFormActions={false}
           actions={
             <div className="flex w-full items-center gap-3">
-              {tab === "activity" && (
-                <>
-                  {activeFilters && (
-                    <Button type="button" variant="ghost" onClick={handleClearAll}>
-                      Reset
-                    </Button>
-                  )}
-                  <Button type="button" variant={isFiltersOpen ? "default" : "secondary"} onClick={() => setIsFiltersOpen((v) => !v)}>
-                    {isFiltersOpen ? "Hide filters" : "Show filters"}
-                  </Button>
-                </>
-              )}
-              <Button type="button" variant="secondary" onClick={handleRefresh}>
-                Refresh
+              <Button type="button" variant="secondary" disabled={refreshing} onClick={handleRefresh}>
+                {refreshing && <RefreshCw className="size-4 animate-spin" />}
+                {refreshing ? "Refreshing…" : "Refresh"}
               </Button>
+              {tab === "activity" && (
+                <Button type="button" variant={isFiltersOpen ? "default" : "secondary"} onClick={() => setIsFiltersOpen((v) => !v)}>
+                  Filters
+                </Button>
+              )}
               <TabsList>
                 <TabsTrigger value="activity" className="data-active:bg-primary dark:data-active:bg-primary data-active:text-primary-foreground dark:data-active:text-primary-foreground dark:data-active:border-transparent">Activity</TabsTrigger>
                 <TabsTrigger value="leaderboard" className="data-active:bg-primary dark:data-active:bg-primary data-active:text-primary-foreground dark:data-active:text-primary-foreground dark:data-active:border-transparent">Leaderboard</TabsTrigger>
@@ -805,95 +836,9 @@ export default function ActivityPage() {
             <FiltersPanel
               filters={filters}
               onFiltersChange={handleFiltersChange}
+              onClearAll={handleClearAll}
+              resultCount={events.length}
             />
-          )}
-
-          {activeFilters && (
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="secondary">{events.length} results</Badge>
-              {filters.kind && (
-                <Badge variant="outline" className="gap-1.5">
-                  Type: {ACTIVITY_KIND_CONFIG[filters.kind].label}
-                  <button
-                    type="button"
-                    className="inline-flex size-3.5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
-                    onClick={() => handleFiltersChange({ kind: "" })}
-                    aria-label="Remove type filter"
-                  >
-                    ×
-                  </button>
-                </Badge>
-              )}
-              {filters.attestationType && (
-                <Badge variant="outline" className="gap-1.5">
-                  {ATTESTATION_TYPES[filters.attestationType]?.emoji} {ATTESTATION_TYPES[filters.attestationType]?.label ?? filters.attestationType}
-                  <button
-                    type="button"
-                    className="inline-flex size-3.5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
-                    onClick={() => handleFiltersChange({ attestationType: "" })}
-                    aria-label="Remove attestation type filter"
-                  >
-                    ×
-                  </button>
-                </Badge>
-              )}
-              {filters.direction && (
-                <Badge variant="outline" className="gap-1.5">
-                  Direction: {filters.direction === "given" ? "Given" : "Received"}
-                  <button
-                    type="button"
-                    className="inline-flex size-3.5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
-                    onClick={() => handleFiltersChange({ direction: "" })}
-                    aria-label="Remove direction filter"
-                  >
-                    ×
-                  </button>
-                </Badge>
-              )}
-              {filters.onchain && (
-                <Badge variant="outline" className="gap-1.5">
-                  Status: {filters.onchain === "onchain" ? "Onchain" : "Offchain"}
-                  <button
-                    type="button"
-                    className="inline-flex size-3.5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
-                    onClick={() => handleFiltersChange({ onchain: "" })}
-                    aria-label="Remove onchain status filter"
-                  >
-                    ×
-                  </button>
-                </Badge>
-              )}
-              {(filters.dateFrom || filters.dateTo) && (
-                <Badge variant="outline" className="gap-1.5">
-                  Date: {filters.dateFrom && filters.dateTo
-                    ? `${formatDateLabel(new Date(filters.dateFrom))} – ${formatDateLabel(new Date(filters.dateTo))}`
-                    : filters.dateFrom
-                      ? `From ${formatDateLabel(new Date(filters.dateFrom))}`
-                      : `Until ${formatDateLabel(new Date(filters.dateTo))}`}
-                  <button
-                    type="button"
-                    className="inline-flex size-3.5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
-                    onClick={() => handleFiltersChange({ dateFrom: "", dateTo: "" })}
-                    aria-label="Remove date filter"
-                  >
-                    ×
-                  </button>
-                </Badge>
-              )}
-              {filters.q && (
-                <Badge variant="outline" className="gap-1.5">
-                  Search: {filters.q}
-                  <button
-                    type="button"
-                    className="inline-flex size-3.5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
-                    onClick={() => handleFiltersChange({ q: "" })}
-                    aria-label="Remove search filter"
-                  >
-                    ×
-                  </button>
-                </Badge>
-              )}
-            </div>
           )}
 
           <Card>
