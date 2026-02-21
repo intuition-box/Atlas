@@ -52,7 +52,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${sans.variable} ${mono.variable} dark`}>
+      <body className={`${sans.variable} ${mono.variable} grain dark`}>
         <Providers>
           <NavigationController />
           <main>

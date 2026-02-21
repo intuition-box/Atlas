@@ -138,24 +138,7 @@
     @apply flex flex-col w-full min-h-[100vh] m-0 p-0 antialiased;
     @apply text-foreground font-sans;
     @apply bg-background selection:bg-foreground/30;
-    background-image: var(--color-background-radial-gradient);
-    background-attachment: fixed;
-    background-size: cover;
-    background-repeat: no-repeat;
-  }
 
-  body:after {
-    content: "";
-    z-index: -1;
-    opacity: 0.03;
-    position: fixed;
-    top: 0px;
-    right: 0px;
-    bottom: 0px;
-    left: 0px;
-    background-image: url("/grain.png");
-    touch-action: none;
-    pointer-events: none
   }
 
   main {
@@ -193,5 +176,21 @@
 */
 
 @layer utilities {
-  
+  .grain {
+    background-image: var(--color-background-radial-gradient);
+    background-attachment: fixed;
+    background-size: cover;
+    background-repeat: no-repeat;
+
+    &::after {
+      content: "";
+      z-index: -1;
+      opacity: 0.03;
+      position: fixed;
+      inset: 0;
+      background-image: url("/grain.png");
+      touch-action: none;
+      pointer-events: none;
+    }
+  }
 }
