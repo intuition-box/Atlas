@@ -12,9 +12,10 @@ import { communityPath, userPath } from "@/lib/routes"
 import { OrbitView } from "@/components/orbit/view"
 import type { OrbitMember, OrbitCommunityData } from "@/components/orbit/types"
 
+import { OrbitSkeleton } from "@/components/orbit/orbit-skeleton"
+
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
-import { Spinner } from "@/components/ui/spinner"
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
 
 // === TYPES ===
@@ -210,13 +211,9 @@ export default function CommunityOrbitPage() {
         />
       ) : null}
 
-      {/* Loading spinner */}
+      {/* Loading skeleton — rings + pulsing center matching orbit geometry */}
       {!isReady ? (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-          <div className="rounded-full border border-border bg-background/80 p-3 backdrop-blur">
-            <Spinner />
-          </div>
-        </div>
+        <OrbitSkeleton className="pointer-events-none absolute inset-0" />
       ) : null}
 
       {/* Empty state */}
