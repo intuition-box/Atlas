@@ -147,7 +147,11 @@ export async function POST(req: NextRequest) {
 
       const updated = await tx.membership.update({
         where: { id: membership.id },
-        data: { orbitLevelOverride: nextOverride },
+        data: {
+          orbitLevelOverride: nextOverride,
+          // Keep orbitLevel in sync so all consumers see the effective level
+          ...(nextOverride ? { orbitLevel: nextOverride } : {}),
+        },
         select: {
           id: true,
           userId: true,

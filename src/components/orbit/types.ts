@@ -17,6 +17,7 @@ export type OrbitMember = {
   orbitLevel: OrbitLevel;
   loveScore: number;
   reachScore: number;
+  gravityScore: number;
   lastActiveAt?: string | null;
   joinedAt?: string | null;
 };
@@ -71,6 +72,7 @@ export interface SimulatedNode extends SimulationNodeDatum {
   orbitLevel: OrbitLevel;
   loveScore: number;
   reachScore: number;
+  gravityScore: number;
   lastActiveAt?: string | null;
   joinedAt?: string | null;
   radius: number;

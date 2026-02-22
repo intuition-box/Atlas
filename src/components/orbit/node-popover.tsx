@@ -199,6 +199,7 @@ export function MemberTooltipContent({ node }: { node: SimulatedNode }) {
       <div className="mt-1 flex items-center gap-3 text-xs opacity-80">
         <span>Love: {node.loveScore}</span>
         <span>Reach: {node.reachScore}</span>
+        <span>Gravity: {node.gravityScore}</span>
       </div>
     </>
   );

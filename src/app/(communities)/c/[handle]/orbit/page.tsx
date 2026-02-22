@@ -46,7 +46,9 @@ type CommunityGetResponse = {
     avatarUrl: string | null
     image: string | null
     orbitLevel: string
+    loveScore: number
     reachScore: number
+    gravityScore: number
     headline: string | null
     tags: string[] | null
     lastActiveAt: string | null
@@ -71,8 +73,9 @@ function toOrbitMembers(raw: CommunityGetResponse["orbitMembers"]): OrbitMember[
     headline: m.headline,
     tags: m.tags ?? [],
     orbitLevel: (m.orbitLevel as OrbitMember["orbitLevel"]) || "EXPLORER",
-    loveScore: 0,
+    loveScore: m.loveScore,
     reachScore: m.reachScore,
+    gravityScore: m.gravityScore,
     lastActiveAt: m.lastActiveAt,
     joinedAt: m.joinedAt,
   }))

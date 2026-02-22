@@ -45,7 +45,9 @@ type CommunityGetOk = {
     avatarUrl: string | null;
     image: string | null;
     orbitLevel: string;
+    loveScore: number;
     reachScore: number;
+    gravityScore: number;
     headline: string | null;
     tags: string[] | null;
     lastActiveAt: Date | null;
@@ -198,7 +200,10 @@ export async function GET(req: NextRequest) {
             select: {
               userId: true,
               orbitLevel: true,
+              orbitLevelOverride: true,
+              loveScore: true,
               reachScore: true,
+              gravityScore: true,
               lastActiveAt: true,
               createdAt: true,
               user: {
@@ -231,8 +236,10 @@ export async function GET(req: NextRequest) {
             name: m.user.name,
             avatarUrl: m.user.avatarUrl,
             image: m.user.image,
-            orbitLevel: String(m.orbitLevel),
+            orbitLevel: String(m.orbitLevelOverride ?? m.orbitLevel),
+            loveScore: Number(m.loveScore ?? 0),
             reachScore: Number(m.reachScore ?? 0),
+            gravityScore: Number(m.gravityScore ?? 0),
             headline: m.user.headline,
             tags: (m.user.tags as unknown as string[] | null) ?? null,
             lastActiveAt: m.lastActiveAt,
