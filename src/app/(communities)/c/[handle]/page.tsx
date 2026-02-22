@@ -4,6 +4,7 @@ import * as React from "react"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 import { Globe, LayoutGrid, List, Lock, MoreVertical, RefreshCw } from "lucide-react"
+import { useSession } from "next-auth/react"
 import { DiscordIcon, GitHubIcon, TelegramIcon, XIcon } from "@/components/ui/icons"
 
 import { apiGet, apiPost } from "@/lib/api/client"
@@ -609,20 +610,16 @@ function AdminMemberMenu({
             <MoreVertical className="size-3.5" />
           </MenuTrigger>
           <MenuContent align="end" sideOffset={4}>
-            {member.role !== "OWNER" && (
-              <>
-                <MenuGroup>
-                  <MenuLabel>Orbit level</MenuLabel>
-                  <MenuRadioGroup value={currentValue} onValueChange={handleOrbitChange}>
-                    <MenuRadioItem value="auto">Auto</MenuRadioItem>
-                    {ORBIT_LEVELS.map((l) => (
-                      <MenuRadioItem key={l.value} value={l.value}>{l.label}</MenuRadioItem>
-                    ))}
-                  </MenuRadioGroup>
-                </MenuGroup>
-                <MenuSeparator />
-              </>
-            )}
+            <MenuGroup>
+              <MenuLabel>Orbit level</MenuLabel>
+              <MenuRadioGroup value={currentValue} onValueChange={handleOrbitChange}>
+                <MenuRadioItem value="auto">Auto</MenuRadioItem>
+                {ORBIT_LEVELS.map((l) => (
+                  <MenuRadioItem key={l.value} value={l.value}>{l.label}</MenuRadioItem>
+                ))}
+              </MenuRadioGroup>
+            </MenuGroup>
+            <MenuSeparator />
             <MenuGroup>
               <MenuLabel>Moderation</MenuLabel>
               <MenuItem variant="destructive" onClick={() => setBanDialogOpen(true)}>
@@ -653,9 +650,10 @@ function AdminMemberMenu({
   )
 }
 
-function MemberCard({ member, isAdmin, communityHandle, onOrbitOverride }: {
+function MemberCard({ member, isAdmin, viewerUserId, communityHandle, onOrbitOverride }: {
   member: CommunityMember
   isAdmin?: boolean
+  viewerUserId?: string | null
   communityHandle?: string
   onOrbitOverride?: (userId: string, newOverride: string | null) => void
 }) {
@@ -672,7 +670,9 @@ function MemberCard({ member, isAdmin, communityHandle, onOrbitOverride }: {
   const isOrbitOverridden = u.orbitLevelOverride != null
   const effectiveOrbit = u.orbitLevelOverride ?? u.orbitLevel
   const orbitLabel = formatOrbitLevel(effectiveOrbit)
-  const showAdminMenu = isAdmin && communityHandle && onOrbitOverride
+  const isSelf = !!viewerUserId && viewerUserId === u.id
+  const isOwner = member.role === "OWNER"
+  const showAdminMenu = isAdmin && communityHandle && onOrbitOverride && !isSelf && !isOwner
 
   return (
     <Card size="sm" className="transition-colors hover:bg-card/80">
@@ -1014,10 +1014,11 @@ function FiltersPanel({
   )
 }
 
-function MembersGrid({ items, view, isAdmin, communityHandle, onOrbitOverride }: {
+function MembersGrid({ items, view, isAdmin, viewerUserId, communityHandle, onOrbitOverride }: {
   items: CommunityMember[]
   view: "cards" | "list"
   isAdmin?: boolean
+  viewerUserId?: string | null
   communityHandle?: string
   onOrbitOverride?: (userId: string, newOverride: string | null) => void
 }) {
@@ -1029,6 +1030,7 @@ function MembersGrid({ items, view, isAdmin, communityHandle, onOrbitOverride }:
             key={m.membershipId}
             member={m}
             isAdmin={isAdmin}
+            viewerUserId={viewerUserId}
             communityHandle={communityHandle}
             onOrbitOverride={onOrbitOverride}
           />
@@ -1073,6 +1075,8 @@ function MembersEmptyState({ hasFilters, onClearFilters }: { hasFilters: boolean
 
 export default function CommunityProfilePage() {
   const router = useRouter()
+  const { data: session } = useSession()
+  const viewerUserId = session?.user?.id ?? null
   const params = useParams<{ handle: string }>()
   const rawHandle = String(params?.handle ?? "")
   const handle = React.useMemo(() => normalizeHandle(rawHandle), [rawHandle])
@@ -1526,6 +1530,7 @@ export default function CommunityProfilePage() {
                 items={displayItems}
                 view={view}
                 isAdmin={isAdmin}
+                viewerUserId={viewerUserId}
                 communityHandle={handleLabel}
                 onOrbitOverride={handleOrbitOverride}
               />
