@@ -2,19 +2,23 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { useParams } from "next/navigation"
+import { useParams, useRouter } from "next/navigation"
+import { LayoutGrid, List, RefreshCw } from "lucide-react"
+
 import { apiGet } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
 import { normalizeHandle, validateHandle } from "@/lib/handle"
 import {
   communityApplyPath,
-  communityMembersPath,
   communityOrbitPath,
   communityApplicationsPath,
   communitySettingsPath,
   communityPath,
+  userPath,
   ROUTES,
 } from "@/lib/routes"
+import { COUNTRIES } from "@/config/countries"
+import { SKILL_LIST as SKILLS, TOOL_LIST as TOOLS } from "@/lib/attestations/definitions"
 
 import { PageHeader } from "@/components/common/page-header"
 import { PageHeaderMenu } from "@/components/common/page-header-menu"
@@ -23,9 +27,28 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Combobox,
+  ComboboxCollection,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+} from "@/components/ui/combobox"
+import { InfiniteScroll } from "@/components/ui/infinite-scroll"
+import { Input } from "@/components/ui/input"
+import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Spinner } from "@/components/ui/spinner"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
-// === TYPES ===
+// === CONSTANTS ===
+
+const PAGE_SIZE = 50
+const DEBOUNCE_DELAY = 300
+
+// === TYPES (Community) ===
 
 type CommunityGetResponse = {
   mode: "full" | "splash"
@@ -57,11 +80,101 @@ type CommunityGetResponse = {
   }>
 }
 
-type LoadState =
+type CommunityLoadState =
   | { status: "idle" | "loading" }
   | { status: "error"; message: string }
   | { status: "not-found" }
   | { status: "ready"; data: CommunityGetResponse }
+
+// === TYPES (Members) ===
+
+type MemberRole = "OWNER" | "ADMIN" | "MOD" | "MEMBER"
+
+type MemberProfile = {
+  id: string
+  handle: string
+  name?: string | null
+  headline?: string | null
+  bio?: string | null
+  location?: string | null
+  image?: string | null
+  links?: string[] | null
+  skills?: string[] | null
+  tools?: string[] | null
+  orbitLevel?: string | null
+  love?: number | null
+  reach?: number | null
+  gravity?: number | null
+}
+
+type CommunityMember = {
+  membershipId: string
+  role: MemberRole
+  status: string
+  approvedAt?: string | null
+  lastActiveAt?: string | null
+  user: MemberProfile
+}
+
+type MembersResponse = {
+  page: { nextCursor: string | null }
+  members: CommunityMember[]
+}
+
+type FilterState = {
+  q: string
+  role: MemberRole | ""
+  country: string
+  skills: string[]
+  tools: string[]
+  headline: string
+  bio: string
+}
+
+type QueryParams = {
+  handle: string
+  q?: string
+  role?: string
+  location?: string
+  skills?: string
+  tools?: string
+  headline?: string
+  bio?: string
+  cursor?: string
+  limit: number
+}
+
+type ApiMemberItem = {
+  membership: {
+    id: string
+    role: MemberRole
+    status: string
+    orbitLevel: string | null
+    loveScore: number | null
+    reachScore: number | null
+    gravityScore: number | null
+    approvedAt: string | null
+    lastActiveAt: string | null
+  }
+  user: {
+    id: string
+    handle: string | null
+    name: string | null
+    image: string | null
+    avatarUrl: string | null
+    headline: string | null
+    bio: string | null
+    location: string | null
+    skills: string[]
+    tools: string[]
+    links: string[]
+  }
+}
+
+type ApiMembersResponse = {
+  items: ApiMemberItem[]
+  nextCursor: string | null
+}
 
 // === HELPERS ===
 
@@ -71,34 +184,619 @@ function fmtDate(iso: string) {
   return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
 }
 
-function roleLabel(role: string): string {
-  switch (role) {
-    case "OWNER": return "Owner"
-    case "ADMIN": return "Admin"
-    case "MOD": return "Moderator"
-    case "MEMBER": return "Member"
-    default: return role
+
+// === HELPERS (Members) ===
+
+function normalizeMembersPayload(raw: unknown, _fallbackHandle: string): MembersResponse {
+  const r = raw as ApiMembersResponse | null
+  const nextCursor = r?.nextCursor ?? null
+  const items = r?.items ?? []
+
+  const members: CommunityMember[] = items.map((item) => ({
+    membershipId: item.membership.id,
+    role: item.membership.role,
+    status: item.membership.status,
+    approvedAt: item.membership.approvedAt,
+    lastActiveAt: item.membership.lastActiveAt,
+    user: {
+      id: item.user.id,
+      handle: item.user.handle ?? "",
+      name: item.user.name,
+      headline: item.user.headline,
+      bio: item.user.bio,
+      location: item.user.location,
+      image: item.user.avatarUrl ?? item.user.image,
+      links: item.user.links,
+      skills: item.user.skills,
+      tools: item.user.tools,
+      orbitLevel: item.membership.orbitLevel,
+      love: item.membership.loveScore,
+      reach: item.membership.reachScore,
+      gravity: item.membership.gravityScore,
+    },
+  }))
+
+  return { page: { nextCursor }, members }
+}
+
+function mergeMembersUnique(prev: CommunityMember[], next: CommunityMember[]): CommunityMember[] {
+  const out: CommunityMember[] = []
+  const seen = new Set<string>()
+  for (const m of prev) {
+    if (!m || seen.has(m.membershipId)) continue
+    seen.add(m.membershipId)
+    out.push(m)
+  }
+  for (const m of next) {
+    if (!m || seen.has(m.membershipId)) continue
+    seen.add(m.membershipId)
+    out.push(m)
+  }
+  return out
+}
+
+function uniqStrings(values: string[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const v of values) {
+    const s = v.trim()
+    if (!s) continue
+    const key = s.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(s)
+  }
+  return out
+}
+
+function optionalString(value: string | undefined | null): string | undefined {
+  const v = (value ?? "").trim()
+  return v || undefined
+}
+
+function asCsv(values: string[]): string | undefined {
+  const v = uniqStrings(values)
+  return v.length ? v.join(",") : undefined
+}
+
+function formatCompact(n: number | null | undefined): string {
+  if (n === null || n === undefined || !Number.isFinite(n)) return ""
+  return Intl.NumberFormat(undefined, { notation: "compact" }).format(n)
+}
+
+function buildQueryParams(communityHandle: string, filters: FilterState, cursor: string | null): QueryParams {
+  return {
+    handle: communityHandle,
+    q: optionalString(filters.q),
+    role: optionalString(filters.role),
+    location: optionalString(filters.country),
+    skills: asCsv(filters.skills),
+    tools: asCsv(filters.tools),
+    headline: optionalString(filters.headline),
+    bio: optionalString(filters.bio),
+    cursor: cursor ?? undefined,
+    limit: PAGE_SIZE,
   }
 }
 
-function statusLabel(status: string): string {
-  switch (status) {
-    case "APPROVED": return "Active"
-    case "PENDING": return "Pending"
-    case "REJECTED": return "Rejected"
-    case "BANNED": return "Banned"
-    default: return status
+function hasActiveFilters(filters: FilterState): boolean {
+  return Boolean(
+    filters.q ||
+    filters.role ||
+    filters.country ||
+    filters.skills.length ||
+    filters.tools.length ||
+    filters.headline ||
+    filters.bio
+  )
+}
+
+// === HOOKS ===
+
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = React.useState(value)
+  React.useEffect(() => {
+    const t = window.setTimeout(() => setDebounced(value), delayMs)
+    return () => window.clearTimeout(t)
+  }, [value, delayMs])
+  return debounced
+}
+
+function useMembersData(communityHandle: string, filters: FilterState, cursor: string | null) {
+  const router = useRouter()
+  const [data, setData] = React.useState<MembersResponse | null>(null)
+  const [items, setItems] = React.useState<CommunityMember[]>([])
+  const [loading, setLoading] = React.useState(true)
+  const [loadingMore, setLoadingMore] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+
+  const debouncedQ = useDebouncedValue(filters.q, DEBOUNCE_DELAY)
+  const debouncedHeadline = useDebouncedValue(filters.headline, DEBOUNCE_DELAY)
+  const debouncedBio = useDebouncedValue(filters.bio, DEBOUNCE_DELAY)
+
+  const queryObject = React.useMemo(() => {
+    return buildQueryParams(
+      communityHandle,
+      { ...filters, q: debouncedQ, headline: debouncedHeadline, bio: debouncedBio },
+      cursor
+    )
+  }, [
+    communityHandle, debouncedQ, filters.role, filters.country,
+    filters.skills, filters.tools, debouncedHeadline, debouncedBio, cursor,
+  ])
+
+  React.useEffect(() => {
+    if (!communityHandle) return
+
+    const ac = new AbortController()
+
+    async function load() {
+      setError(null)
+      setLoading(cursor === null)
+      setLoadingMore(cursor !== null)
+
+      try {
+        const res = await apiGet<MembersResponse>("/api/membership/list", queryObject, {
+          signal: ac.signal,
+        })
+
+        if (ac.signal.aborted) return
+
+        if (!res.ok) {
+          if ("status" in res.error && res.error.status === 401) {
+            router.replace(ROUTES.signIn)
+            return
+          }
+          setError("We couldn't load members. Try again.")
+          setLoading(false)
+          setLoadingMore(false)
+          return
+        }
+
+        const normalized = normalizeMembersPayload(res.value as unknown, communityHandle)
+        setData(normalized)
+        setItems((prev) => cursor ? mergeMembersUnique(prev, normalized.members) : normalized.members)
+        setLoading(false)
+        setLoadingMore(false)
+      } catch {
+        if (!ac.signal.aborted) {
+          setError("An unexpected error occurred while loading members.")
+          setLoading(false)
+          setLoadingMore(false)
+        }
+      }
+    }
+
+    void load()
+    return () => { ac.abort() }
+  }, [router, queryObject, cursor, communityHandle])
+
+  return { data, items, loading, loadingMore, error }
+}
+
+// === SUB-COMPONENTS (Members) ===
+
+function Chip({ children, onRemove }: { children: React.ReactNode; onRemove?: () => void }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-4xl bg-muted-foreground/10 px-2 py-1 text-xs font-medium">
+      <span className="truncate">{children}</span>
+      {onRemove && (
+        <button
+          type="button"
+          className="-mr-1 inline-flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
+          onClick={onRemove}
+          aria-label="Remove filter"
+        >
+          ×
+        </button>
+      )}
+    </span>
+  )
+}
+
+type FilterComboboxProps<T> = {
+  label: string
+  placeholder: string
+  items: T[]
+  value: T | null
+  onValueChange: (value: T | null) => void
+  inputValue?: string
+  onInputValueChange?: (value: string) => void
+  renderItem?: (item: T) => React.ReactNode
+  emptyMessage?: string
+  showClear?: boolean
+  showTrigger?: boolean
+  onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void
+}
+
+function FilterCombobox<T extends string>({
+  label,
+  placeholder,
+  items,
+  value,
+  onValueChange,
+  inputValue,
+  onInputValueChange,
+  renderItem,
+  emptyMessage = "No items found.",
+  showClear = true,
+  showTrigger = true,
+  onKeyDown,
+}: FilterComboboxProps<T>) {
+  return (
+    <div className="flex flex-col gap-2">
+      {label && <div className="text-xs font-medium text-foreground/70">{label}</div>}
+      <Combobox
+        items={items}
+        value={value}
+        onValueChange={(v) => onValueChange(v as T | null)}
+        inputValue={inputValue}
+        onInputValueChange={onInputValueChange}
+      >
+        <ComboboxInput
+          placeholder={placeholder}
+          className="w-full"
+          showClear={showClear}
+          showTrigger={showTrigger}
+          onKeyDown={onKeyDown}
+        />
+        <ComboboxContent className="bg-popover text-popover-foreground border border-border/60 shadow-lg rounded-2xl p-1">
+          <ComboboxEmpty className="px-3 py-2 text-sm text-muted-foreground">{emptyMessage}</ComboboxEmpty>
+          <ComboboxList className="max-h-64 overflow-auto">
+            <ComboboxCollection>
+              {(item: T) => (
+                <ComboboxItem
+                  key={item}
+                  value={item}
+                  className="data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground flex items-center gap-2 rounded-xl px-3 py-2 text-sm"
+                >
+                  <span className="flex-1">{renderItem ? renderItem(item) : item}</span>
+                </ComboboxItem>
+              )}
+            </ComboboxCollection>
+          </ComboboxList>
+        </ComboboxContent>
+      </Combobox>
+    </div>
+  )
+}
+
+function MemberCard({ member }: { member: CommunityMember }) {
+  const u = member.user
+  const displayName = u.name?.trim() || `@${u.handle}`
+  const href = userPath(u.handle)
+
+  return (
+    <Link
+      href={href}
+      className="group rounded-2xl border border-border/60 bg-card/30 p-4 transition-colors hover:bg-card/50"
+      aria-label={`View ${displayName}'s profile`}
+    >
+      <div className="flex items-start gap-3">
+        <ProfileAvatar type="user" src={u.image} name={displayName} className="h-10 w-10" />
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <div className="truncate text-sm font-medium">{displayName}</div>
+              <div className="truncate text-xs text-muted-foreground">@{u.handle}</div>
+            </div>
+            <Badge variant="secondary" className="shrink-0">
+              {member.role}
+            </Badge>
+          </div>
+
+          {u.headline && <div className="text-xs text-foreground/80 line-clamp-2">{u.headline}</div>}
+
+          <div className="mt-2 flex flex-wrap gap-2">
+            {u.location && <Chip>{u.location}</Chip>}
+            {u.love != null && <Chip>Love {formatCompact(u.love)}</Chip>}
+            {u.reach != null && <Chip>Reach {formatCompact(u.reach)}</Chip>}
+            {u.gravity != null && <Chip>Gravity {formatCompact(u.gravity)}</Chip>}
+          </div>
+
+          {(u.skills?.length || u.tools?.length) ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {(u.skills || []).slice(0, 4).map((s) => (
+                <span
+                  key={`s:${s}`}
+                  className="inline-flex items-center rounded-4xl bg-muted-foreground/10 px-2 py-1 text-[11px] text-foreground/90"
+                >
+                  {s}
+                </span>
+              ))}
+              {(u.tools || []).slice(0, 4).map((t) => (
+                <span
+                  key={`t:${t}`}
+                  className="inline-flex items-center rounded-4xl bg-muted-foreground/10 px-2 py-1 text-[11px] text-foreground/90"
+                >
+                  {t}
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </div>
+      <div className="mt-4 text-xs text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
+        View profile
+      </div>
+    </Link>
+  )
+}
+
+function MemberRow({ member }: { member: CommunityMember }) {
+  const u = member.user
+  const displayName = u.name?.trim() || `@${u.handle}`
+  const href = userPath(u.handle)
+
+  return (
+    <Link
+      href={href}
+      className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3 px-4 py-3 text-sm transition-colors hover:bg-card/50"
+      aria-label={`View ${displayName}'s profile`}
+    >
+      <div className="flex min-w-0 items-center gap-3">
+        <ProfileAvatar type="user" src={u.image} name={displayName} className="h-8 w-8" />
+        <div className="min-w-0">
+          <div className="truncate font-medium">{displayName}</div>
+          <div className="truncate text-xs text-muted-foreground">@{u.handle}</div>
+          {u.headline && <div className="truncate text-xs text-foreground/70">{u.headline}</div>}
+        </div>
+      </div>
+
+      <div className="flex items-center">
+        <Badge variant="secondary">{member.role}</Badge>
+      </div>
+
+      <div className="flex items-center">
+        <span className="truncate text-sm text-foreground/80">{u.location || "\u2014"}</span>
+      </div>
+
+      <div className="flex items-center justify-end gap-2 text-xs text-muted-foreground">
+        {u.gravity != null && <span>G {formatCompact(u.gravity)}</span>}
+        {u.love != null && <span>L {formatCompact(u.love)}</span>}
+        {u.reach != null && <span>R {formatCompact(u.reach)}</span>}
+      </div>
+    </Link>
+  )
+}
+
+function MembersLoadingState() {
+  return (
+    <div className="flex items-center justify-center py-20" aria-busy="true">
+      <Spinner className="size-8 text-muted-foreground" />
+    </div>
+  )
+}
+
+function FiltersPanel({
+  filters,
+  onFiltersChange,
+  onAddSkill,
+  onAddTool,
+  onClearAll,
+  memberCount,
+  hasMorePages,
+}: {
+  filters: FilterState
+  onFiltersChange: (updates: Partial<FilterState>) => void
+  onAddSkill: (skill: string) => void
+  onAddTool: (tool: string) => void
+  onClearAll: () => void
+  memberCount: number
+  hasMorePages: boolean
+}) {
+  const [skillQuery, setSkillQuery] = React.useState("")
+  const [toolQuery, setToolQuery] = React.useState("")
+
+  const countryItems = React.useMemo(() => COUNTRIES.map((c) => c.name), [])
+  const roleItems = React.useMemo<Array<MemberRole | "">>(
+    () => ["", "OWNER", "ADMIN", "MOD", "MEMBER"],
+    []
+  )
+
+  const selectedSkillSet = React.useMemo(() => new Set(filters.skills.map((s) => s.toLowerCase())), [filters.skills])
+  const selectedToolSet = React.useMemo(() => new Set(filters.tools.map((t) => t.toLowerCase())), [filters.tools])
+
+  const availableSkills = React.useMemo(() => {
+    return (SKILLS as string[]).filter((s) => !selectedSkillSet.has(s.toLowerCase()))
+  }, [selectedSkillSet])
+
+  const [toolOptions, setToolOptions] = React.useState<string[]>(TOOLS as string[])
+  const availableTools = React.useMemo(() => {
+    return toolOptions.filter((t) => !selectedToolSet.has(t.toLowerCase()))
+  }, [toolOptions, selectedToolSet])
+
+  function handleAddTool(next: string) {
+    const v = next.trim()
+    if (!v || selectedToolSet.has(v.toLowerCase())) return
+    if (!toolOptions.some((t) => t.toLowerCase() === v.toLowerCase())) {
+      setToolOptions((prev) => [v, ...prev])
+    }
+    onAddTool(v)
+    setToolQuery("")
   }
+
+  function handleAddSkill(next: string) {
+    const v = next.trim()
+    if (!v || selectedSkillSet.has(v.toLowerCase())) return
+    onAddSkill(v)
+    setSkillQuery("")
+  }
+
+  return (
+    <section className="rounded-2xl border border-border/60 bg-card/30 p-4" aria-label="Member filters">
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="flex flex-col gap-2">
+          <div className="text-xs font-medium text-foreground/70">Search</div>
+          <Input
+            placeholder="Name, handle, headline\u2026"
+            value={filters.q}
+            onChange={(e) => onFiltersChange({ q: e.target.value })}
+            aria-label="Search members"
+          />
+        </div>
+
+        <FilterCombobox
+          label="Role"
+          placeholder="Any"
+          items={roleItems}
+          value={filters.role || null}
+          onValueChange={(v) => onFiltersChange({ role: (v as MemberRole) || "" })}
+          renderItem={(item) => item || "Any"}
+        />
+
+        <FilterCombobox
+          label="Country"
+          placeholder="Any"
+          items={countryItems}
+          value={filters.country || null}
+          onValueChange={(v) => onFiltersChange({ country: v || "" })}
+        />
+
+        <div className="flex flex-col gap-2">
+          <div className="text-xs font-medium text-foreground/70">Headline contains</div>
+          <Input
+            placeholder="e.g. Designer"
+            value={filters.headline}
+            onChange={(e) => onFiltersChange({ headline: e.target.value })}
+            aria-label="Filter by headline"
+          />
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <div className="text-xs font-medium text-foreground/70">Bio contains</div>
+          <Input
+            placeholder="keywords"
+            value={filters.bio}
+            onChange={(e) => onFiltersChange({ bio: e.target.value })}
+            aria-label="Filter by bio"
+          />
+        </div>
+
+        <div className="grid gap-4 lg:col-span-3 lg:grid-cols-2">
+          <div className="flex flex-col gap-2">
+            <div className="text-xs font-medium text-foreground/70">Skills</div>
+            <FilterCombobox
+              label=""
+              placeholder="Add a skill\u2026"
+              items={availableSkills}
+              value={null}
+              onValueChange={(v) => v && handleAddSkill(v)}
+              inputValue={skillQuery}
+              onInputValueChange={setSkillQuery}
+            />
+            {filters.skills.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {filters.skills.map((s) => (
+                  <Chip key={s} onRemove={() => onFiltersChange({ skills: filters.skills.filter((x) => x !== s) })}>
+                    {s}
+                  </Chip>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <div className="text-xs font-medium text-foreground/70">Tools</div>
+            <FilterCombobox
+              label=""
+              placeholder="Add a tool\u2026"
+              items={availableTools}
+              value={null}
+              onValueChange={(v) => v && handleAddTool(v)}
+              inputValue={toolQuery}
+              onInputValueChange={setToolQuery}
+              emptyMessage={`Press Enter to add "${toolQuery.trim() || "\u2026"}".`}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault()
+                  handleAddTool(toolQuery)
+                }
+              }}
+            />
+            {filters.tools.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {filters.tools.map((t) => (
+                  <Chip key={t} onRemove={() => onFiltersChange({ tools: filters.tools.filter((x) => x !== t) })}>
+                    {t}
+                  </Chip>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {hasActiveFilters(filters) && (
+          <>
+            <Separator className="lg:col-span-3" />
+            <div className="flex items-center justify-center gap-2 lg:col-span-3">
+              <Badge variant="secondary">
+                {memberCount}{hasMorePages ? "+" : ""} members
+              </Badge>
+              <Button type="button" variant="destructive" size="sm" onClick={onClearAll}>
+                Clear filters
+              </Button>
+            </div>
+          </>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function MembersGrid({ items, view }: { items: CommunityMember[]; view: "cards" | "list" }) {
+  if (view === "cards") {
+    return (
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {items.map((m) => (
+          <MemberCard key={m.membershipId} member={m} />
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-2xl border border-border/60 bg-card/30 overflow-hidden">
+      <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3 border-b border-border/60 px-4 py-3 text-xs font-medium text-foreground/70">
+        <div>Member</div>
+        <div>Role</div>
+        <div>Location</div>
+        <div className="text-right">Score</div>
+      </div>
+      {items.map((m) => (
+        <MemberRow key={m.membershipId} member={m} />
+      ))}
+    </div>
+  )
+}
+
+function MembersEmptyState({ hasFilters, onClearFilters }: { hasFilters: boolean; onClearFilters: () => void }) {
+  return (
+    <div className="rounded-2xl border border-border/60 bg-card/30 px-4 py-10 text-center text-sm text-muted-foreground">
+      <p>No members match your filters.</p>
+      {hasFilters && (
+        <button
+          type="button"
+          onClick={onClearFilters}
+          className="mt-2 text-primary hover:underline"
+        >
+          Clear all filters
+        </button>
+      )}
+    </div>
+  )
 }
 
 // === PAGE ===
 
 export default function CommunityProfilePage() {
+  const router = useRouter()
   const params = useParams<{ handle: string }>()
   const rawHandle = String(params?.handle ?? "")
   const handle = React.useMemo(() => normalizeHandle(rawHandle), [rawHandle])
 
-  const [state, setState] = React.useState<LoadState>({ status: "idle" })
+  // --- Community data ---
+  const [state, setState] = React.useState<CommunityLoadState>({ status: "idle" })
 
   React.useEffect(() => {
     const parsed = validateHandle(handle)
@@ -140,6 +838,59 @@ export default function CommunityProfilePage() {
 
     return () => controller.abort()
   }, [handle])
+
+  // --- Members data ---
+  const [view, setView] = React.useState<"cards" | "list">("cards")
+  const [cursor, setCursor] = React.useState<string | null>(null)
+  const [isFiltersOpen, setIsFiltersOpen] = React.useState(false)
+  const [refreshing, setRefreshing] = React.useState(false)
+  const refreshStartedRef = React.useRef(false)
+
+  const [filters, setFilters] = React.useState<FilterState>({
+    q: "", role: "", country: "", skills: [], tools: [], headline: "", bio: "",
+  })
+
+  const canViewDirectory = state.status === "ready" && state.data.canViewDirectory
+  const { data: membersData, items: memberItems, loading: membersLoading, loadingMore, error: membersError } =
+    useMembersData(canViewDirectory ? handle : "", filters, cursor)
+
+  const activeFilters = hasActiveFilters(filters)
+
+  React.useEffect(() => {
+    setCursor(null)
+  }, [filters.q, filters.role, filters.country, filters.skills, filters.tools, filters.headline, filters.bio])
+
+  function handleFiltersChange(updates: Partial<FilterState>) {
+    setFilters((prev) => ({ ...prev, ...updates }))
+  }
+
+  function handleClearAll() {
+    setFilters({ q: "", role: "", country: "", skills: [], tools: [], headline: "", bio: "" })
+  }
+
+  function handleAddSkill(skill: string) {
+    setFilters((prev) => ({ ...prev, skills: [...prev.skills, skill] }))
+  }
+
+  function handleAddTool(tool: string) {
+    setFilters((prev) => ({ ...prev, tools: [...prev.tools, tool] }))
+  }
+
+  function handleRefresh() {
+    setRefreshing(true)
+    refreshStartedRef.current = false
+    setCursor(null)
+  }
+
+  React.useEffect(() => {
+    if (!refreshing) return
+    if (membersLoading) {
+      refreshStartedRef.current = true
+    } else if (refreshStartedRef.current) {
+      setRefreshing(false)
+      refreshStartedRef.current = false
+    }
+  }, [refreshing, membersLoading])
 
   // --- SKELETON ---
 
@@ -238,12 +989,10 @@ export default function CommunityProfilePage() {
 
   // --- READY ---
 
-  const { community, memberCount, canViewDirectory, isAdmin, viewerMembership, orbitMembers } =
-    state.data
+  const { community, memberCount, isAdmin, viewerMembership } = state.data
 
   const handleLabel = community.handle ?? handle
   const avatarSrc = community.avatarUrl ?? ""
-  const previewMembers = orbitMembers.slice(0, 5)
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
@@ -258,13 +1007,36 @@ export default function CommunityProfilePage() {
         }
         title={community.name}
         description={`@${handleLabel}`}
-        sticky={false}
+        sticky
         actions={
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             {viewerMembership?.status !== "APPROVED" && community.isMembershipOpen ? (
               <Button variant="secondary" render={<Link href={communityApplyPath(handleLabel)} />}>
                 Apply
               </Button>
+            ) : null}
+            {canViewDirectory ? (
+              <>
+                <Button type="button" variant="secondary" disabled={refreshing} onClick={handleRefresh}>
+                  {refreshing && <RefreshCw className="size-4 animate-spin" />}
+                  {refreshing ? "Refreshing\u2026" : "Refresh"}
+                </Button>
+                <Button type="button" variant={isFiltersOpen ? "default" : "secondary"} onClick={() => setIsFiltersOpen((v) => !v)}>
+                  Filters
+                </Button>
+                <Tabs className="gap-0" value={view} onValueChange={(v) => setView(v === "list" ? "list" : "cards")}>
+                  <TabsList>
+                    <TabsTrigger value="cards" aria-label="Cards view" className="cursor-pointer px-3 !border-transparent data-active:!bg-primary data-active:!text-primary-foreground">
+                      <LayoutGrid className="size-4" />
+                    </TabsTrigger>
+                    <TabsTrigger value="list" aria-label="List view" className="cursor-pointer px-3 !border-transparent data-active:!bg-primary data-active:!text-primary-foreground">
+                      <List className="size-4" />
+                    </TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="cards" />
+                  <TabsContent value="list" />
+                </Tabs>
+              </>
             ) : null}
             <PageHeaderMenu
               items={[
@@ -272,7 +1044,6 @@ export default function CommunityProfilePage() {
                 ...(isAdmin
                   ? [{ label: "Applications", href: communityApplicationsPath(handleLabel) }]
                   : []),
-                { label: "Members", href: communityMembersPath(handleLabel) },
                 ...(isAdmin
                   ? [{ label: "Settings", href: communitySettingsPath(handleLabel) }]
                   : []),
@@ -283,21 +1054,6 @@ export default function CommunityProfilePage() {
         actionsAsFormActions={false}
       />
 
-      {/* Viewer membership */}
-      {viewerMembership ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Your membership</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-3">
-              <Badge variant="secondary">{roleLabel(viewerMembership.role)}</Badge>
-              <Badge variant="outline">{statusLabel(viewerMembership.status)}</Badge>
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
-
       {/* About */}
       <Card>
         <CardHeader>
@@ -305,7 +1061,6 @@ export default function CommunityProfilePage() {
         </CardHeader>
         <CardContent>
           <div className="flex flex-col gap-3">
-            {/* Row 1: Created + Members */}
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="rounded-lg border border-border/60 p-3">
                 <div className="text-xs font-medium text-foreground/70">Created</div>
@@ -317,7 +1072,6 @@ export default function CommunityProfilePage() {
               </div>
             </div>
 
-            {/* Row 2: Visibility + Membership */}
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="rounded-lg border border-border/60 p-3">
                 <div className="text-xs font-medium text-foreground/70">Visibility</div>
@@ -337,7 +1091,6 @@ export default function CommunityProfilePage() {
               </div>
             </div>
 
-            {/* Description */}
             {community.description ? (
               <div className="rounded-lg border border-border/60 p-3">
                 <div className="text-xs font-medium text-foreground/70">Description</div>
@@ -350,42 +1103,49 @@ export default function CommunityProfilePage() {
         </CardContent>
       </Card>
 
-      {/* Members preview */}
-      {canViewDirectory && previewMembers.length > 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Members</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-col gap-3">
-              {previewMembers.map((m) => {
-                const memberName = m.name?.trim() || m.handle || "Unknown"
-                const memberAvatar = m.avatarUrl || m.image || ""
+      {/* Member directory */}
+      {canViewDirectory ? (
+        <>
 
-                return (
-                  <div key={m.id} className="flex items-center gap-3">
-                    <ProfileAvatar type="user" src={memberAvatar} name={memberName} />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium text-foreground">{memberName}</div>
-                      {m.handle ? (
-                        <div className="truncate text-xs text-muted-foreground">@{m.handle}</div>
-                      ) : null}
-                    </div>
-                    {m.headline ? (
-                      <div className="hidden truncate text-xs text-muted-foreground sm:block">
-                        {m.headline}
-                      </div>
-                    ) : null}
-                  </div>
-                )
-              })}
+          {isFiltersOpen && (
+            <FiltersPanel
+              filters={filters}
+              onFiltersChange={handleFiltersChange}
+              onAddSkill={handleAddSkill}
+              onAddTool={handleAddTool}
+              onClearAll={handleClearAll}
+              memberCount={memberItems.length}
+              hasMorePages={!!membersData?.page?.nextCursor}
+            />
+          )}
 
-              <Button variant="ghost" size="sm" className="w-fit" render={<Link href={communityMembersPath(handleLabel)} />}>
-                View all members →
-              </Button>
+          {membersError && (
+            <div
+              className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive"
+              role="alert"
+            >
+              {membersError}
             </div>
-          </CardContent>
-        </Card>
+          )}
+
+          <div aria-live="polite" aria-atomic="true" className="sr-only">
+            {membersLoading ? "Loading members..." : `${memberItems.length} members loaded`}
+          </div>
+
+          {membersLoading ? (
+            <MembersLoadingState />
+          ) : memberItems.length === 0 ? (
+            <MembersEmptyState hasFilters={activeFilters} onClearFilters={handleClearAll} />
+          ) : (
+            <InfiniteScroll
+              onLoadMore={() => setCursor(membersData?.page?.nextCursor ?? null)}
+              hasMore={!!membersData?.page?.nextCursor}
+              isLoading={loadingMore}
+            >
+              <MembersGrid items={memberItems} view={view} />
+            </InfiniteScroll>
+          )}
+        </>
       ) : null}
     </div>
   )

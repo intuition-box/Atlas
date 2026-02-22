@@ -96,9 +96,9 @@ export function communityDashboardPath(handle: string): string {
   return `/c/${encodeURIComponent(handle)}/dashboard`;
 }
 
-/** `/c/:handle/members` */
+/** @deprecated Members directory is now on the community profile page. */
 export function communityMembersPath(handle: string): string {
-  return `/c/${encodeURIComponent(handle)}/members`;
+  return communityPath(handle);
 }
 
 /** `/c/:handle/applications` */

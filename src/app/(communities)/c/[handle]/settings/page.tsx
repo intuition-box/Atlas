@@ -7,7 +7,7 @@ import { useParams, useRouter } from "next/navigation"
 import { getSession } from "next-auth/react"
 import { apiGet, apiPost } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
-import { communityPath, communitySettingsPath, communityMembersPath, communityOrbitPath, communityApplicationsPath } from "@/lib/routes"
+import { communityPath, communitySettingsPath, communityOrbitPath, communityApplicationsPath } from "@/lib/routes"
 
 import { AvatarDropzone } from "@/components/common/avatar-dropzone"
 import { HandleField } from "@/components/common/handle-field"
@@ -505,7 +505,6 @@ export default function CommunitySettingsPage() {
               items={[
                 { label: "Orbit", href: communityOrbitPath(communityHandle) },
                 { label: "Applications", href: communityApplicationsPath(communityHandle) },
-                { label: "Members", href: communityMembersPath(communityHandle) },
                 { label: "Profile", href: communityPath(communityHandle) },
               ]}
             />

@@ -7,7 +7,7 @@ import { RefreshCw } from "lucide-react"
 
 import { apiGet, apiPost } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
-import { ROUTES, userPath, communityPath, communityMembersPath, communityOrbitPath, communitySettingsPath } from "@/lib/routes"
+import { ROUTES, userPath, communityPath, communityOrbitPath, communitySettingsPath } from "@/lib/routes"
 
 import { PageHeader } from "@/components/common/page-header"
 import { PageHeaderMenu } from "@/components/common/page-header-menu"
@@ -793,7 +793,6 @@ export default function CommunityApplicationsPage() {
             <PageHeaderMenu
               items={[
                 { label: "Orbit", href: communityOrbitPath(handle) },
-                { label: "Members", href: communityMembersPath(handle) },
                 { label: "Profile", href: communityPath(handle) },
                 { label: "Settings", href: communitySettingsPath(handle) },
               ]}
