@@ -30,6 +30,7 @@ const ListMembershipQuerySchema = z
     role: z.nativeEnum(MembershipRole).optional(),
     status: z.nativeEnum(MembershipStatus).optional().default(MembershipStatus.APPROVED),
     orbitLevel: z.nativeEnum(OrbitLevel).optional(),
+    orbitLevelType: z.enum(["auto", "manual"]).optional(),
 
     // user profile filters
     q: z.string().trim().min(1).optional(),
@@ -42,6 +43,7 @@ const ListMembershipQuerySchema = z
     skills: z.string().trim().optional(),
     tools: z.string().trim().optional(),
     links: z.string().trim().optional(),
+    languages: z.string().trim().optional(),
   })
   .transform((v) => ({
     ...v,
@@ -59,6 +61,12 @@ const ListMembershipQuerySchema = z
       : [],
     links: v.links
       ? v.links
+          .split(",")
+          .map((x) => x.trim())
+          .filter(Boolean)
+      : [],
+    languages: v.languages
+      ? v.languages
           .split(",")
           .map((x) => x.trim())
           .filter(Boolean)
@@ -179,6 +187,11 @@ export async function GET(req: NextRequest) {
     ...(q.role ? { role: q.role } : null),
     ...(q.status ? { status: q.status } : null),
     ...(q.orbitLevel ? { orbitLevel: q.orbitLevel } : null),
+    ...(q.orbitLevelType === "manual"
+      ? { orbitLevelOverride: { not: null } }
+      : q.orbitLevelType === "auto"
+        ? { orbitLevelOverride: null }
+        : null),
   }
 
   const userAnd: Prisma.UserWhereInput[] = []
@@ -188,6 +201,7 @@ export async function GET(req: NextRequest) {
       OR: [
         { name: { contains: q.q, mode: "insensitive" } },
         { headline: { contains: q.q, mode: "insensitive" } },
+        { bio: { contains: q.q, mode: "insensitive" } },
       ],
     })
   }
@@ -201,6 +215,7 @@ export async function GET(req: NextRequest) {
   // UI “tools” maps to schema `tags`
   if (q.tools.length) userAnd.push({ tags: { hasSome: q.tools } })
   if (q.links.length) userAnd.push({ links: { hasSome: q.links } })
+  if (q.languages.length) userAnd.push({ languages: { hasSome: q.languages } })
 
   let handleUserIds: string[] | null = null
   if (q.q) {

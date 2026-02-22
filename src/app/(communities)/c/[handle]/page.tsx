@@ -19,6 +19,7 @@ import {
   ROUTES,
 } from "@/lib/routes"
 import { COUNTRIES } from "@/config/countries"
+import { LANGUAGE_LIST as LANGUAGES } from "@/config/languages"
 import { SKILL_LIST as SKILLS, TOOL_LIST as TOOLS } from "@/lib/attestations/definitions"
 
 import { PageHeader } from "@/components/common/page-header"
@@ -157,8 +158,9 @@ type FilterState = {
   country: string
   skills: string[]
   tools: string[]
-  headline: string
-  bio: string
+  orbitLevel: string
+  orbitLevelType: string
+  language: string
 }
 
 type QueryParams = {
@@ -168,8 +170,9 @@ type QueryParams = {
   location?: string
   skills?: string
   tools?: string
-  headline?: string
-  bio?: string
+  orbitLevel?: string
+  orbitLevelType?: string
+  languages?: string
   cursor?: string
   limit: number
 }
@@ -350,8 +353,9 @@ function buildQueryParams(communityHandle: string, filters: FilterState, cursor:
     location: optionalString(filters.country),
     skills: asCsv(filters.skills),
     tools: asCsv(filters.tools),
-    headline: optionalString(filters.headline),
-    bio: optionalString(filters.bio),
+    orbitLevel: optionalString(filters.orbitLevel),
+    orbitLevelType: optionalString(filters.orbitLevelType),
+    languages: optionalString(filters.language),
     cursor: cursor ?? undefined,
     limit: PAGE_SIZE,
   }
@@ -364,8 +368,9 @@ function hasActiveFilters(filters: FilterState): boolean {
     filters.country ||
     filters.skills.length ||
     filters.tools.length ||
-    filters.headline ||
-    filters.bio
+    filters.orbitLevel ||
+    filters.orbitLevelType ||
+    filters.language
   )
 }
 
@@ -389,18 +394,17 @@ function useMembersData(communityHandle: string, filters: FilterState, cursor: s
   const [error, setError] = React.useState<string | null>(null)
 
   const debouncedQ = useDebouncedValue(filters.q, DEBOUNCE_DELAY)
-  const debouncedHeadline = useDebouncedValue(filters.headline, DEBOUNCE_DELAY)
-  const debouncedBio = useDebouncedValue(filters.bio, DEBOUNCE_DELAY)
 
   const queryObject = React.useMemo(() => {
     return buildQueryParams(
       communityHandle,
-      { ...filters, q: debouncedQ, headline: debouncedHeadline, bio: debouncedBio },
+      { ...filters, q: debouncedQ },
       cursor
     )
   }, [
     communityHandle, debouncedQ, filters.role, filters.country,
-    filters.skills, filters.tools, debouncedHeadline, debouncedBio, cursor,
+    filters.skills, filters.tools, filters.orbitLevel, filters.orbitLevelType,
+    filters.language, cursor,
   ])
 
   React.useEffect(() => {
@@ -869,13 +873,18 @@ function FiltersPanel({
     setSkillQuery("")
   }
 
+  const orbitLevelItems = React.useMemo(() => ["", ...ORBIT_LEVELS.map((l) => l.value)], [])
+  const orbitTypeItems = React.useMemo(() => ["", "auto", "manual"], [])
+  const languageItems = React.useMemo(() => LANGUAGES as string[], [])
+
   return (
     <section className="rounded-2xl border border-border/60 bg-card/30 p-4" aria-label="Member filters">
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid gap-4 lg:grid-cols-2">
+        {/* Row 1: Search + Role */}
         <div className="flex flex-col gap-2">
           <div className="text-xs font-medium text-foreground/70">Search</div>
           <Input
-            placeholder="Name, handle, headline\u2026"
+            placeholder="Name, handle, bio..."
             value={filters.q}
             onChange={(e) => onFiltersChange({ q: e.target.value })}
             aria-label="Search members"
@@ -888,9 +897,10 @@ function FiltersPanel({
           items={roleItems}
           value={filters.role || null}
           onValueChange={(v) => onFiltersChange({ role: (v as MemberRole) || "" })}
-          renderItem={(item) => item || "Any"}
+          renderItem={(item) => (item ? item.charAt(0) + item.slice(1).toLowerCase() : "Any")}
         />
 
+        {/* Row 2: Country + Language */}
         <FilterCombobox
           label="Country"
           placeholder="Any"
@@ -899,32 +909,40 @@ function FiltersPanel({
           onValueChange={(v) => onFiltersChange({ country: v || "" })}
         />
 
-        <div className="flex flex-col gap-2">
-          <div className="text-xs font-medium text-foreground/70">Headline contains</div>
-          <Input
-            placeholder="e.g. Designer"
-            value={filters.headline}
-            onChange={(e) => onFiltersChange({ headline: e.target.value })}
-            aria-label="Filter by headline"
-          />
-        </div>
+        <FilterCombobox
+          label="Language"
+          placeholder="Any"
+          items={languageItems}
+          value={filters.language || null}
+          onValueChange={(v) => onFiltersChange({ language: v || "" })}
+        />
 
-        <div className="flex flex-col gap-2">
-          <div className="text-xs font-medium text-foreground/70">Bio contains</div>
-          <Input
-            placeholder="keywords"
-            value={filters.bio}
-            onChange={(e) => onFiltersChange({ bio: e.target.value })}
-            aria-label="Filter by bio"
-          />
-        </div>
+        {/* Row 3: Orbit level + Orbit level type */}
+        <FilterCombobox
+          label="Orbit level"
+          placeholder="Any"
+          items={orbitLevelItems}
+          value={filters.orbitLevel || null}
+          onValueChange={(v) => onFiltersChange({ orbitLevel: v || "" })}
+          renderItem={(item) => (item ? item.charAt(0) + item.slice(1).toLowerCase() : "Any")}
+        />
 
-        <div className="grid gap-4 lg:col-span-3 lg:grid-cols-2">
+        <FilterCombobox
+          label="Orbit level type"
+          placeholder="Any"
+          items={orbitTypeItems}
+          value={filters.orbitLevelType || null}
+          onValueChange={(v) => onFiltersChange({ orbitLevelType: v || "" })}
+          renderItem={(item) => (item === "auto" ? "Auto" : item === "manual" ? "Manual" : "Any")}
+        />
+
+        {/* Row 4: Skills + Tools */}
+        <div className="grid gap-4 lg:col-span-2 lg:grid-cols-2">
           <div className="flex flex-col gap-2">
             <div className="text-xs font-medium text-foreground/70">Skills</div>
             <FilterCombobox
               label=""
-              placeholder="Add a skill\u2026"
+              placeholder="Any"
               items={availableSkills}
               value={null}
               onValueChange={(v) => v && handleAddSkill(v)}
@@ -946,7 +964,7 @@ function FiltersPanel({
             <div className="text-xs font-medium text-foreground/70">Tools</div>
             <FilterCombobox
               label=""
-              placeholder="Add a tool\u2026"
+              placeholder="Any"
               items={availableTools}
               value={null}
               onValueChange={(v) => v && handleAddTool(v)}
@@ -974,8 +992,8 @@ function FiltersPanel({
 
         {hasActiveFilters(filters) && (
           <>
-            <Separator className="lg:col-span-3" />
-            <div className="flex items-center justify-center gap-2 lg:col-span-3">
+            <Separator className="lg:col-span-2" />
+            <div className="flex items-center justify-center gap-2 lg:col-span-2">
               <Badge variant="secondary">
                 {memberCount}{hasMorePages ? "+" : ""} members
               </Badge>
@@ -1137,7 +1155,7 @@ export default function CommunityProfilePage() {
   const refreshStartedRef = React.useRef(false)
 
   const [filters, setFilters] = React.useState<FilterState>({
-    q: "", role: "", country: "", skills: [], tools: [], headline: "", bio: "",
+    q: "", role: "", country: "", skills: [], tools: [], orbitLevel: "", orbitLevelType: "", language: "",
   })
 
   const canViewDirectory = state.status === "ready" && state.data.canViewDirectory
@@ -1148,14 +1166,14 @@ export default function CommunityProfilePage() {
 
   React.useEffect(() => {
     setCursor(null)
-  }, [filters.q, filters.role, filters.country, filters.skills, filters.tools, filters.headline, filters.bio])
+  }, [filters.q, filters.role, filters.country, filters.skills, filters.tools, filters.orbitLevel, filters.orbitLevelType, filters.language])
 
   function handleFiltersChange(updates: Partial<FilterState>) {
     setFilters((prev) => ({ ...prev, ...updates }))
   }
 
   function handleClearAll() {
-    setFilters({ q: "", role: "", country: "", skills: [], tools: [], headline: "", bio: "" })
+    setFilters({ q: "", role: "", country: "", skills: [], tools: [], orbitLevel: "", orbitLevelType: "", language: "" })
   }
 
   function handleAddSkill(skill: string) {
