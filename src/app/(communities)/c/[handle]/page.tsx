@@ -3,7 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
-import { Globe, Info, LayoutGrid, List, RefreshCw } from "lucide-react"
+import { Globe, LayoutGrid, List, RefreshCw } from "lucide-react"
 import { DiscordIcon, GitHubIcon, TelegramIcon, XIcon } from "@/components/ui/icons"
 
 import { apiGet } from "@/lib/api/client"
@@ -511,6 +511,19 @@ function FilterCombobox<T extends string>({
   )
 }
 
+const ROLE_LABELS: Record<MemberRole, string> = {
+  OWNER: "Owner",
+  ADMIN: "Admin",
+  MOD: "Mod",
+  MEMBER: "Member",
+}
+
+function formatOrbitLevel(level: string | null | undefined): string | null {
+  if (!level) return null
+  // e.g. "EXPLORER" → "Explorer", "CONTRIBUTOR" → "Contributor"
+  return level.charAt(0).toUpperCase() + level.slice(1).toLowerCase()
+}
+
 function MemberCard({ member }: { member: CommunityMember }) {
   const u = member.user
   const displayName = u.name?.trim() || `@${u.handle}`
@@ -519,87 +532,87 @@ function MemberCard({ member }: { member: CommunityMember }) {
   const hasOrbit = u.love != null || u.reach != null || u.gravity != null
   const hasSkills = (u.skills?.length ?? 0) > 0
   const hasTools = (u.tools?.length ?? 0) > 0
+  const orbitLabel = formatOrbitLevel(u.orbitLevel)
 
   return (
     <Card size="sm" className="transition-colors hover:bg-card/80">
       <Link href={href} aria-label={`View ${displayName}'s profile`} className="contents">
         <CardHeader className="!gap-0">
-          <div className="flex items-start gap-3">
-            <ProfileAvatar type="user" src={u.image} name={displayName} className="h-10 w-10" />
-            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-              <div className="flex items-center justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium">{displayName}</div>
-                  <div className="truncate text-xs text-muted-foreground">@{u.handle}</div>
-                </div>
-                {member.role !== "MEMBER" && (
-                  <Badge variant="secondary" className="shrink-0">
-                    {member.role}
-                  </Badge>
-                )}
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-start gap-3 min-w-0">
+              <ProfileAvatar type="user" src={u.image} name={displayName} className="h-10 w-10" />
+              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <div className="truncate text-sm font-medium">{displayName}</div>
+                <div className="truncate text-xs text-muted-foreground">@{u.handle}</div>
               </div>
-              {u.headline && <div className="text-xs text-foreground/80 line-clamp-2">{u.headline}</div>}
-              {u.location && <div className="text-xs text-muted-foreground">{u.location}</div>}
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              {orbitLabel && (
+                <Badge variant="secondary">{orbitLabel}</Badge>
+              )}
+              {member.role !== "MEMBER" && (
+                <Badge variant="secondary">{ROLE_LABELS[member.role]}</Badge>
+              )}
             </div>
           </div>
         </CardHeader>
 
         {hasOrbit && (
           <CardContent>
-            <Separator />
-            <div className="pt-3">
-              <div className="grid grid-cols-3 divide-x divide-border/60">
-                <div className="flex flex-col items-center">
-                  <span className="text-[10px] text-muted-foreground">Love</span>
-                  <span className="text-xs font-medium">{u.love != null ? formatCompact(u.love) : "\u2014"}</span>
-                </div>
-                <div className="flex flex-col items-center">
-                  <span className="text-[10px] text-muted-foreground">Reach</span>
-                  <span className="text-xs font-medium">{u.reach != null ? formatCompact(u.reach) : "\u2014"}</span>
-                </div>
-                <div className="flex flex-col items-center">
-                  <span className="text-[10px] text-muted-foreground">Gravity</span>
-                  <span className="text-xs font-medium">{u.gravity != null ? formatCompact(u.gravity) : "\u2014"}</span>
-                </div>
+            <div className="grid grid-cols-3 divide-x divide-border/60 rounded-lg border border-border/60 py-2">
+              <div className="flex flex-col items-center">
+                <span className="text-[10px] text-muted-foreground">Love</span>
+                <span className="text-xs font-medium">{u.love != null ? formatCompact(u.love) : "\u2014"}</span>
               </div>
+              <div className="flex flex-col items-center">
+                <span className="text-[10px] text-muted-foreground">Reach</span>
+                <span className="text-xs font-medium">{u.reach != null ? formatCompact(u.reach) : "\u2014"}</span>
+              </div>
+              <div className="flex flex-col items-center">
+                <span className="text-[10px] text-muted-foreground">Gravity</span>
+                <span className="text-xs font-medium">{u.gravity != null ? formatCompact(u.gravity) : "\u2014"}</span>
+              </div>
+            </div>
+          </CardContent>
+        )}
+
+        {u.location && (
+          <CardContent>
+            <h3 className="text-[11px] font-medium text-muted-foreground">Location</h3>
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              <Badge variant="secondary">{u.location}</Badge>
             </div>
           </CardContent>
         )}
 
         {hasSkills && (
           <CardContent>
-            <Separator />
-            <div className="pt-3">
-              <h3 className="text-[11px] font-medium text-muted-foreground">Skills</h3>
-              <div className="mt-1.5 flex flex-wrap gap-1">
-                {(u.skills || []).slice(0, 5).map((s) => (
-                  <span
-                    key={`s:${s}`}
-                    className="inline-flex items-center rounded-4xl bg-muted-foreground/10 px-1.5 py-0.5 text-[10px] text-foreground/90"
-                  >
-                    {s}
-                  </span>
-                ))}
-              </div>
+            <h3 className="text-[11px] font-medium text-muted-foreground">Skills</h3>
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              {(u.skills || []).slice(0, 5).map((s) => (
+                <span
+                  key={`s:${s}`}
+                  className="inline-flex items-center rounded-4xl bg-muted-foreground/10 px-1.5 py-0.5 text-[10px] text-foreground/90"
+                >
+                  {s}
+                </span>
+              ))}
             </div>
           </CardContent>
         )}
 
         {hasTools && (
           <CardContent>
-            <Separator />
-            <div className="pt-3">
-              <h3 className="text-[11px] font-medium text-muted-foreground">Tools</h3>
-              <div className="mt-1.5 flex flex-wrap gap-1">
-                {(u.tools || []).slice(0, 5).map((t) => (
-                  <span
-                    key={`t:${t}`}
-                    className="inline-flex items-center rounded-4xl bg-muted-foreground/10 px-1.5 py-0.5 text-[10px] text-foreground/90"
-                  >
-                    {t}
-                  </span>
-                ))}
-              </div>
+            <h3 className="text-[11px] font-medium text-muted-foreground">Tools</h3>
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              {(u.tools || []).slice(0, 5).map((t) => (
+                <span
+                  key={`t:${t}`}
+                  className="inline-flex items-center rounded-4xl bg-muted-foreground/10 px-1.5 py-0.5 text-[10px] text-foreground/90"
+                >
+                  {t}
+                </span>
+              ))}
             </div>
           </CardContent>
         )}
@@ -630,7 +643,7 @@ function MemberRow({ member }: { member: CommunityMember }) {
 
       <div className="flex items-center">
         {member.role !== "MEMBER" ? (
-          <Badge variant="secondary">{member.role}</Badge>
+          <Badge variant="secondary">{ROLE_LABELS[member.role]}</Badge>
         ) : (
           <span className="text-sm text-muted-foreground">{"\u2014"}</span>
         )}
@@ -932,7 +945,23 @@ export default function CommunityProfilePage() {
   const [view, setView] = React.useState<"cards" | "list">("cards")
   const [cursor, setCursor] = React.useState<string | null>(null)
   const [isFiltersOpen, setIsFiltersOpen] = React.useState(false)
-  const [isAboutOpen, setIsAboutOpen] = React.useState(true)
+  const [isAboutOpen, setIsAboutOpen] = React.useState(() => {
+    if (typeof window === "undefined") return true
+    try {
+      const stored = localStorage.getItem("community-about-open")
+      return stored === null ? true : stored === "true"
+    } catch {
+      return true
+    }
+  })
+
+  React.useEffect(() => {
+    try {
+      localStorage.setItem("community-about-open", String(isAboutOpen))
+    } catch {
+      // Storage full or disabled
+    }
+  }, [isAboutOpen])
   const [refreshing, setRefreshing] = React.useState(false)
   const refreshStartedRef = React.useRef(false)
 
@@ -1133,13 +1162,13 @@ export default function CommunityProfilePage() {
               onClick={() => setIsAboutOpen((v) => !v)}
               aria-label={isAboutOpen ? "Hide community info" : "Show community info"}
               aria-expanded={isAboutOpen}
-              className={`inline-flex h-9 items-center justify-center rounded-4xl px-3 text-sm transition-colors cursor-pointer ${
+              className={`inline-flex h-9 items-center justify-center rounded-4xl px-4 text-sm font-medium transition-colors cursor-pointer ${
                 isAboutOpen
                   ? "bg-primary text-primary-foreground"
                   : "bg-muted text-muted-foreground hover:text-foreground"
               }`}
             >
-              <Info className="size-4" />
+              About
             </button>
             <PageHeaderMenu
               items={[
