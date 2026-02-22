@@ -98,6 +98,11 @@ export async function POST(req: NextRequest) {
     if (input.isPublicDirectory !== undefined) data.isPublicDirectory = input.isPublicDirectory;
     if (input.membershipConfig !== undefined) data.membershipConfig = prismaJson(input.membershipConfig);
     if (input.orbitConfig !== undefined) data.orbitConfig = prismaJson(input.orbitConfig);
+    if (input.discordUrl !== undefined) data.discordUrl = input.discordUrl ?? null;
+    if (input.xUrl !== undefined) data.xUrl = input.xUrl ?? null;
+    if (input.telegramUrl !== undefined) data.telegramUrl = input.telegramUrl ?? null;
+    if (input.githubUrl !== undefined) data.githubUrl = input.githubUrl ?? null;
+    if (input.websiteUrl !== undefined) data.websiteUrl = input.websiteUrl ?? null;
 
     // Read old avatar URL before the transaction so we can clean up R2 after commit.
     const oldAvatarUrl =

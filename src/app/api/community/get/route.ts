@@ -25,6 +25,11 @@ type CommunityGetOk = {
     isPublicDirectory: boolean;
     membershipConfig: unknown | null;
     orbitConfig: unknown | null;
+    discordUrl: string | null;
+    xUrl: string | null;
+    telegramUrl: string | null;
+    githubUrl: string | null;
+    websiteUrl: string | null;
   };
   memberCount: number;
   canViewDirectory: boolean;
@@ -93,6 +98,11 @@ export async function GET(req: NextRequest) {
         isPublicDirectory: true,
         membershipConfig: true,
         orbitConfig: true,
+        discordUrl: true,
+        xUrl: true,
+        telegramUrl: true,
+        githubUrl: true,
+        websiteUrl: true,
         _count: {
           select: {
             memberships: { where: { status: MembershipStatus.APPROVED } },
@@ -165,6 +175,11 @@ export async function GET(req: NextRequest) {
           isPublicDirectory: row.isPublicDirectory,
           membershipConfig: null,
           orbitConfig: null,
+          discordUrl: row.discordUrl,
+          xUrl: row.xUrl,
+          telegramUrl: row.telegramUrl,
+          githubUrl: row.githubUrl,
+          websiteUrl: row.websiteUrl,
         },
         memberCount: row._count.memberships,
         canViewDirectory: false,
@@ -239,6 +254,11 @@ export async function GET(req: NextRequest) {
         isPublicDirectory: row.isPublicDirectory,
         membershipConfig: (row.membershipConfig as unknown) ?? null,
         orbitConfig: (row.orbitConfig as unknown) ?? null,
+        discordUrl: row.discordUrl,
+        xUrl: row.xUrl,
+        telegramUrl: row.telegramUrl,
+        githubUrl: row.githubUrl,
+        websiteUrl: row.websiteUrl,
       },
       memberCount: row._count.memberships,
       canViewDirectory,

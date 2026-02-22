@@ -361,6 +361,13 @@ model Community {
   /// If false, users cannot submit new applications to join this community.
   isMembershipOpen Boolean @default(true)
 
+  // Social links (plain URLs, no OAuth)
+  discordUrl  String?
+  xUrl        String?
+  telegramUrl String?
+  githubUrl   String?
+  websiteUrl  String?
+
   // JSON settings so you can evolve without migrations every week
   membershipConfig Json?
   orbitConfig       Json? // thresholds, weights, etc.

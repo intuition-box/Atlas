@@ -197,6 +197,11 @@ export const CommunityCreateSchema = z.object({
   isPublicDirectory: z.coerce.boolean().optional(),
   membershipConfig: jsonOk(z.unknown()).nullable().optional(),
   orbitConfig: jsonOk(z.unknown()).nullable().optional(),
+  discordUrl: OptionalUrl.nullable().optional(),
+  xUrl: OptionalUrl.nullable().optional(),
+  telegramUrl: OptionalUrl.nullable().optional(),
+  githubUrl: OptionalUrl.nullable().optional(),
+  websiteUrl: OptionalUrl.nullable().optional(),
 });
 
 export const CommunityUpdateSchema = z.object({
@@ -209,6 +214,11 @@ export const CommunityUpdateSchema = z.object({
   isPublicDirectory: z.coerce.boolean().optional(),
   membershipConfig: jsonOk(z.unknown()).nullable().optional(),
   orbitConfig: jsonOk(z.unknown()).nullable().optional(),
+  discordUrl: OptionalUrl.nullable().optional(),
+  xUrl: OptionalUrl.nullable().optional(),
+  telegramUrl: OptionalUrl.nullable().optional(),
+  githubUrl: OptionalUrl.nullable().optional(),
+  websiteUrl: OptionalUrl.nullable().optional(),
 });
 
 export const CommunityGetSchema = z

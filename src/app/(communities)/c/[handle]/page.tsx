@@ -3,7 +3,8 @@
 import * as React from "react"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
-import { LayoutGrid, List, RefreshCw } from "lucide-react"
+import { Globe, Info, LayoutGrid, List, RefreshCw } from "lucide-react"
+import { DiscordIcon, GitHubIcon, TelegramIcon, XIcon } from "@/components/ui/icons"
 
 import { apiGet } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
@@ -26,7 +27,7 @@ import { ProfileAvatar } from "@/components/common/profile-avatar"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Combobox,
   ComboboxCollection,
@@ -61,6 +62,11 @@ type CommunityGetResponse = {
     createdAt: string
     isMembershipOpen: boolean
     isPublicDirectory: boolean
+    discordUrl: string | null
+    xUrl: string | null
+    telegramUrl: string | null
+    githubUrl: string | null
+    websiteUrl: string | null
   }
   memberCount: number
   canViewDirectory: boolean
@@ -184,6 +190,50 @@ function fmtDate(iso: string) {
   return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
 }
 
+
+function safeUrl(input: string): string | null {
+  const raw = /^https?:\/\//i.test(input) ? input : `https://${input}`
+  try {
+    const url = new URL(raw)
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null
+    return url.toString()
+  } catch {
+    return null
+  }
+}
+
+/** Strips protocol and trailing slash for display (e.g. "https://wave.so/" → "wave.so"). */
+function displayUrl(input: string): string {
+  return input.replace(/^https?:\/\//i, "").replace(/\/+$/, "")
+}
+
+const SOCIAL_BASES: Record<string, string> = {
+  discordUrl: "discord.gg/",
+  xUrl: "x.com/",
+  githubUrl: "github.com/",
+  telegramUrl: "t.me/",
+}
+
+/** Extracts a display handle from a full URL (e.g. "https://x.com/wavedotso" → "wavedotso"). */
+function displaySocialHandle(key: string, url: string): string {
+  const base = SOCIAL_BASES[key]
+  if (base) {
+    const stripped = url.replace(/^https?:\/\//i, "")
+    if (stripped.toLowerCase().startsWith(base.toLowerCase())) {
+      const handle = stripped.slice(base.length).replace(/\/+$/, "")
+      if (handle) return handle
+    }
+  }
+  return displayUrl(url)
+}
+
+const SOCIAL_LINKS = [
+  { key: "discordUrl", label: "Discord", icon: DiscordIcon },
+  { key: "xUrl", label: "X", icon: XIcon },
+  { key: "githubUrl", label: "GitHub", icon: GitHubIcon },
+  { key: "telegramUrl", label: "Telegram", icon: TelegramIcon },
+  { key: "websiteUrl", label: "Website", icon: Globe },
+] as const
 
 // === HELPERS (Members) ===
 
@@ -466,60 +516,95 @@ function MemberCard({ member }: { member: CommunityMember }) {
   const displayName = u.name?.trim() || `@${u.handle}`
   const href = userPath(u.handle)
 
+  const hasOrbit = u.love != null || u.reach != null || u.gravity != null
+  const hasSkills = (u.skills?.length ?? 0) > 0
+  const hasTools = (u.tools?.length ?? 0) > 0
+
   return (
-    <Link
-      href={href}
-      className="group rounded-2xl border border-border/60 bg-card/30 p-4 transition-colors hover:bg-card/50"
-      aria-label={`View ${displayName}'s profile`}
-    >
-      <div className="flex items-start gap-3">
-        <ProfileAvatar type="user" src={u.image} name={displayName} className="h-10 w-10" />
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <div className="flex items-center justify-between gap-2">
-            <div className="min-w-0">
-              <div className="truncate text-sm font-medium">{displayName}</div>
-              <div className="truncate text-xs text-muted-foreground">@{u.handle}</div>
+    <Card size="sm" className="transition-colors hover:bg-card/80">
+      <Link href={href} aria-label={`View ${displayName}'s profile`} className="contents">
+        <CardHeader className="!gap-0">
+          <div className="flex items-start gap-3">
+            <ProfileAvatar type="user" src={u.image} name={displayName} className="h-10 w-10" />
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium">{displayName}</div>
+                  <div className="truncate text-xs text-muted-foreground">@{u.handle}</div>
+                </div>
+                {member.role !== "MEMBER" && (
+                  <Badge variant="secondary" className="shrink-0">
+                    {member.role}
+                  </Badge>
+                )}
+              </div>
+              {u.headline && <div className="text-xs text-foreground/80 line-clamp-2">{u.headline}</div>}
+              {u.location && <div className="text-xs text-muted-foreground">{u.location}</div>}
             </div>
-            <Badge variant="secondary" className="shrink-0">
-              {member.role}
-            </Badge>
           </div>
+        </CardHeader>
 
-          {u.headline && <div className="text-xs text-foreground/80 line-clamp-2">{u.headline}</div>}
-
-          <div className="mt-2 flex flex-wrap gap-2">
-            {u.location && <Chip>{u.location}</Chip>}
-            {u.love != null && <Chip>Love {formatCompact(u.love)}</Chip>}
-            {u.reach != null && <Chip>Reach {formatCompact(u.reach)}</Chip>}
-            {u.gravity != null && <Chip>Gravity {formatCompact(u.gravity)}</Chip>}
-          </div>
-
-          {(u.skills?.length || u.tools?.length) ? (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {(u.skills || []).slice(0, 4).map((s) => (
-                <span
-                  key={`s:${s}`}
-                  className="inline-flex items-center rounded-4xl bg-muted-foreground/10 px-2 py-1 text-[11px] text-foreground/90"
-                >
-                  {s}
-                </span>
-              ))}
-              {(u.tools || []).slice(0, 4).map((t) => (
-                <span
-                  key={`t:${t}`}
-                  className="inline-flex items-center rounded-4xl bg-muted-foreground/10 px-2 py-1 text-[11px] text-foreground/90"
-                >
-                  {t}
-                </span>
-              ))}
+        {hasOrbit && (
+          <CardContent>
+            <Separator />
+            <div className="pt-3">
+              <div className="grid grid-cols-3 divide-x divide-border/60">
+                <div className="flex flex-col items-center">
+                  <span className="text-[10px] text-muted-foreground">Love</span>
+                  <span className="text-xs font-medium">{u.love != null ? formatCompact(u.love) : "\u2014"}</span>
+                </div>
+                <div className="flex flex-col items-center">
+                  <span className="text-[10px] text-muted-foreground">Reach</span>
+                  <span className="text-xs font-medium">{u.reach != null ? formatCompact(u.reach) : "\u2014"}</span>
+                </div>
+                <div className="flex flex-col items-center">
+                  <span className="text-[10px] text-muted-foreground">Gravity</span>
+                  <span className="text-xs font-medium">{u.gravity != null ? formatCompact(u.gravity) : "\u2014"}</span>
+                </div>
+              </div>
             </div>
-          ) : null}
-        </div>
-      </div>
-      <div className="mt-4 text-xs text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
-        View profile
-      </div>
-    </Link>
+          </CardContent>
+        )}
+
+        {hasSkills && (
+          <CardContent>
+            <Separator />
+            <div className="pt-3">
+              <h3 className="text-[11px] font-medium text-muted-foreground">Skills</h3>
+              <div className="mt-1.5 flex flex-wrap gap-1">
+                {(u.skills || []).slice(0, 5).map((s) => (
+                  <span
+                    key={`s:${s}`}
+                    className="inline-flex items-center rounded-4xl bg-muted-foreground/10 px-1.5 py-0.5 text-[10px] text-foreground/90"
+                  >
+                    {s}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </CardContent>
+        )}
+
+        {hasTools && (
+          <CardContent>
+            <Separator />
+            <div className="pt-3">
+              <h3 className="text-[11px] font-medium text-muted-foreground">Tools</h3>
+              <div className="mt-1.5 flex flex-wrap gap-1">
+                {(u.tools || []).slice(0, 5).map((t) => (
+                  <span
+                    key={`t:${t}`}
+                    className="inline-flex items-center rounded-4xl bg-muted-foreground/10 px-1.5 py-0.5 text-[10px] text-foreground/90"
+                  >
+                    {t}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </CardContent>
+        )}
+      </Link>
+    </Card>
   )
 }
 
@@ -544,7 +629,11 @@ function MemberRow({ member }: { member: CommunityMember }) {
       </div>
 
       <div className="flex items-center">
-        <Badge variant="secondary">{member.role}</Badge>
+        {member.role !== "MEMBER" ? (
+          <Badge variant="secondary">{member.role}</Badge>
+        ) : (
+          <span className="text-sm text-muted-foreground">{"\u2014"}</span>
+        )}
       </div>
 
       <div className="flex items-center">
@@ -747,7 +836,7 @@ function FiltersPanel({
 function MembersGrid({ items, view }: { items: CommunityMember[]; view: "cards" | "list" }) {
   if (view === "cards") {
     return (
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2">
         {items.map((m) => (
           <MemberCard key={m.membershipId} member={m} />
         ))}
@@ -843,6 +932,7 @@ export default function CommunityProfilePage() {
   const [view, setView] = React.useState<"cards" | "list">("cards")
   const [cursor, setCursor] = React.useState<string | null>(null)
   const [isFiltersOpen, setIsFiltersOpen] = React.useState(false)
+  const [isAboutOpen, setIsAboutOpen] = React.useState(true)
   const [refreshing, setRefreshing] = React.useState(false)
   const refreshStartedRef = React.useRef(false)
 
@@ -1038,6 +1128,19 @@ export default function CommunityProfilePage() {
                 </Tabs>
               </>
             ) : null}
+            <button
+              type="button"
+              onClick={() => setIsAboutOpen((v) => !v)}
+              aria-label={isAboutOpen ? "Hide community info" : "Show community info"}
+              aria-expanded={isAboutOpen}
+              className={`inline-flex h-9 items-center justify-center rounded-4xl px-3 text-sm transition-colors cursor-pointer ${
+                isAboutOpen
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Info className="size-4" />
+            </button>
             <PageHeaderMenu
               items={[
                 { label: "Orbit", href: communityOrbitPath(handleLabel) },
@@ -1054,54 +1157,86 @@ export default function CommunityProfilePage() {
         actionsAsFormActions={false}
       />
 
-      {/* About */}
-      <Card>
-        <CardHeader>
-          <CardTitle>About</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-col gap-3">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="rounded-lg border border-border/60 p-3">
-                <div className="text-xs font-medium text-foreground/70">Created</div>
-                <div className="mt-1 text-sm text-foreground/80">{fmtDate(community.createdAt)}</div>
-              </div>
-              <div className="rounded-lg border border-border/60 p-3">
-                <div className="text-xs font-medium text-foreground/70">Members</div>
-                <div className="mt-1 text-sm text-foreground/80">{memberCount}</div>
-              </div>
-            </div>
+      {/* Social accounts (toggled via info button in header) */}
+      {isAboutOpen && (() => {
+        const socials = SOCIAL_LINKS.filter(
+          (s) => community[s.key],
+        )
 
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="rounded-lg border border-border/60 p-3">
-                <div className="text-xs font-medium text-foreground/70">Visibility</div>
-                <div className="mt-1">
-                  <Badge variant="secondary">
-                    {community.isPublicDirectory ? "Public" : "Private"}
-                  </Badge>
-                </div>
+        return socials.length > 0 ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Social accounts</CardTitle>
+              <CardDescription>Where to find this community online.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {socials.map(({ key, label, icon: Icon }) => {
+                  const href = safeUrl(community[key]!)
+                  if (!href) return null
+                  return (
+                    <a
+                      key={key}
+                      href={href}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-lg border border-border/60 p-3 text-sm transition-colors hover:border-accent/20 hover:text-accent group"
+                    >
+                      <h2 className="text-xs font-medium text-muted-foreground mb-3 group-hover:transition-colors group-hover:text-accent">{label}</h2>
+                      <div className="flex items-center gap-2">
+                        <Icon className="size-4 shrink-0 text-muted-foreground group-hover:transition-colors group-hover:text-accent" />
+                        <span className="text-sm font-medium">{displaySocialHandle(key, community[key]!)}</span>
+                      </div>
+                    </a>
+                  )
+                })}
               </div>
-              <div className="rounded-lg border border-border/60 p-3">
-                <div className="text-xs font-medium text-foreground/70">Membership</div>
-                <div className="mt-1">
-                  <Badge variant="secondary">
-                    {community.isMembershipOpen ? "Open" : "Closed"}
-                  </Badge>
-                </div>
-              </div>
-            </div>
+            </CardContent>
+          </Card>
+        ) : null
+      })()}
 
-            {community.description ? (
-              <div className="rounded-lg border border-border/60 p-3">
-                <div className="text-xs font-medium text-foreground/70">Description</div>
-                <div className="mt-1 whitespace-pre-wrap text-sm text-foreground/80">
-                  {community.description}
+      {/* About (toggled via info button in header) */}
+      {isAboutOpen && (
+        <Card>
+          <CardHeader>
+            <CardTitle>About</CardTitle>
+            <CardDescription>Community details and settings.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col gap-3">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-lg border border-border/60 p-3 text-sm">
+                  <h2 className="text-xs font-medium text-muted-foreground mb-3">Created</h2>
+                  <p className="text-sm font-medium">{fmtDate(community.createdAt)}</p>
+                </div>
+                <div className="rounded-lg border border-border/60 p-3 text-sm">
+                  <h2 className="text-xs font-medium text-muted-foreground mb-3">Members</h2>
+                  <p className="text-sm font-medium">{memberCount}</p>
                 </div>
               </div>
-            ) : null}
-          </div>
-        </CardContent>
-      </Card>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-lg border border-border/60 p-3 text-sm">
+                  <h2 className="text-xs font-medium text-muted-foreground mb-3">Visibility</h2>
+                  <p className="text-sm font-medium">{community.isPublicDirectory ? "Public" : "Private"}</p>
+                </div>
+                <div className="rounded-lg border border-border/60 p-3 text-sm">
+                  <h2 className="text-xs font-medium text-muted-foreground mb-3">Membership</h2>
+                  <p className="text-sm font-medium">{community.isMembershipOpen ? "Open" : "Closed"}</p>
+                </div>
+              </div>
+
+              {community.description ? (
+                <div className="rounded-lg border border-border/60 p-3 text-sm">
+                  <h2 className="text-xs font-medium text-muted-foreground mb-3">Description</h2>
+                  <p className="whitespace-pre-wrap text-sm font-medium">{community.description}</p>
+                </div>
+              ) : null}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Member directory */}
       {canViewDirectory ? (

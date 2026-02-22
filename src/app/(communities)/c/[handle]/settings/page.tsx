@@ -18,7 +18,8 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Form, FormField, fieldControlProps, useForm } from "@/components/ui/form"
-import { Users } from "lucide-react"
+import { Globe, Users } from "lucide-react"
+import { DiscordIcon, GitHubIcon, TelegramIcon, XIcon } from "@/components/ui/icons"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
@@ -45,6 +46,11 @@ const CommunitySettingsSchema = z.object({
   isPublicDirectory: z.boolean(),
   isMembershipOpen: z.boolean(),
   applicationQuestions: z.array(ApplicationQuestionSchema),
+  discordUrl: z.string().max(2048, "URL is too long"),
+  xUrl: z.string().max(2048, "URL is too long"),
+  telegramUrl: z.string().max(2048, "URL is too long"),
+  githubUrl: z.string().max(2048, "URL is too long"),
+  websiteUrl: z.string().max(2048, "URL is too long"),
 })
 
 type CommunitySettingsValues = z.infer<typeof CommunitySettingsSchema>
@@ -63,6 +69,11 @@ type CommunityGetResponse = {
     ownerId?: string | null
     owner?: { handle?: string | null } | null
     membershipConfig?: unknown
+    discordUrl?: string | null
+    xUrl?: string | null
+    telegramUrl?: string | null
+    githubUrl?: string | null
+    websiteUrl?: string | null
   }
 }
 
@@ -85,6 +96,49 @@ function generateQuestionId(): string {
 function optionalString(value: string | undefined | null): string | undefined {
   const trimmed = String(value ?? "").trim()
   return trimmed || undefined
+}
+
+const SOCIAL_BASES: Record<string, string> = {
+  discordUrl: "https://discord.gg/",
+  xUrl: "https://x.com/",
+  telegramUrl: "https://t.me/",
+  githubUrl: "https://github.com/",
+}
+
+/**
+ * Normalize a social link field value into a full `https://` URL.
+ *
+ * - Empty / whitespace → `null`
+ * - Already a full URL → force `https://`
+ * - Contains a dot (e.g. `x.com/handle`) → prepend `https://`
+ * - Plain handle (e.g. `wavedotso`) → prepend platform base URL
+ * - Website field → just ensure `https://` prefix
+ */
+function normalizeSocialUrl(
+  value: string | undefined | null,
+  field: string,
+): string | null {
+  const trimmed = String(value ?? "").trim().replace(/^@/, "")
+  if (!trimmed) return null
+
+  // Already has a protocol → force https
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed.replace(/^http:\/\//i, "https://")
+  }
+
+  // Website field: just prepend https://
+  if (field === "websiteUrl") {
+    return `https://${trimmed}`
+  }
+
+  // Contains a dot → looks like a domain (e.g. "x.com/handle")
+  if (trimmed.includes(".")) {
+    return `https://${trimmed}`
+  }
+
+  // Plain handle → prepend platform base
+  const base = SOCIAL_BASES[field]
+  return base ? `${base}${trimmed}` : `https://${trimmed}`
 }
 
 function parseApplicationQuestions(membershipConfig: Record<string, unknown>): CommunitySettingsValues["applicationQuestions"] {
@@ -275,6 +329,11 @@ export default function CommunitySettingsPage() {
       isPublicDirectory: true,
       isMembershipOpen: true,
       applicationQuestions: [],
+      discordUrl: "",
+      xUrl: "",
+      telegramUrl: "",
+      githubUrl: "",
+      websiteUrl: "",
     },
     mode: "onBlur",
   })
@@ -328,6 +387,11 @@ export default function CommunitySettingsPage() {
         isPublicDirectory: community.isPublicDirectory ?? true,
         isMembershipOpen: community.isMembershipOpen ?? true,
         applicationQuestions: safeQuestions,
+        discordUrl: community.discordUrl ?? "",
+        xUrl: community.xUrl ?? "",
+        telegramUrl: community.telegramUrl ?? "",
+        githubUrl: community.githubUrl ?? "",
+        websiteUrl: community.websiteUrl ?? "",
       },
       { keepDirty: false }
     )
@@ -367,6 +431,11 @@ export default function CommunitySettingsPage() {
           help: String(q.help || "").trim(),
         })),
       },
+      discordUrl: normalizeSocialUrl(values.discordUrl, "discordUrl"),
+      xUrl: normalizeSocialUrl(values.xUrl, "xUrl"),
+      telegramUrl: normalizeSocialUrl(values.telegramUrl, "telegramUrl"),
+      githubUrl: normalizeSocialUrl(values.githubUrl, "githubUrl"),
+      websiteUrl: normalizeSocialUrl(values.websiteUrl, "websiteUrl"),
     }
 
     const result = await apiPost<CommunityUpdateResponse>("/api/community/update", payload)
@@ -388,6 +457,11 @@ export default function CommunitySettingsPage() {
           placeholder: q.placeholder,
           help: q.help,
         })),
+        discordUrl: values.discordUrl,
+        xUrl: values.xUrl,
+        telegramUrl: values.telegramUrl,
+        githubUrl: values.githubUrl,
+        websiteUrl: values.websiteUrl,
       }
       form.reset(cleanValues)
 
@@ -519,6 +593,8 @@ export default function CommunitySettingsPage() {
           </Alert>
         ) : null}
 
+        <SocialLinksSection form={form} />
+
         <ProfileSection
           form={form}
           community={community}
@@ -645,6 +721,42 @@ function ProfileSection({
             />
           )}
         />
+      </CardContent>
+    </Card>
+  )
+}
+
+const SOCIAL_FIELDS = [
+  { name: "discordUrl" as const, label: "Discord", icon: DiscordIcon, placeholder: "invite-code or discord.gg/..." },
+  { name: "xUrl" as const, label: "X", icon: XIcon, placeholder: "handle" },
+  { name: "githubUrl" as const, label: "GitHub", icon: GitHubIcon, placeholder: "org or user" },
+  { name: "telegramUrl" as const, label: "Telegram", icon: TelegramIcon, placeholder: "handle" },
+  { name: "websiteUrl" as const, label: "Website", icon: Globe, placeholder: "example.com" },
+] as const
+
+function SocialLinksSection({ form }: { form: ReturnType<typeof useForm<CommunitySettingsValues>> }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Social accounts</CardTitle>
+        <CardDescription>Add links so members can find your community elsewhere.</CardDescription>
+      </CardHeader>
+      <CardContent className="px-5">
+        <div className="grid gap-3 sm:grid-cols-2">
+          {SOCIAL_FIELDS.map(({ name, label, icon: Icon, placeholder }) => (
+            <div key={name} className="rounded-lg border border-border/60 p-3 text-sm">
+              <h2 className="text-xs font-medium text-muted-foreground mb-2">{label}</h2>
+              <div className="flex items-center gap-2">
+                <Icon className="size-4 shrink-0 text-muted-foreground" />
+                <Input
+                  {...form.register(name)}
+                  placeholder={placeholder}
+                  className="h-8 text-sm"
+                />
+              </div>
+            </div>
+          ))}
+        </div>
       </CardContent>
     </Card>
   )

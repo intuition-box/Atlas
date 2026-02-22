@@ -135,6 +135,12 @@ export async function POST(req: NextRequest) {
             membershipConfig: prismaJson(input.membershipConfig),
             orbitConfig: prismaJson(input.orbitConfig),
 
+            discordUrl: input.discordUrl ?? null,
+            xUrl: input.xUrl ?? null,
+            telegramUrl: input.telegramUrl ?? null,
+            githubUrl: input.githubUrl ?? null,
+            websiteUrl: input.websiteUrl ?? null,
+
             memberships: {
               create: {
                 userId,
