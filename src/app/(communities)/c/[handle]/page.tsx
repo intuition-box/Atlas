@@ -107,6 +107,7 @@ type MemberProfile = {
   links?: string[] | null
   skills?: string[] | null
   tools?: string[] | null
+  languages?: string[] | null
   orbitLevel?: string | null
   love?: number | null
   reach?: number | null
@@ -174,6 +175,7 @@ type ApiMemberItem = {
     skills: string[]
     tools: string[]
     links: string[]
+    languages: string[]
   }
 }
 
@@ -259,6 +261,7 @@ function normalizeMembersPayload(raw: unknown, _fallbackHandle: string): Members
       links: item.user.links,
       skills: item.user.skills,
       tools: item.user.tools,
+      languages: item.user.languages,
       orbitLevel: item.membership.orbitLevel,
       love: item.membership.loveScore,
       reach: item.membership.reachScore,
@@ -532,6 +535,8 @@ function MemberCard({ member }: { member: CommunityMember }) {
   const hasOrbit = u.love != null || u.reach != null || u.gravity != null
   const hasSkills = (u.skills?.length ?? 0) > 0
   const hasTools = (u.tools?.length ?? 0) > 0
+  const languages = (u.languages ?? []).filter(Boolean)
+  const hasLocationOrLangs = !!u.location || languages.length > 0
   const orbitLabel = formatOrbitLevel(u.orbitLevel)
 
   return (
@@ -551,7 +556,7 @@ function MemberCard({ member }: { member: CommunityMember }) {
                 <Badge variant="secondary">{orbitLabel}</Badge>
               )}
               {member.role !== "MEMBER" && (
-                <Badge variant="secondary">{ROLE_LABELS[member.role]}</Badge>
+                <Badge variant="secondary" className="bg-amber-500/10 text-amber-600 border-amber-500/20">{ROLE_LABELS[member.role]}</Badge>
               )}
             </div>
           </div>
@@ -576,11 +581,14 @@ function MemberCard({ member }: { member: CommunityMember }) {
           </CardContent>
         )}
 
-        {u.location && (
+        {hasLocationOrLangs && (
           <CardContent>
-            <h3 className="text-[11px] font-medium text-muted-foreground">Location</h3>
+            <h3 className="text-[11px] font-medium text-muted-foreground">Location & languages</h3>
             <div className="mt-1.5 flex flex-wrap gap-1">
-              <Badge variant="secondary">{u.location}</Badge>
+              {u.location && <Badge variant="secondary">{u.location}</Badge>}
+              {languages.map((l) => (
+                <Badge key={`l:${l}`} variant="secondary">{l}</Badge>
+              ))}
             </div>
           </CardContent>
         )}
@@ -590,12 +598,7 @@ function MemberCard({ member }: { member: CommunityMember }) {
             <h3 className="text-[11px] font-medium text-muted-foreground">Skills</h3>
             <div className="mt-1.5 flex flex-wrap gap-1">
               {(u.skills || []).slice(0, 5).map((s) => (
-                <span
-                  key={`s:${s}`}
-                  className="inline-flex items-center rounded-4xl bg-muted-foreground/10 px-1.5 py-0.5 text-[10px] text-foreground/90"
-                >
-                  {s}
-                </span>
+                <Badge key={`s:${s}`} variant="secondary">{s}</Badge>
               ))}
             </div>
           </CardContent>
@@ -606,12 +609,7 @@ function MemberCard({ member }: { member: CommunityMember }) {
             <h3 className="text-[11px] font-medium text-muted-foreground">Tools</h3>
             <div className="mt-1.5 flex flex-wrap gap-1">
               {(u.tools || []).slice(0, 5).map((t) => (
-                <span
-                  key={`t:${t}`}
-                  className="inline-flex items-center rounded-4xl bg-muted-foreground/10 px-1.5 py-0.5 text-[10px] text-foreground/90"
-                >
-                  {t}
-                </span>
+                <Badge key={`t:${t}`} variant="secondary">{t}</Badge>
               ))}
             </div>
           </CardContent>

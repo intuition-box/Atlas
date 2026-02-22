@@ -91,6 +91,7 @@ type MemberListItem = {
     skills: string[]
     tools: string[]
     links: string[]
+    languages: string[]
   }
 }
 
@@ -273,6 +274,7 @@ export async function GET(req: NextRequest) {
           skills: true,
           tags: true,
           links: true,
+          languages: true,
         },
       },
     },
@@ -322,6 +324,7 @@ export async function GET(req: NextRequest) {
         skills: Array.isArray(r.user.skills) ? r.user.skills : [],
         tools: Array.isArray(r.user.tags) ? r.user.tags : [],
         links: Array.isArray(r.user.links) ? r.user.links : [],
+        languages: Array.isArray(r.user.languages) ? r.user.languages : [],
       },
     })),
     nextCursor,
