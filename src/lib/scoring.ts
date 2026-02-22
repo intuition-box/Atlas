@@ -1,6 +1,6 @@
 import "server-only";
 
-import { MembershipStatus, OrbitLevel, ScoringType } from "@prisma/client";
+import { MembershipRole, MembershipStatus, OrbitLevel, ScoringType } from "@prisma/client";
 import { z } from "zod";
 
 import { db } from "@/lib/db/client";
@@ -408,12 +408,13 @@ export async function recomputeOrbitLevelsForCommunity(params: { communityId: st
   });
   const config = getOrbitConfig(community?.orbitConfig);
 
-  // Fetch approved members (no override)
+  // Fetch approved members (no override, skip owners — always Advocate)
   const members = await db.membership.findMany({
     where: {
       communityId,
       status: MembershipStatus.APPROVED,
       orbitLevelOverride: null,
+      role: { not: MembershipRole.OWNER },
     },
     select: { userId: true, gravityScore: true },
   });

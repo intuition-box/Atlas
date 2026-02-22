@@ -128,6 +128,7 @@ export async function POST(req: NextRequest) {
           id: true,
           userId: true,
           communityId: true,
+          role: true,
           orbitLevel: true,
           orbitLevelOverride: true,
         },
@@ -135,6 +136,11 @@ export async function POST(req: NextRequest) {
 
       if (!membership) {
         return { kind: "not_found" } as const;
+      }
+
+      // Owners are always Advocate — cannot be changed
+      if (membership.role === MembershipRole.OWNER) {
+        return { kind: "owner_locked" } as const;
       }
 
       const nextOverride = input.orbitLevelOverride;
@@ -189,6 +195,10 @@ export async function POST(req: NextRequest) {
 
     if (result.kind === "forbidden") {
       return errJson({ code: "FORBIDDEN", message: "Insufficient permissions", status: 403 });
+    }
+
+    if (result.kind === "owner_locked") {
+      return errJson({ code: "FORBIDDEN", message: "Owner orbit level cannot be changed", status: 403 });
     }
 
     if (result.kind === "not_found") {

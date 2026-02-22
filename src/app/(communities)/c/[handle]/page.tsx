@@ -609,16 +609,20 @@ function AdminMemberMenu({
             <MoreVertical className="size-3.5" />
           </MenuTrigger>
           <MenuContent align="end" sideOffset={4}>
-            <MenuGroup>
-              <MenuLabel>Orbit level</MenuLabel>
-              <MenuRadioGroup value={currentValue} onValueChange={handleOrbitChange}>
-                <MenuRadioItem value="auto">Auto</MenuRadioItem>
-                {ORBIT_LEVELS.map((l) => (
-                  <MenuRadioItem key={l.value} value={l.value}>{l.label}</MenuRadioItem>
-                ))}
-              </MenuRadioGroup>
-            </MenuGroup>
-            <MenuSeparator />
+            {member.role !== "OWNER" && (
+              <>
+                <MenuGroup>
+                  <MenuLabel>Orbit level</MenuLabel>
+                  <MenuRadioGroup value={currentValue} onValueChange={handleOrbitChange}>
+                    <MenuRadioItem value="auto">Auto</MenuRadioItem>
+                    {ORBIT_LEVELS.map((l) => (
+                      <MenuRadioItem key={l.value} value={l.value}>{l.label}</MenuRadioItem>
+                    ))}
+                  </MenuRadioGroup>
+                </MenuGroup>
+                <MenuSeparator />
+              </>
+            )}
             <MenuGroup>
               <MenuLabel>Moderation</MenuLabel>
               <MenuItem variant="destructive" onClick={() => setBanDialogOpen(true)}>
@@ -691,7 +695,9 @@ function MemberCard({ member, isAdmin, communityHandle, onOrbitOverride }: {
                       {orbitLabel}
                     </Badge>
                   </TooltipTrigger>
-                  <TooltipContent>Manually set by admin</TooltipContent>
+                  <TooltipContent>
+                    {member.role === "OWNER" ? "Owner — always Advocate" : "Manually set by admin"}
+                  </TooltipContent>
                 </Tooltip>
               ) : (
                 <Badge variant="secondary">{orbitLabel}</Badge>

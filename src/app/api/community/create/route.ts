@@ -3,6 +3,7 @@ import {
   HandleOwnerType,
   MembershipRole,
   MembershipStatus,
+  OrbitLevel,
   Prisma,
 } from "@prisma/client";
 import type { NextRequest } from "next/server";
@@ -146,6 +147,8 @@ export async function POST(req: NextRequest) {
                 userId,
                 role: MembershipRole.OWNER,
                 status: MembershipStatus.APPROVED,
+                orbitLevel: OrbitLevel.ADVOCATE,
+                orbitLevelOverride: OrbitLevel.ADVOCATE,
                 approvedAt: now,
                 lastActiveAt: now,
               },
