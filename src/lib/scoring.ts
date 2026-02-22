@@ -1,8 +1,13 @@
 import "server-only";
 
-import { MembershipStatus, OrbitLevel } from "@prisma/client";
+import { MembershipStatus, OrbitLevel, ScoringType } from "@prisma/client";
+import { z } from "zod";
 
 import { db } from "@/lib/db/client";
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
@@ -18,31 +23,64 @@ function arrayLen(v: unknown): number {
   return Array.isArray(v) ? v.length : 0;
 }
 
-const LOVE = {
-  profileCompleteThreshold: 3,
-  profileCompleteBonus: 2,
-  approvedBonus: 3,
-  attestationsGivenMax: 10,
-  attestationGivenWeight: 1,
-} as const;
+// ---------------------------------------------------------------------------
+// OrbitConfig — Zod-first, stored in Community.orbitConfig
+// ---------------------------------------------------------------------------
 
-const REACH = {
-  // Unique peers you have reached (given attestations)
-  uniqueToMax: 20,
-  uniqueToWeight: 1,
+const OrbitLevelThresholdSchema = z.object({
+  minGravity: z.number().min(0),
+  /** If set, the member must have given an attestation to a community peer within this many days. */
+  recentAttestationDays: z.number().int().positive().nullable(),
+});
 
-  // Unique peers who have reached you (received attestations)
-  uniqueFromMax: 20,
-  uniqueFromWeight: 2,
+export const OrbitConfigSchema = z.object({
+  thresholds: z.object({
+    ADVOCATE: OrbitLevelThresholdSchema,
+    CONTRIBUTOR: OrbitLevelThresholdSchema,
+    PARTICIPANT: OrbitLevelThresholdSchema,
+  }),
+  /** Half-life (in days) for the exponential decay applied to attestation activity. */
+  decayHalfLifeDays: z.number().positive(),
+  /** Only attestations within this window contribute to the activity (love) score. */
+  activityWindowDays: z.number().int().positive(),
+  /** Maximum activity score from attestation decay sum. */
+  activityScoreCap: z.number().positive(),
+});
 
-  // Extra attestations beyond the first per peer (capped, to avoid spam dominating reach)
-  extraToMax: 10,
-  extraToWeight: 1,
-  extraFromMax: 10,
-  extraFromWeight: 1,
-} as const;
+export type OrbitConfig = z.infer<typeof OrbitConfigSchema>;
 
-function computeLove(params: {
+export const DEFAULT_ORBIT_CONFIG: OrbitConfig = {
+  thresholds: {
+    ADVOCATE: { minGravity: 200, recentAttestationDays: 30 },
+    CONTRIBUTOR: { minGravity: 50, recentAttestationDays: 60 },
+    PARTICIPANT: { minGravity: 10, recentAttestationDays: null },
+  },
+  decayHalfLifeDays: 30,
+  activityWindowDays: 90,
+  activityScoreCap: 10,
+};
+
+/** Parse raw JSON from Community.orbitConfig, falling back to defaults on any error. */
+export function getOrbitConfig(raw: unknown): OrbitConfig {
+  const result = OrbitConfigSchema.safeParse(raw);
+  return result.success ? result.data : DEFAULT_ORBIT_CONFIG;
+}
+
+// ---------------------------------------------------------------------------
+// Love — Activity-based with time decay
+// ---------------------------------------------------------------------------
+
+/**
+ * Computes love score for a community member.
+ *
+ * - Profile bonus (0–3): `Math.floor(fieldCount * 3 / 5)`
+ * - Approved bonus: +2 if membership status is APPROVED
+ * - Activity score: exponential decay sum of community-scoped attestation
+ *   activity within the activity window, capped at `activityScoreCap`.
+ *
+ * Love range: 0–15.
+ */
+export function computeLove(params: {
   user: {
     headline: string | null;
     bio: string | null;
@@ -51,43 +89,90 @@ function computeLove(params: {
     tags: unknown;
   };
   status: MembershipStatus;
-  attestationsGivenCount: number;
+  /** Sorted descending attestation createdAt dates (community-scoped, within activity window). */
+  attestationDates: Date[];
+  config: OrbitConfig;
 }): number {
-  const { user, status, attestationsGivenCount } = params;
+  const { user, status, attestationDates, config } = params;
 
-  const profileCompleteness =
+  // Profile bonus — up to 3 pts
+  const fieldCount =
     (user.headline ? 1 : 0) +
     (user.bio ? 1 : 0) +
     (arrayLen(user.links) > 0 ? 1 : 0) +
     (arrayLen(user.skills) > 0 ? 1 : 0) +
     (arrayLen(user.tags) > 0 ? 1 : 0);
+  const profileBonus = Math.floor((fieldCount * 3) / 5);
 
-  const profileCompleteEnough = profileCompleteness >= LOVE.profileCompleteThreshold;
+  // Approved bonus — 2 pts
+  const approvedBonus = status === MembershipStatus.APPROVED ? 2 : 0;
 
-  let love = 0;
-  if (profileCompleteEnough) love += LOVE.profileCompleteBonus;
-  if (status === MembershipStatus.APPROVED) love += LOVE.approvedBonus;
+  // Activity score — exponential decay sum, capped
+  const now = Date.now();
+  const ln2 = Math.LN2;
+  const halfLifeMs = config.decayHalfLifeDays * 86_400_000;
 
-  love +=
-    clamp(attestationsGivenCount, 0, LOVE.attestationsGivenMax) *
-    LOVE.attestationGivenWeight;
+  let decaySum = 0;
+  for (const d of attestationDates) {
+    const ageMs = now - d.getTime();
+    decaySum += Math.exp((-ln2 * ageMs) / halfLifeMs);
+  }
 
-  return love;
+  const activityScore = Math.round(Math.min(decaySum, config.activityScoreCap));
+
+  return profileBonus + approvedBonus + activityScore;
 }
 
-function computeReach(params: {
-  uniqueToCount: number;
-  uniqueFromCount: number;
-  extraToCount: number;
-  extraFromCount: number;
+// ---------------------------------------------------------------------------
+// Reach — Community-scoped + external dimension
+// ---------------------------------------------------------------------------
+
+const REACH = {
+  /** Unique community members you attested (max 20, weight ×1). */
+  uniqueGivenMax: 20,
+  uniqueGivenWeight: 1,
+
+  /** Unique community members who attested you (max 20, weight ×2). */
+  uniqueReceivedMax: 20,
+  uniqueReceivedWeight: 2,
+
+  /** Extra attestations given beyond 1st per peer (max 10, weight ×1). */
+  extraGivenMax: 10,
+  extraGivenWeight: 1,
+
+  /** Extra attestations received beyond 1st per peer (max 10, weight ×1). */
+  extraReceivedMax: 10,
+  extraReceivedWeight: 1,
+
+  /** Other communities where the user is an approved member (max 5, weight ×2). */
+  externalCommunitiesMax: 5,
+  externalCommunitiesWeight: 2,
+} as const;
+
+/**
+ * Computes reach score for a community member.
+ *
+ * Reach range: 0–90.
+ */
+export function computeReach(params: {
+  uniqueGivenCount: number;
+  uniqueReceivedCount: number;
+  extraGivenCount: number;
+  extraReceivedCount: number;
+  externalCommunityCount: number;
 }): number {
   return (
-    clamp(params.uniqueToCount, 0, REACH.uniqueToMax) * REACH.uniqueToWeight +
-    clamp(params.uniqueFromCount, 0, REACH.uniqueFromMax) * REACH.uniqueFromWeight +
-    clamp(params.extraToCount, 0, REACH.extraToMax) * REACH.extraToWeight +
-    clamp(params.extraFromCount, 0, REACH.extraFromMax) * REACH.extraFromWeight
+    clamp(params.uniqueGivenCount, 0, REACH.uniqueGivenMax) * REACH.uniqueGivenWeight +
+    clamp(params.uniqueReceivedCount, 0, REACH.uniqueReceivedMax) * REACH.uniqueReceivedWeight +
+    clamp(params.extraGivenCount, 0, REACH.extraGivenMax) * REACH.extraGivenWeight +
+    clamp(params.extraReceivedCount, 0, REACH.extraReceivedMax) * REACH.extraReceivedWeight +
+    clamp(params.externalCommunityCount, 0, REACH.externalCommunitiesMax) * REACH.externalCommunitiesWeight
   );
 }
+
+// ---------------------------------------------------------------------------
+// Batch recompute — community-scoped
+// ---------------------------------------------------------------------------
 
 /**
  * Single-member recompute. Kept for convenience.
@@ -98,19 +183,47 @@ export async function recomputeMemberScores(params: { communityId: string; userI
 }
 
 /**
- * Batch recompute for many members.
- * - Uses Prisma groupBy for attestation counts (fewer round trips)
- * - Updates memberships in chunks to keep transactions reasonable
+ * Batch recompute love, reach, and gravity for members of a community.
+ *
+ * All attestation queries are **community-scoped**: both the from-user and the
+ * to-user must be approved members of this community. This aligns with the
+ * Orbit Model's concept of community-specific engagement.
  */
 export async function recomputeMemberScoresBatch(params: {
   communityId: string;
   userIds: string[];
 }) {
-  const communityId = params.communityId;
+  const { communityId } = params;
   const userIds = Array.from(new Set(params.userIds)).filter(Boolean);
   if (userIds.length === 0) return;
 
-  const [users, memberships, givenCounts, receivedCounts, uniqueToPairs, uniqueFromPairs] = await Promise.all([
+  // Load orbit config for this community
+  const community = await db.community.findUnique({
+    where: { id: communityId },
+    select: { orbitConfig: true },
+  });
+  const config = getOrbitConfig(community?.orbitConfig);
+
+  const activityWindowStart = new Date(
+    Date.now() - config.activityWindowDays * 86_400_000,
+  );
+
+  // Fetch the set of all approved member IDs for this community (used to scope attestation queries).
+  const approvedMemberships = await db.membership.findMany({
+    where: { communityId, status: MembershipStatus.APPROVED },
+    select: { userId: true },
+  });
+  const approvedMemberIds = new Set(approvedMemberships.map((m) => m.userId));
+  const approvedMemberIdsArray = [...approvedMemberIds];
+
+  const [
+    users,
+    memberships,
+    givenAttestations,
+    receivedAttestations,
+    externalCounts,
+  ] = await Promise.all([
+    // 1. User profiles
     db.user.findMany({
       where: { id: { in: userIds } },
       select: {
@@ -122,85 +235,102 @@ export async function recomputeMemberScoresBatch(params: {
         tags: true,
       },
     }),
+
+    // 2. Membership statuses for target users
     db.membership.findMany({
       where: { communityId, userId: { in: userIds } },
       select: { userId: true, status: true },
     }),
 
-    // attestations given per user (active only)
-    // Note: Attestations are global (user-to-user), so we count all attestations from these users.
-    db.attestation.groupBy({
-      by: ["fromUserId"],
+    // 3. Active attestations GIVEN by target users TO community members
+    //    (select fromUserId, toUserId, createdAt — filter activity window in JS for love)
+    db.attestation.findMany({
       where: {
         fromUserId: { in: userIds },
+        toUserId: { in: approvedMemberIdsArray },
         revokedAt: null,
         supersededById: null,
       },
-      _count: { _all: true },
+      select: { fromUserId: true, toUserId: true, createdAt: true },
     }),
 
-    // attestations received per user (active only)
-    db.attestation.groupBy({
-      by: ["toUserId"],
+    // 4. Active attestations RECEIVED by target users FROM community members
+    db.attestation.findMany({
       where: {
         toUserId: { in: userIds },
+        fromUserId: { in: approvedMemberIdsArray },
         revokedAt: null,
         supersededById: null,
+      },
+      select: { fromUserId: true, toUserId: true, createdAt: true },
+    }),
+
+    // 5. External community count per user (approved memberships in other communities)
+    db.membership.groupBy({
+      by: ["userId"],
+      where: {
+        userId: { in: userIds },
+        communityId: { not: communityId },
+        status: MembershipStatus.APPROVED,
       },
       _count: { _all: true },
-    }),
-
-    // Distinct user pairs (dedup) to count unique peers.
-    // We also separately count total attestations so multiple attestations can increase reach (capped).
-    // distinct (fromUserId,toUserId) pairs => uniqueTo per fromUserId
-    db.attestation.groupBy({
-      by: ["fromUserId", "toUserId"],
-      where: {
-        fromUserId: { in: userIds },
-        revokedAt: null,
-        supersededById: null,
-      },
-    }),
-
-    // distinct (toUserId,fromUserId) pairs => uniqueFrom per toUserId
-    db.attestation.groupBy({
-      by: ["toUserId", "fromUserId"],
-      where: {
-        toUserId: { in: userIds },
-        revokedAt: null,
-        supersededById: null,
-      },
     }),
   ]);
 
+  // Build lookup maps
   const userById = new Map(users.map((u) => [u.id, u] as const));
   const membershipByUserId = new Map(memberships.map((m) => [m.userId, m] as const));
 
-  const givenByUserId = new Map<string, number>();
-  for (const row of givenCounts) {
-    // Prisma returns fromUserId nullable in types if schema allows; guard defensively.
-    if (!row.fromUserId) continue;
-    givenByUserId.set(row.fromUserId, row._count._all);
+  const externalCountByUserId = new Map<string, number>();
+  for (const row of externalCounts) {
+    externalCountByUserId.set(row.userId, row._count._all);
   }
 
-  const receivedByUserId = new Map<string, number>();
-  for (const row of receivedCounts) {
-    if (!row.toUserId) continue;
-    receivedByUserId.set(row.toUserId, row._count._all);
+  // Per-user attestation aggregation (single pass)
+  // Given attestations: activity dates for love, unique peers + total for reach
+  const givenDatesByUser = new Map<string, Date[]>();
+  const givenUniquePeersByUser = new Map<string, Set<string>>();
+  const givenTotalByUser = new Map<string, number>();
+
+  for (const a of givenAttestations) {
+    // Activity dates (for love — filter to activity window)
+    if (a.createdAt >= activityWindowStart) {
+      let dates = givenDatesByUser.get(a.fromUserId);
+      if (!dates) {
+        dates = [];
+        givenDatesByUser.set(a.fromUserId, dates);
+      }
+      dates.push(a.createdAt);
+    }
+
+    // Unique peers given to
+    let peers = givenUniquePeersByUser.get(a.fromUserId);
+    if (!peers) {
+      peers = new Set();
+      givenUniquePeersByUser.set(a.fromUserId, peers);
+    }
+    peers.add(a.toUserId);
+
+    // Total given
+    givenTotalByUser.set(a.fromUserId, (givenTotalByUser.get(a.fromUserId) ?? 0) + 1);
   }
 
-  const uniqueToByFrom = new Map<string, number>();
-  for (const row of uniqueToPairs) {
-    if (!row.fromUserId) continue;
-    uniqueToByFrom.set(row.fromUserId, (uniqueToByFrom.get(row.fromUserId) ?? 0) + 1);
+  // Received attestations: unique peers + total for reach
+  const receivedUniquePeersByUser = new Map<string, Set<string>>();
+  const receivedTotalByUser = new Map<string, number>();
+
+  for (const a of receivedAttestations) {
+    let peers = receivedUniquePeersByUser.get(a.toUserId);
+    if (!peers) {
+      peers = new Set();
+      receivedUniquePeersByUser.set(a.toUserId, peers);
+    }
+    peers.add(a.fromUserId);
+
+    receivedTotalByUser.set(a.toUserId, (receivedTotalByUser.get(a.toUserId) ?? 0) + 1);
   }
 
-  const uniqueFromByTo = new Map<string, number>();
-  for (const row of uniqueFromPairs) {
-    if (!row.toUserId) continue;
-    uniqueFromByTo.set(row.toUserId, (uniqueFromByTo.get(row.toUserId) ?? 0) + 1);
-  }
-
+  // Compute scores
   const updates = userIds
     .map((userId) => {
       const user = userById.get(userId);
@@ -210,24 +340,21 @@ export async function recomputeMemberScoresBatch(params: {
       const love = computeLove({
         user,
         status: membership.status,
-        attestationsGivenCount: givenByUserId.get(userId) ?? 0,
+        attestationDates: givenDatesByUser.get(userId) ?? [],
+        config,
       });
 
-      const uniqueTo = uniqueToByFrom.get(userId) ?? 0;
-      const uniqueFrom = uniqueFromByTo.get(userId) ?? 0;
-
-      const givenTotal = givenByUserId.get(userId) ?? 0;
-      const receivedTotal = receivedByUserId.get(userId) ?? 0;
-
-      // Extra attestations beyond the first per unique peer.
-      const extraTo = Math.max(0, givenTotal - uniqueTo);
-      const extraFrom = Math.max(0, receivedTotal - uniqueFrom);
+      const uniqueGiven = givenUniquePeersByUser.get(userId)?.size ?? 0;
+      const uniqueReceived = receivedUniquePeersByUser.get(userId)?.size ?? 0;
+      const totalGiven = givenTotalByUser.get(userId) ?? 0;
+      const totalReceived = receivedTotalByUser.get(userId) ?? 0;
 
       const reach = computeReach({
-        uniqueToCount: uniqueTo,
-        uniqueFromCount: uniqueFrom,
-        extraToCount: extraTo,
-        extraFromCount: extraFrom,
+        uniqueGivenCount: uniqueGiven,
+        uniqueReceivedCount: uniqueReceived,
+        extraGivenCount: Math.max(0, totalGiven - uniqueGiven),
+        extraReceivedCount: Math.max(0, totalReceived - uniqueReceived),
+        externalCommunityCount: externalCountByUserId.get(userId) ?? 0,
       });
 
       const gravity = love * reach;
@@ -243,7 +370,7 @@ export async function recomputeMemberScoresBatch(params: {
 
   if (updates.length === 0) return;
 
-  // Avoid huge interactive transactions in dev; update in chunks.
+  // Write in chunks of 50 (existing pattern)
   for (const batch of chunk(updates, 50)) {
     const ops = batch.map((u) =>
       db.membership.update({
@@ -260,51 +387,184 @@ export async function recomputeMemberScoresBatch(params: {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Orbit levels — Absolute thresholds + behavioral gates
+// ---------------------------------------------------------------------------
+
+/**
+ * Reassigns orbit levels for all approved members of a community based on
+ * absolute gravity thresholds and behavioral gates (recency of attestation
+ * activity), replacing the old percentile-based bucketing.
+ *
+ * Members with an `orbitLevelOverride` are skipped.
+ */
 export async function recomputeOrbitLevelsForCommunity(params: { communityId: string }) {
+  const { communityId } = params;
+
+  // Load config
+  const community = await db.community.findUnique({
+    where: { id: communityId },
+    select: { orbitConfig: true },
+  });
+  const config = getOrbitConfig(community?.orbitConfig);
+
+  // Fetch approved members (no override)
   const members = await db.membership.findMany({
-    where: { communityId: params.communityId, status: MembershipStatus.APPROVED },
-    select: { userId: true, gravityScore: true, orbitLevelOverride: true },
-    orderBy: { gravityScore: "desc" },
+    where: {
+      communityId,
+      status: MembershipStatus.APPROVED,
+      orbitLevelOverride: null,
+    },
+    select: { userId: true, gravityScore: true },
   });
 
   if (members.length === 0) return;
 
-  // Only bucket members without an override.
-  const eligible = members.filter((m) => !m.orbitLevelOverride);
-  if (eligible.length === 0) return;
+  const memberUserIds = members.map((m) => m.userId);
 
-  // Percentile buckets:
-  // top 10% advocate, next 20% contributor, next 30% participant, rest explorer
-  const total = eligible.length;
-  const aCut = Math.ceil(total * 0.1);
-  const cCut = Math.ceil(total * 0.3);
-  const pCut = Math.ceil(total * 0.6);
+  // Fetch all approved member IDs to scope attestation queries
+  const approvedMemberships = await db.membership.findMany({
+    where: { communityId, status: MembershipStatus.APPROVED },
+    select: { userId: true },
+  });
+  const approvedMemberIds = [...new Set(approvedMemberships.map((m) => m.userId))];
 
-  const advocates = eligible.slice(0, aCut).map((m) => m.userId);
-  const contributors = eligible.slice(aCut, cCut).map((m) => m.userId);
-  const participants = eligible.slice(cCut, pCut).map((m) => m.userId);
-  const explorers = eligible.slice(pCut).map((m) => m.userId);
+  // Find the most recent attestation each eligible member gave to a community peer.
+  // We fetch all active attestations from eligible members to community peers,
+  // then pick the most recent per user in JS (avoids raw SQL).
+  const recentAttestations = await db.attestation.findMany({
+    where: {
+      fromUserId: { in: memberUserIds },
+      toUserId: { in: approvedMemberIds },
+      revokedAt: null,
+      supersededById: null,
+    },
+    select: { fromUserId: true, createdAt: true },
+    orderBy: { createdAt: "desc" },
+  });
 
-  const communityId = params.communityId;
+  const lastAttestationByUser = new Map<string, Date>();
+  for (const a of recentAttestations) {
+    // Since ordered desc, the first occurrence per user is the most recent
+    if (!lastAttestationByUser.has(a.fromUserId)) {
+      lastAttestationByUser.set(a.fromUserId, a.createdAt);
+    }
+  }
 
-  const ops = [
-    { level: OrbitLevel.ADVOCATE, userIds: advocates },
-    { level: OrbitLevel.CONTRIBUTOR, userIds: contributors },
-    { level: OrbitLevel.PARTICIPANT, userIds: participants },
-    { level: OrbitLevel.EXPLORER, userIds: explorers },
-  ]
-    .filter((x) => x.userIds.length > 0)
-    .map((x) =>
+  // Determine orbit level for each member
+  const now = Date.now();
+  const levels: Record<OrbitLevel, string[]> = {
+    [OrbitLevel.ADVOCATE]: [],
+    [OrbitLevel.CONTRIBUTOR]: [],
+    [OrbitLevel.PARTICIPANT]: [],
+    [OrbitLevel.EXPLORER]: [],
+  };
+
+  const orderedLevels: { level: OrbitLevel; threshold: z.infer<typeof OrbitLevelThresholdSchema> }[] = [
+    { level: OrbitLevel.ADVOCATE, threshold: config.thresholds.ADVOCATE },
+    { level: OrbitLevel.CONTRIBUTOR, threshold: config.thresholds.CONTRIBUTOR },
+    { level: OrbitLevel.PARTICIPANT, threshold: config.thresholds.PARTICIPANT },
+  ];
+
+  for (const m of members) {
+    let assigned: OrbitLevel = OrbitLevel.EXPLORER;
+
+    for (const { level, threshold } of orderedLevels) {
+      if (m.gravityScore < threshold.minGravity) continue;
+
+      // Behavioral gate: if recentAttestationDays is set, check recency
+      if (threshold.recentAttestationDays !== null) {
+        const lastDate = lastAttestationByUser.get(m.userId);
+        if (!lastDate) continue;
+
+        const daysSince = (now - lastDate.getTime()) / 86_400_000;
+        if (daysSince > threshold.recentAttestationDays) continue;
+      }
+
+      assigned = level;
+      break; // Levels are checked top-down; first match wins
+    }
+
+    levels[assigned].push(m.userId);
+  }
+
+  // Batch update grouped by level
+  const ops = Object.entries(levels)
+    .filter(([, userIds]) => userIds.length > 0)
+    .map(([level, userIds]) =>
       db.membership.updateMany({
         where: {
           communityId,
           status: MembershipStatus.APPROVED,
           orbitLevelOverride: null,
-          userId: { in: x.userIds },
+          userId: { in: userIds },
         },
-        data: { orbitLevel: x.level },
+        data: { orbitLevel: level as OrbitLevel },
       }),
     );
 
-  await db.$transaction(ops);
+  if (ops.length > 0) {
+    await db.$transaction(ops);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ScoringEvent logging — fire-and-forget
+// ---------------------------------------------------------------------------
+
+/**
+ * Fire-and-forget: log a ScoringEvent for every community where both users are
+ * approved members. Used by attestation create/retract routes.
+ *
+ * Never throws — failures are silently swallowed so they don't block the
+ * calling route's response.
+ */
+export function logScoringEvent(params: {
+  fromUserId: string;
+  toUserId: string;
+  type: ScoringType;
+}) {
+  const { fromUserId, toUserId, type } = params;
+
+  db.membership
+    .findMany({
+      where: {
+        userId: { in: [fromUserId, toUserId] },
+        status: MembershipStatus.APPROVED,
+      },
+      select: { userId: true, communityId: true },
+    })
+    .then((memberships) => {
+      // Group by community, keep only communities where BOTH users are approved
+      const byCommunity = new Map<string, Set<string>>();
+      for (const m of memberships) {
+        let users = byCommunity.get(m.communityId);
+        if (!users) {
+          users = new Set();
+          byCommunity.set(m.communityId, users);
+        }
+        users.add(m.userId);
+      }
+
+      const sharedCommunityIds: string[] = [];
+      for (const [communityId, users] of byCommunity) {
+        if (users.has(fromUserId) && users.has(toUserId)) {
+          sharedCommunityIds.push(communityId);
+        }
+      }
+
+      if (sharedCommunityIds.length === 0) return;
+
+      return db.scoringEvent.createMany({
+        data: sharedCommunityIds.map((communityId) => ({
+          communityId,
+          actorId: fromUserId,
+          subjectUserId: toUserId,
+          type,
+        })),
+      });
+    })
+    .catch(() => {
+      // Best-effort; never block the caller's response.
+    });
 }
