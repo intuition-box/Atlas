@@ -73,6 +73,7 @@ type MemberListItem = {
     role: MembershipRole
     status: MembershipStatus
     orbitLevel: OrbitLevel | null
+    orbitLevelOverride: OrbitLevel | null
     loveScore: number | null
     reachScore: number | null
     gravityScore: number | null
@@ -257,6 +258,7 @@ export async function GET(req: NextRequest) {
       role: true,
       status: true,
       orbitLevel: true,
+      orbitLevelOverride: true,
       loveScore: true,
       reachScore: true,
       gravityScore: true,
@@ -306,6 +308,7 @@ export async function GET(req: NextRequest) {
         role: r.role,
         status: r.status,
         orbitLevel: r.orbitLevel ?? null,
+        orbitLevelOverride: r.orbitLevelOverride ?? null,
         loveScore: r.loveScore ?? null,
         reachScore: r.reachScore ?? null,
         gravityScore: r.gravityScore ?? null,

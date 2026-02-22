@@ -3,10 +3,10 @@
 import * as React from "react"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
-import { Globe, LayoutGrid, List, RefreshCw } from "lucide-react"
+import { Globe, LayoutGrid, List, MoreVertical, Pin, RefreshCw } from "lucide-react"
 import { DiscordIcon, GitHubIcon, TelegramIcon, XIcon } from "@/components/ui/icons"
 
-import { apiGet } from "@/lib/api/client"
+import { apiGet, apiPost } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
 import { normalizeHandle, validateHandle } from "@/lib/handle"
 import {
@@ -26,6 +26,28 @@ import { PageHeaderMenu } from "@/components/common/page-header-menu"
 import { ProfileAvatar } from "@/components/common/profile-avatar"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import {
+  Menu,
+  MenuContent,
+  MenuGroup,
+  MenuItem,
+  MenuLabel,
+  MenuRadioGroup,
+  MenuRadioItem,
+  MenuSeparator,
+  MenuTrigger,
+} from "@/components/ui/menu"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -109,6 +131,7 @@ type MemberProfile = {
   tools?: string[] | null
   languages?: string[] | null
   orbitLevel?: string | null
+  orbitLevelOverride?: string | null
   love?: number | null
   reach?: number | null
   gravity?: number | null
@@ -157,6 +180,7 @@ type ApiMemberItem = {
     role: MemberRole
     status: string
     orbitLevel: string | null
+    orbitLevelOverride: string | null
     loveScore: number | null
     reachScore: number | null
     gravityScore: number | null
@@ -263,6 +287,7 @@ function normalizeMembersPayload(raw: unknown, _fallbackHandle: string): Members
       tools: item.user.tools,
       languages: item.user.languages,
       orbitLevel: item.membership.orbitLevel,
+      orbitLevelOverride: item.membership.orbitLevelOverride,
       love: item.membership.loveScore,
       reach: item.membership.reachScore,
       gravity: item.membership.gravityScore,
@@ -527,7 +552,105 @@ function formatOrbitLevel(level: string | null | undefined): string | null {
   return level.charAt(0).toUpperCase() + level.slice(1).toLowerCase()
 }
 
-function MemberCard({ member }: { member: CommunityMember }) {
+const ORBIT_LEVELS = [
+  { value: "EXPLORER", label: "Explorer" },
+  { value: "PARTICIPANT", label: "Participant" },
+  { value: "CONTRIBUTOR", label: "Contributor" },
+  { value: "ADVOCATE", label: "Advocate" },
+] as const
+
+function AdminMemberMenu({
+  member,
+  communityHandle,
+  onOrbitOverride,
+}: {
+  member: CommunityMember
+  communityHandle: string
+  onOrbitOverride: (userId: string, newOverride: string | null) => void
+}) {
+  const [banDialogOpen, setBanDialogOpen] = React.useState(false)
+  const [banning, setBanning] = React.useState(false)
+
+  const u = member.user
+  const currentValue = u.orbitLevelOverride ?? "auto"
+  const displayName = u.name?.trim() || `@${u.handle}`
+
+  function handleOrbitChange(nextValue: unknown) {
+    const next = String(nextValue)
+    const nextOverride = next === "auto" ? null : next
+    onOrbitOverride(u.id, nextOverride)
+
+    void apiPost("/api/membership/orbit", {
+      communityHandle,
+      userId: u.id,
+      orbitLevelOverride: nextOverride,
+    })
+  }
+
+  async function handleBan() {
+    setBanning(true)
+    // TODO: wire to POST /api/membership/ban when implemented
+    setBanning(false)
+    setBanDialogOpen(false)
+  }
+
+  return (
+    <>
+      <div onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+        <Menu>
+          <MenuTrigger
+            className="inline-flex h-6 w-6 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:text-foreground hover:bg-accent cursor-pointer"
+            aria-label="Member actions"
+          >
+            <MoreVertical className="size-3.5" />
+          </MenuTrigger>
+          <MenuContent align="end" sideOffset={4}>
+            <MenuGroup>
+              <MenuLabel>Orbit level</MenuLabel>
+              <MenuRadioGroup value={currentValue} onValueChange={handleOrbitChange}>
+                <MenuRadioItem value="auto">Auto</MenuRadioItem>
+                {ORBIT_LEVELS.map((l) => (
+                  <MenuRadioItem key={l.value} value={l.value}>{l.label}</MenuRadioItem>
+                ))}
+              </MenuRadioGroup>
+            </MenuGroup>
+            <MenuSeparator />
+            <MenuGroup>
+              <MenuLabel>Moderation</MenuLabel>
+              <MenuItem variant="destructive" onClick={() => setBanDialogOpen(true)}>
+                Ban member
+              </MenuItem>
+            </MenuGroup>
+          </MenuContent>
+        </Menu>
+      </div>
+
+      <AlertDialog open={banDialogOpen} onOpenChange={setBanDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Ban {displayName}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will remove them from the community. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" disabled={banning} onClick={handleBan}>
+              {banning ? "Banning\u2026" : "Ban member"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  )
+}
+
+function MemberCard({ member, isAdmin, communityHandle, onOrbitOverride }: {
+  member: CommunityMember
+  isAdmin?: boolean
+  communityHandle?: string
+  onOrbitOverride?: (userId: string, newOverride: string | null) => void
+}) {
   const u = member.user
   const displayName = u.name?.trim() || `@${u.handle}`
   const href = userPath(u.handle)
@@ -537,31 +660,54 @@ function MemberCard({ member }: { member: CommunityMember }) {
   const hasTools = (u.tools?.length ?? 0) > 0
   const languages = (u.languages ?? []).filter(Boolean)
   const hasLocationOrLangs = !!u.location || languages.length > 0
-  const orbitLabel = formatOrbitLevel(u.orbitLevel)
+
+  const isOrbitOverridden = u.orbitLevelOverride != null
+  const effectiveOrbit = u.orbitLevelOverride ?? u.orbitLevel
+  const orbitLabel = formatOrbitLevel(effectiveOrbit)
+  const showAdminMenu = isAdmin && communityHandle && onOrbitOverride
 
   return (
     <Card size="sm" className="transition-colors hover:bg-card/80">
-      <Link href={href} aria-label={`View ${displayName}'s profile`} className="contents">
-        <CardHeader className="!gap-0">
-          <div className="flex items-start justify-between gap-2">
-            <div className="flex items-start gap-3 min-w-0">
-              <ProfileAvatar type="user" src={u.image} name={displayName} className="h-10 w-10" />
-              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <div className="truncate text-sm font-medium">{displayName}</div>
-                <div className="truncate text-xs text-muted-foreground">@{u.handle}</div>
-              </div>
+      <CardHeader className="!gap-0">
+        <div className="flex items-start justify-between gap-2">
+          <Link href={href} aria-label={`View ${displayName}'s profile`} className="flex items-start gap-3 min-w-0">
+            <ProfileAvatar type="user" src={u.image} name={displayName} className="h-10 w-10" />
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <div className="truncate text-sm font-medium">{displayName}</div>
+              <div className="truncate text-xs text-muted-foreground">@{u.handle}</div>
             </div>
-            <div className="flex items-center gap-1.5 shrink-0">
-              {orbitLabel && (
+          </Link>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {orbitLabel && (
+              isOrbitOverridden ? (
+                <Tooltip>
+                  <TooltipTrigger>
+                    <Badge variant="secondary" className="gap-1 bg-destructive/15 text-destructive">
+                      <Pin className="size-2.5" />
+                      {orbitLabel}
+                    </Badge>
+                  </TooltipTrigger>
+                  <TooltipContent>Manually set by admin</TooltipContent>
+                </Tooltip>
+              ) : (
                 <Badge variant="secondary">{orbitLabel}</Badge>
-              )}
-              {member.role !== "MEMBER" && (
-                <Badge variant="secondary" className="bg-amber-500/10 text-amber-600 border-amber-500/20">{ROLE_LABELS[member.role]}</Badge>
-              )}
-            </div>
+              )
+            )}
+            {member.role !== "MEMBER" && (
+              <Badge variant="secondary" className="bg-amber-500/15 text-amber-600">{ROLE_LABELS[member.role]}</Badge>
+            )}
+            {showAdminMenu && (
+              <AdminMemberMenu
+                member={member}
+                communityHandle={communityHandle}
+                onOrbitOverride={onOrbitOverride}
+              />
+            )}
           </div>
-        </CardHeader>
+        </div>
+      </CardHeader>
 
+      <Link href={href} className="contents">
         {hasOrbit && (
           <CardContent>
             <div className="grid grid-cols-3 divide-x divide-border/60 rounded-lg border border-border/60 py-2">
@@ -844,12 +990,24 @@ function FiltersPanel({
   )
 }
 
-function MembersGrid({ items, view }: { items: CommunityMember[]; view: "cards" | "list" }) {
+function MembersGrid({ items, view, isAdmin, communityHandle, onOrbitOverride }: {
+  items: CommunityMember[]
+  view: "cards" | "list"
+  isAdmin?: boolean
+  communityHandle?: string
+  onOrbitOverride?: (userId: string, newOverride: string | null) => void
+}) {
   if (view === "cards") {
     return (
       <div className="grid gap-4 sm:grid-cols-2">
         {items.map((m) => (
-          <MemberCard key={m.membershipId} member={m} />
+          <MemberCard
+            key={m.membershipId}
+            member={m}
+            isAdmin={isAdmin}
+            communityHandle={communityHandle}
+            onOrbitOverride={onOrbitOverride}
+          />
         ))}
       </div>
     )
@@ -1008,6 +1166,27 @@ export default function CommunityProfilePage() {
       refreshStartedRef.current = false
     }
   }, [refreshing, membersLoading])
+
+  // --- Orbit override optimistic state ---
+  const [orbitOverrides, setOrbitOverrides] = React.useState<Map<string, string | null>>(new Map())
+
+  const handleOrbitOverride = React.useCallback((userId: string, newOverride: string | null) => {
+    setOrbitOverrides((prev) => {
+      const next = new Map(prev)
+      next.set(userId, newOverride)
+      return next
+    })
+  }, [])
+
+  // Apply optimistic overrides on top of server data
+  const displayItems = React.useMemo(() => {
+    if (orbitOverrides.size === 0) return memberItems
+    return memberItems.map((m) => {
+      const override = orbitOverrides.get(m.user.id)
+      if (override === undefined) return m
+      return { ...m, user: { ...m.user, orbitLevelOverride: override } }
+    })
+  }, [memberItems, orbitOverrides])
 
   // --- SKELETON ---
 
@@ -1304,7 +1483,13 @@ export default function CommunityProfilePage() {
               hasMore={!!membersData?.page?.nextCursor}
               isLoading={loadingMore}
             >
-              <MembersGrid items={memberItems} view={view} />
+              <MembersGrid
+                items={displayItems}
+                view={view}
+                isAdmin={isAdmin}
+                communityHandle={handleLabel}
+                onOrbitOverride={handleOrbitOverride}
+              />
             </InfiniteScroll>
           )}
         </>
