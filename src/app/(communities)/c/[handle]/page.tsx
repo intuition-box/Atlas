@@ -3,7 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
-import { Globe, LayoutGrid, List, MoreVertical, Pin, RefreshCw } from "lucide-react"
+import { Globe, LayoutGrid, List, Lock, MoreVertical, RefreshCw } from "lucide-react"
 import { DiscordIcon, GitHubIcon, TelegramIcon, XIcon } from "@/components/ui/icons"
 
 import { apiGet, apiPost } from "@/lib/api/client"
@@ -682,8 +682,8 @@ function MemberCard({ member, isAdmin, communityHandle, onOrbitOverride }: {
               isOrbitOverridden ? (
                 <Tooltip>
                   <TooltipTrigger>
-                    <Badge variant="secondary" className="gap-1 bg-destructive/15 text-destructive">
-                      <Pin className="size-2.5" />
+                    <Badge variant="secondary" className="gap-2 bg-destructive/15 text-destructive">
+                      <Lock className="size-2.5" />
                       {orbitLabel}
                     </Badge>
                   </TooltipTrigger>
@@ -1100,7 +1100,14 @@ export default function CommunityProfilePage() {
   // --- Members data ---
   const [view, setView] = React.useState<"cards" | "list">("cards")
   const [cursor, setCursor] = React.useState<string | null>(null)
-  const [isFiltersOpen, setIsFiltersOpen] = React.useState(false)
+  const [isFiltersOpen, setIsFiltersOpen] = React.useState(() => {
+    if (typeof window === "undefined") return false
+    try {
+      return localStorage.getItem("community-filters-open") === "true"
+    } catch {
+      return false
+    }
+  })
   const [isAboutOpen, setIsAboutOpen] = React.useState(() => {
     if (typeof window === "undefined") return true
     try {
@@ -1110,6 +1117,14 @@ export default function CommunityProfilePage() {
       return true
     }
   })
+
+  React.useEffect(() => {
+    try {
+      localStorage.setItem("community-filters-open", String(isFiltersOpen))
+    } catch {
+      // Storage full or disabled
+    }
+  }, [isFiltersOpen])
 
   React.useEffect(() => {
     try {
