@@ -777,8 +777,8 @@ export default function ActivityPage() {
       <Tabs className="gap-6" value={tab} onValueChange={(v) => setTab(v as "activity" | "leaderboard")}>
         <PageHeader
           leading={
-            <Avatar className="h-12 w-12">
-              <AvatarFallback><Globe className="size-5" /></AvatarFallback>
+            <Avatar className="h-12 w-12 has-[[data-slot=avatar-fallback]]:after:border-primary/15">
+              <AvatarFallback className="bg-primary/10 text-primary"><Globe className="size-5" /></AvatarFallback>
             </Avatar>
           }
           title="Activity"

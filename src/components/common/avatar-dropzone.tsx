@@ -440,7 +440,7 @@ const AvatarDropzone = React.forwardRef<AvatarDropzoneHandle, AvatarDropzoneProp
           (disabled || isUploading) && "opacity-70 cursor-not-allowed",
         )}
       >
-        <Avatar className="size-16 rounded-2xl">
+        <Avatar className="size-16 rounded-2xl has-[[data-slot=avatar-fallback]]:after:border-primary/15">
           <AvatarImage
             key={normalizedSrc ?? "empty"}
             src={normalizedSrc}
@@ -449,7 +449,7 @@ const AvatarDropzone = React.forwardRef<AvatarDropzoneHandle, AvatarDropzoneProp
             referrerPolicy="no-referrer"
             onLoadingStatusChange={(status) => setImageLoaded(status === "loaded")}
           />
-          <AvatarFallback>
+          <AvatarFallback className="bg-primary/10 text-primary">
             <FallbackIcon />
           </AvatarFallback>
         </Avatar>

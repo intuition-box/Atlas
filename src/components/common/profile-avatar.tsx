@@ -29,11 +29,11 @@ export function ProfileAvatar({
   const FallbackIcon = type === "community" ? Users : User;
 
   return (
-    <Avatar size={size} className={className}>
+    <Avatar size={size} className={cn("has-[[data-slot=avatar-fallback]]:after:border-primary/15", className)}>
       <AvatarImage src={src ?? undefined} alt={name ?? ""} referrerPolicy="no-referrer" />
-      <AvatarFallback>
+      <AvatarFallback className="bg-primary/10 text-primary">
         <FallbackIcon
-          className={cn("text-muted-foreground", FALLBACK_ICON_SIZE[size])}
+          className={cn("text-primary", FALLBACK_ICON_SIZE[size])}
         />
       </AvatarFallback>
     </Avatar>

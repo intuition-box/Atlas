@@ -851,7 +851,7 @@ export default function OnboardingPage() {
       <Form form={form} onSubmit={onSubmit}>
         <PageHeader
           leading={
-            <div className="flex size-12 items-center justify-center rounded-full bg-primary/10">
+            <div className="flex size-12 items-center justify-center rounded-full border border-primary/15 bg-primary/10">
               <Hand className="size-6 text-primary" />
             </div>
           }
