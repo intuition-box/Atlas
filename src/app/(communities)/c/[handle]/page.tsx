@@ -11,7 +11,7 @@ import { apiGet, apiPost } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
 import { normalizeHandle, validateHandle } from "@/lib/handle"
 import {
-  communityApplyPath,
+  communityJoinPath,
   communityOrbitPath,
   communityApplicationsPath,
   communitySettingsPath,
@@ -1592,8 +1592,8 @@ export default function CommunityProfilePage() {
         actions={
           <div className="flex items-center gap-2">
             {viewerMembership?.status !== "APPROVED" && community.isMembershipOpen ? (
-              <Button variant="secondary" render={<Link href={communityApplyPath(handleLabel)} />}>
-                Apply
+              <Button variant="secondary" render={<Link href={communityJoinPath(handleLabel)} />}>
+                Join
               </Button>
             ) : null}
             {canViewDirectory ? (

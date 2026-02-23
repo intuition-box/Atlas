@@ -368,7 +368,7 @@ export default function UserProfilePage() {
         actions={
           <PageHeaderMenu
             items={[
-              { label: "Settings", href: userSettingsPath(handleLabel) },
+              ...(isSelf ? [{ label: "Settings", href: userSettingsPath(handleLabel) }] : []),
               { label: "Attestations", href: userAttestationsPath(handleLabel) },
             ]}
           />

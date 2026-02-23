@@ -680,7 +680,7 @@ function ApplicationDialog({
               <Alert variant="destructive">
                 <AlertDescription>
                   {confirmAction === "ban"
-                    ? "Are you sure you want to ban this user? They will not be able to reapply. Click \"Ban\" again to confirm."
+                    ? "Are you sure you want to ban this user? They will not be able to rejoin. Click \"Ban\" again to confirm."
                     : "Are you sure you want to reject this application? Click \"Reject\" again to confirm."}
                 </AlertDescription>
               </Alert>

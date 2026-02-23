@@ -815,8 +815,8 @@ function ApplicationQuestionsSection({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Application questions</CardTitle>
-        <CardDescription>These questions appear on the apply page when applications are open. Keep them short and focused.</CardDescription>
+        <CardTitle>Join questions</CardTitle>
+        <CardDescription>These questions appear on the join page when membership is open. Keep them short and focused.</CardDescription>
       </CardHeader>
 
       <CardContent className="flex flex-col gap-4">
@@ -833,7 +833,7 @@ function ApplicationQuestionsSection({
           </div>
         ) : (
           <Alert>
-            <AlertDescription>No application questions yet.</AlertDescription>
+            <AlertDescription>No join questions yet.</AlertDescription>
           </Alert>
         )}
 

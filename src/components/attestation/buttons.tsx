@@ -119,8 +119,8 @@ export function AttestationButtons({
     return () => controller.abort();
   }, [currentUserId, toUserId, lastSavedAt, isSessionLoading]);
 
-  // Don't show attestation buttons for yourself
-  if (currentUserId === toUserId) {
+  // Don't show attestation buttons if not logged in or viewing own profile
+  if (!currentUserId || currentUserId === toUserId) {
     return null;
   }
 

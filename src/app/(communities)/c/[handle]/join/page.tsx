@@ -2,12 +2,13 @@
 
 import * as React from "react"
 import { useParams, useRouter } from "next/navigation"
+import { useSession } from "next-auth/react"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
 
 import { apiGet, apiPost } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
-import { communityPath } from "@/lib/routes"
+import { communityPath, ROUTES } from "@/lib/routes"
 
 import { PageHeader } from "@/components/common/page-header"
 import { ProfileAvatar } from "@/components/common/profile-avatar"
@@ -22,7 +23,7 @@ import { Textarea } from "@/components/ui/textarea"
 
 // === TYPES ===
 
-type CommunityApplicationQuestion = {
+type JoinQuestion = {
   id: string
   label: string
   help: string | null
@@ -64,13 +65,14 @@ type StatusBanner = {
 
 // === UTILITY FUNCTIONS ===
 
-function parseQuestions(config: unknown): CommunityApplicationQuestion[] {
+function parseQuestions(config: unknown): JoinQuestion[] {
   if (!config || typeof config !== "object") return []
 
   const record = config as Record<string, unknown>
 
   const candidates = [
     record.applicationQuestions,
+    record.joinQuestions,
     record.membershipQuestions,
     record.applyQuestions,
     record.questions,
@@ -80,7 +82,7 @@ function parseQuestions(config: unknown): CommunityApplicationQuestion[] {
   if (!Array.isArray(arr)) return []
 
   return (arr as unknown[])
-    .map((raw): CommunityApplicationQuestion | null => {
+    .map((raw): JoinQuestion | null => {
       if (!raw || typeof raw !== "object") return null
 
       const q = raw as Record<string, unknown>
@@ -92,12 +94,12 @@ function parseQuestions(config: unknown): CommunityApplicationQuestion[] {
       const help = typeof q.help === "string" ? q.help : null
       const placeholder = typeof q.placeholder === "string" ? q.placeholder : null
       const required = q.required === true
-      const type: CommunityApplicationQuestion["type"] =
+      const type: JoinQuestion["type"] =
         q.type === "text" || q.type === "textarea" ? q.type : null
 
       return { id, label, help, placeholder, required, type }
     })
-    .filter((q): q is CommunityApplicationQuestion => q !== null)
+    .filter((q): q is JoinQuestion => q !== null)
 }
 
 function getStatusLabel(status: string): string {
@@ -123,16 +125,16 @@ function createStatusBanner(status: string | null): StatusBanner | null {
   if (status === "WITHDRAWN") {
     return {
       tone: "neutral",
-      title: "Previous application cancelled",
-      body: "You can submit a new application.",
+      title: "Previous request cancelled",
+      body: "You can submit a new join request.",
     }
   }
 
   if (status === "PENDING") {
     return {
       tone: "neutral",
-      title: "Application in review",
-      body: "Your application is being reviewed. You can still submit a new one.",
+      title: "Join request in review",
+      body: "Your join request is being reviewed. You can still submit a new one.",
     }
   }
 
@@ -148,15 +150,15 @@ function createStatusBanner(status: string | null): StatusBanner | null {
     return {
       tone: "danger",
       title: "Banned",
-      body: "You can't apply to this community.",
+      body: "You can't join this community.",
     }
   }
 
   if (status === "REJECTED") {
     return {
       tone: "danger",
-      title: "Application rejected",
-      body: "Your previous application was not accepted. You may submit a new one.",
+      title: "Request rejected",
+      body: "Your previous join request was not accepted. You may submit a new one.",
     }
   }
 
@@ -167,7 +169,7 @@ function createStatusBanner(status: string | null): StatusBanner | null {
   }
 }
 
-function canUserApply(community: CommunityInfo | null, membershipStatus: string | null): boolean {
+function canUserJoin(community: CommunityInfo | null, membershipStatus: string | null): boolean {
   if (!community) return false
   if (!community.isPublicDirectory) return false
   if (!community.isMembershipOpen) return false
@@ -179,7 +181,7 @@ function canUserApply(community: CommunityInfo | null, membershipStatus: string 
   return false
 }
 
-function buildDynamicSchema(questions: CommunityApplicationQuestion[]) {
+function buildDynamicSchema(questions: JoinQuestion[]) {
   const shape: Record<string, z.ZodTypeAny> = {
     note: z.string().max(2000, "Note is too long").optional().or(z.literal("")),
   }
@@ -198,7 +200,7 @@ function buildDynamicSchema(questions: CommunityApplicationQuestion[]) {
 
 function useCommunityData(handle: string) {
   const [community, setCommunity] = React.useState<CommunityInfo | null>(null)
-  const [questions, setQuestions] = React.useState<CommunityApplicationQuestion[]>([])
+  const [questions, setQuestions] = React.useState<JoinQuestion[]>([])
   const [membershipStatus, setMembershipStatus] = React.useState<string | null>(null)
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
@@ -246,7 +248,7 @@ function useCommunityData(handle: string) {
         setMembershipStatus(viewerStatus)
 
         setLoading(false)
-      } catch (err) {
+      } catch {
         if (!cancelled) {
           setError("An unexpected error occurred while loading the community.")
           setLoading(false)
@@ -276,19 +278,19 @@ function StatusBannerAlert({ banner }: { banner: StatusBanner }) {
   )
 }
 
-function ApplicationQuestions({
+function JoinQuestions({
   questions,
-  canApply,
+  canJoin,
   form,
 }: {
-  questions: CommunityApplicationQuestion[]
-  canApply: boolean
+  questions: JoinQuestion[]
+  canJoin: boolean
   form: ReturnType<typeof useForm<any>>
 }) {
   if (questions.length === 0) {
     return (
       <Alert>
-        <AlertDescription>This community doesn't have any application questions yet.</AlertDescription>
+        <AlertDescription>This community doesn't have any questions yet.</AlertDescription>
       </Alert>
     )
   }
@@ -308,7 +310,7 @@ function ApplicationQuestions({
                 {...fieldControlProps(field, { id, invalid: fieldState.invalid })}
                 value={String(field.value ?? "")}
                 placeholder={q.placeholder ? q.placeholder : undefined}
-                disabled={!canApply}
+                disabled={!canJoin}
               />
             ) : (
               <Textarea
@@ -316,7 +318,7 @@ function ApplicationQuestions({
                 value={String(field.value ?? "")}
                 placeholder={q.placeholder ? q.placeholder : undefined}
                 rows={4}
-                disabled={!canApply}
+                disabled={!canJoin}
               />
             )
           }}
@@ -327,14 +329,14 @@ function ApplicationQuestions({
 }
 
 function OptionalNoteField({
-  canApply,
+  canJoin,
   form,
 }: {
-  canApply: boolean
+  canJoin: boolean
   form: ReturnType<typeof useForm<any>>
 }) {
   return (
-    <Field data-slot="community-apply-note" name="note" invalid={!!form.formState.errors.note}>
+    <Field data-slot="community-join-note" name="note" invalid={!!form.formState.errors.note}>
       <FieldLabel>Optional note</FieldLabel>
       <FieldDescription>Anything else you want moderators to know.</FieldDescription>
 
@@ -345,7 +347,7 @@ function OptionalNoteField({
             {...fieldControlProps(field, { id, invalid: fieldState.invalid })}
             value={String(field.value ?? "")}
             rows={3}
-            disabled={!canApply}
+            disabled={!canJoin}
           />
         )}
       />
@@ -359,24 +361,25 @@ function OptionalNoteField({
 
 // === MAIN COMPONENT ===
 
-export default function CommunityApplyPage() {
+export default function CommunityJoinPage() {
   const router = useRouter()
+  const { data: session, status: sessionStatus } = useSession()
   const params = useParams<{ handle: string }>()
   const communityHandle = String(params?.handle || "").trim()
 
   const { community, questions, membershipStatus, loading, error } = useCommunityData(communityHandle)
 
   const schema = React.useMemo(() => buildDynamicSchema(questions), [questions])
-  type ApplyValues = z.infer<typeof schema>
+  type JoinValues = z.infer<typeof schema>
 
-  const form = useForm<ApplyValues>({
+  const form = useForm<JoinValues>({
     resolver: zodResolver(schema),
-    defaultValues: { note: "" } as ApplyValues,
+    defaultValues: { note: "" } as JoinValues,
     mode: "onBlur",
   })
 
-  const canApply = React.useMemo(
-    () => canUserApply(community, membershipStatus),
+  const canJoin = React.useMemo(
+    () => canUserJoin(community, membershipStatus),
     [community, membershipStatus]
   )
 
@@ -385,12 +388,19 @@ export default function CommunityApplyPage() {
     [membershipStatus]
   )
 
+  // Redirect to sign-in if not authenticated
+  React.useEffect(() => {
+    if (sessionStatus === "unauthenticated") {
+      router.replace(ROUTES.signIn)
+    }
+  }, [sessionStatus, router])
+
   // Initialize form values for dynamic questions
   React.useEffect(() => {
     for (const q of questions) {
-      const current = form.getValues(q.id as keyof ApplyValues)
+      const current = form.getValues(q.id as keyof JoinValues)
       if (typeof current === "undefined") {
-        form.setValue(q.id as keyof ApplyValues, "" as any, { shouldDirty: false })
+        form.setValue(q.id as keyof JoinValues, "" as any, { shouldDirty: false })
       }
     }
   }, [questions, form])
@@ -402,7 +412,7 @@ export default function CommunityApplyPage() {
     }
   }, [error, form])
 
-  async function handleSubmit(values: ApplyValues) {
+  async function handleSubmit(values: JoinValues) {
     form.clearErrors("root")
 
     if (!community) {
@@ -411,12 +421,12 @@ export default function CommunityApplyPage() {
     }
 
     if (!community.isPublicDirectory || !community.isMembershipOpen) {
-      form.setError("root", { type: "validate", message: "This community is not accepting applications." })
+      form.setError("root", { type: "validate", message: "This community is not accepting new members." })
       return
     }
 
-    if (!canApply) {
-      form.setError("root", { type: "validate", message: "You can't submit another application." })
+    if (!canJoin) {
+      form.setError("root", { type: "validate", message: "You can't submit another join request." })
       return
     }
 
@@ -459,11 +469,7 @@ export default function CommunityApplyPage() {
       }
     }
 
-    form.setError("root", { type: "server", message: parsed.formError || "Couldn't submit application." })
-  }
-
-  function handleCancel() {
-    router.replace(communityPath(communityHandle))
+    form.setError("root", { type: "server", message: parsed.formError || "Couldn't submit join request." })
   }
 
   const rootError = form.formState.errors.root?.message
@@ -472,24 +478,44 @@ export default function CommunityApplyPage() {
 
   if (!communityHandle) return null
 
-  return (
-    <main className="mx-auto flex w-full max-w-lg flex-col gap-8 px-4 py-10">
-      {loading ? (
-        <div className="flex flex-col gap-8">
-          {/* Header skeleton */}
-          <Card>
-            <CardContent className="flex items-center gap-4 px-5">
-              <Skeleton className="size-12 rounded-full" />
-              <div className="flex flex-col gap-2">
-                <Skeleton className="h-5 w-24" />
-                <Skeleton className="h-4 w-36" />
-              </div>
-            </CardContent>
-          </Card>
+  // Don't render while checking session
+  if (sessionStatus === "loading" || sessionStatus === "unauthenticated") {
+    return (
+      <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
+        <div className="w-full flex flex-wrap items-center gap-3 p-5">
+          <Skeleton className="size-12 rounded-full shrink-0" />
+          <div className="flex flex-col gap-1.5">
+            <Skeleton className="h-6 w-40" />
+            <Skeleton className="h-3.5 w-20" />
+          </div>
+        </div>
+        <Card>
+          <CardContent className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1">
+              <Skeleton className="h-4 w-32" />
+              <Skeleton className="h-3 w-56" />
+            </div>
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
 
-          {/* Question skeletons */}
+  return (
+    <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
+      {loading ? (
+        <>
+          <div className="w-full flex flex-wrap items-center gap-3 p-5">
+            <Skeleton className="size-12 rounded-full shrink-0" />
+            <div className="flex flex-col gap-1.5">
+              <Skeleton className="h-6 w-40" />
+              <Skeleton className="h-3.5 w-20" />
+            </div>
+          </div>
           <Card>
-            <CardContent className="flex flex-col gap-4 px-5">
+            <CardContent className="flex flex-col gap-4">
               <div className="flex flex-col gap-1">
                 <Skeleton className="h-4 w-32" />
                 <Skeleton className="h-3 w-56" />
@@ -498,17 +524,12 @@ export default function CommunityApplyPage() {
               <Skeleton className="h-10 w-full" />
             </CardContent>
           </Card>
-        </div>
+        </>
       ) : !community ? (
         <>
           <PageHeader
-            title="Apply"
+            title="Join"
             description={`@${communityHandle}`}
-            actions={
-              <Button type="button" variant="secondary" onClick={handleCancel}>
-                Back
-              </Button>
-            }
           />
           <Alert>
             <AlertDescription>This community doesn't exist or is not available.</AlertDescription>
@@ -520,16 +541,11 @@ export default function CommunityApplyPage() {
             leading={
               <ProfileAvatar type="community" src={community.avatarUrl} name={communityName} className="h-12 w-12" />
             }
-            title="Apply"
+            title="Join"
             description={`@${communityHandle}`}
-            actions={
-              <Button type="button" variant="secondary" onClick={handleCancel}>
-                Back
-              </Button>
-            }
           />
           <Alert>
-            <AlertDescription>Applications are only available for communities listed publicly.</AlertDescription>
+            <AlertDescription>Join requests are only available for communities listed publicly.</AlertDescription>
           </Alert>
         </>
       ) : !community.isMembershipOpen ? (
@@ -538,31 +554,21 @@ export default function CommunityApplyPage() {
             leading={
               <ProfileAvatar type="community" src={community.avatarUrl} name={communityName} className="h-12 w-12" />
             }
-            title="Apply"
+            title="Join"
             description={`@${communityHandle}`}
-            actions={
-              <Button type="button" variant="secondary" onClick={handleCancel}>
-                Back
-              </Button>
-            }
           />
           <Alert>
-            <AlertDescription>This community is not accepting applications right now.</AlertDescription>
+            <AlertDescription>This community is not accepting new members right now.</AlertDescription>
           </Alert>
         </>
-      ) : !canApply && statusBanner ? (
+      ) : !canJoin && statusBanner ? (
         <>
           <PageHeader
             leading={
               <ProfileAvatar type="community" src={community.avatarUrl} name={communityName} className="h-12 w-12" />
             }
-            title="Apply"
+            title="Join"
             description={`@${communityHandle}`}
-            actions={
-              <Button type="button" variant="secondary" onClick={handleCancel}>
-                Back
-              </Button>
-            }
           />
           <StatusBannerAlert banner={statusBanner} />
         </>
@@ -572,14 +578,12 @@ export default function CommunityApplyPage() {
             leading={
               <ProfileAvatar type="community" src={community.avatarUrl} name={communityName} className="h-12 w-12" />
             }
-            title="Apply"
+            title="Join"
             description={`@${communityHandle}`}
+            sticky
             actions={
               <FormActions className="flex items-center gap-3">
-                <Button type="button" variant="secondary" onClick={handleCancel}>
-                  Back
-                </Button>
-                <Button type="submit" disabled={!canApply || form.formState.isSubmitting}>
+                <Button type="submit" disabled={!canJoin || form.formState.isSubmitting}>
                   {form.formState.isSubmitting ? "Submitting…" : "Submit"}
                 </Button>
               </FormActions>
@@ -595,13 +599,13 @@ export default function CommunityApplyPage() {
           )}
 
           <Card>
-            <CardContent className="flex flex-col gap-8 px-5">
-              <ApplicationQuestions questions={questions} canApply={canApply} form={form} />
-              <OptionalNoteField canApply={canApply} form={form} />
+            <CardContent className="flex flex-col gap-8">
+              <JoinQuestions questions={questions} canJoin={canJoin} form={form} />
+              <OptionalNoteField canJoin={canJoin} form={form} />
             </CardContent>
           </Card>
         </Form>
       )}
-    </main>
+    </div>
   )
 }

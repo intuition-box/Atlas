@@ -19,7 +19,7 @@ import {
 
 import { PlusIcon, FileTextIcon, CogIcon, GlobeIcon } from "@/components/ui/icons";
 import { apiGet } from "@/lib/api/client";
-import { communityPath, communityApplyPath, communityApplicationsPath, communitySettingsPath } from "@/lib/routes";
+import { communityPath, communityJoinPath, communityApplicationsPath, communitySettingsPath } from "@/lib/routes";
 import { sounds } from "@/lib/sounds";
 import { useNavigation, type NavigationControls } from "@/components/navigation/navigation-provider";
 import {
@@ -482,7 +482,7 @@ export function OrbitScene({
 
     const bottomLeft = [
       { icon: GlobeIcon, label: "Profile", href: communityPath(handle) },
-      { icon: PlusIcon, label: "Apply", href: communityApplyPath(handle) },
+      { icon: PlusIcon, label: "Join", href: communityJoinPath(handle) },
     ];
 
     const bottomRight = isAdmin

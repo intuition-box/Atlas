@@ -86,9 +86,9 @@ export function communityPath(handle: string): string {
   return `/c/${encodeURIComponent(handle)}`;
 }
 
-/** `/c/:handle/apply` */
-export function communityApplyPath(handle: string): string {
-  return `/c/${encodeURIComponent(handle)}/apply`;
+/** `/c/:handle/join` */
+export function communityJoinPath(handle: string): string {
+  return `/c/${encodeURIComponent(handle)}/join`;
 }
 
 /** `/c/:handle/dashboard` */
