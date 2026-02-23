@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { SessionProvider, useSession } from "next-auth/react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
-import { ROUTES, isPublicRoute, isOnboardingRoute } from "@/lib/routes";
+import { ROUTES, isPublicRoute, isOnboardingRoute, userSettingsPath } from "@/lib/routes";
 import { apiPost, resetCsrf, initCsrfVisibilityRefresh } from "@/lib/api/client";
 import { sounds } from "@/lib/sounds";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -153,22 +153,37 @@ function OnboardingGuard({ children }: { children: React.ReactNode }) {
     if (!isOnboarded) {
       // NOT onboarded: must go to onboarding page
       if (!onOnboardingPage && !onPublicRoute) {
-        const returnTo = encodeURIComponent(pathname);
-        router.replace(`${ROUTES.onboarding}?returnToUrl=${returnTo}`);
+        // Only pass returnToUrl for meaningful deep-link pages (not "/").
+        const hasDeepLink = pathname.length > 1;
+        const url = hasDeepLink
+          ? `${ROUTES.onboarding}?returnToUrl=${encodeURIComponent(pathname)}`
+          : ROUTES.onboarding;
+        router.replace(url);
       }
     } else {
       // Onboarded: never show onboarding page again
       if (onOnboardingPage) {
         const returnToUrl = searchParams.get("returnToUrl");
-        const destination = returnToUrl && returnToUrl.startsWith("/") ? returnToUrl : ROUTES.home;
-        router.replace(destination);
+        // Only honour returnToUrl when it points to a real page (not just "/").
+        if (returnToUrl && returnToUrl.length > 1 && returnToUrl.startsWith("/")) {
+          router.replace(returnToUrl);
+        } else {
+          // After first-time onboarding, redirect to settings so the user can
+          // review their profile and connect socials / wallet.
+          const handle = session.user.handle;
+          router.replace(handle ? userSettingsPath(handle) : ROUTES.home);
+        }
       }
     }
   }, [session, status, pathname, searchParams, router]);
 
-  // Play celebration sound after first-time onboarding redirect
+  // Play celebration sound after first-time onboarding redirect.
+  // Skip while still on the onboarding page — the effect re-fires once the
+  // pathname changes to the destination, so the sound plays exactly once on
+  // the settings page (and the AudioContext stays unlocked via client-side nav).
   useEffect(() => {
     if (status !== "authenticated") return;
+    if (isOnboardingRoute(pathname)) return;
     try {
       if (sessionStorage.getItem("atlas-onboarded") === "1") {
         sessionStorage.removeItem("atlas-onboarded");

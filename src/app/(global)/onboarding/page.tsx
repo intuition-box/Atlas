@@ -4,14 +4,14 @@ import * as React from "react"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { Controller, useFieldArray } from "react-hook-form"
-import { useRouter, useSearchParams } from "next/navigation"
-import { getSession } from "next-auth/react"
+import { useRouter } from "next/navigation"
+import { useSession } from "next-auth/react"
 import { Hand, X } from "lucide-react"
 
-import { apiGet, apiPost } from "@/lib/api/client"
+import { apiPost } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
 import { validateHandle } from "@/lib/handle"
-import { ROUTES, userPath, userSettingsPath } from "@/lib/routes"
+import { userSettingsPath } from "@/lib/routes"
 import { COUNTRIES } from "@/config/countries"
 import { LANGUAGE_LIST as LANGUAGES } from "@/config/languages"
 import { SKILL_LIST as SKILLS, TOOL_LIST as TOOLS } from "@/lib/attestations/definitions"
@@ -123,115 +123,13 @@ function useToolsState() {
 
 function ProfileSection({
   form,
+  oauthImage,
 }: {
   form: ReturnType<typeof useForm<OnboardingValues>>
+  /** Raw OAuth image URL (e.g. Discord CDN) shown as fallback in the dropzone. */
+  oauthImage: string | null
 }) {
   const watchedName = form.watch("name")
-  const oauthImageHydratedRef = React.useRef(false)
-
-  // Hydrate avatar from OAuth session
-  React.useEffect(() => {
-    let cancelled = false
-    let timer: ReturnType<typeof setInterval> | null = null
-
-    function extractOauthImage(session: unknown): string {
-      const s = session as any
-      const user = s?.user
-      const candidates = [
-        user?.image,
-        user?.avatarUrl,
-        user?.avatar_url,
-        user?.picture,
-        s?.picture,
-        s?.image,
-      ]
-      for (const c of candidates) {
-        const v = String(c ?? "").trim()
-        if (v) return v
-      }
-      return ""
-    }
-
-    async function readSessionImage(): Promise<string> {
-      try {
-        const session = await getSession()
-        const url = extractOauthImage(session)
-        if (url) return url
-      } catch { /* ignore */ }
-
-      try {
-        const res = await fetch("/api/auth/session", { cache: "no-store" })
-        if (res.ok) {
-          const data = await res.json()
-          const url = extractOauthImage(data)
-          if (url) return url
-        }
-      } catch { /* ignore */ }
-
-      try {
-        const me = await apiGet<any>("/api/user/get")
-        if (me.ok) {
-          const user = (me.value as any)?.user ?? (me.value as any)?.data?.user ?? (me.value as any)
-          const url = extractOauthImage({ user })
-          if (url) return url
-        }
-      } catch { /* ignore */ }
-
-      return ""
-    }
-
-    async function tryHydrateOnce() {
-      if (cancelled) return
-      const current = String(form.getValues("image") ?? "").trim()
-      const dirty = !!(form.formState.dirtyFields as any)?.image
-      if (oauthImageHydratedRef.current || current || dirty) {
-        if (timer) clearInterval(timer)
-        timer = null
-        return
-      }
-      const url = await readSessionImage()
-      if (cancelled) return
-      const now = String(form.getValues("image") ?? "").trim()
-      const nowDirty = !!(form.formState.dirtyFields as any)?.image
-      if (url && !now && !nowDirty) {
-        form.setValue("image", url, { shouldDirty: false, shouldTouch: false })
-        oauthImageHydratedRef.current = true
-        if (timer) clearInterval(timer)
-        timer = null
-      }
-    }
-
-    function scheduleHydration() {
-      void tryHydrateOnce()
-      const startedAt = Date.now()
-      if (timer) clearInterval(timer)
-      timer = setInterval(() => {
-        if (cancelled) return
-        if (Date.now() - startedAt > 20_000) {
-          if (timer) clearInterval(timer)
-          timer = null
-          return
-        }
-        void tryHydrateOnce()
-      }, 500)
-    }
-
-    function onFocusOrVisible() {
-      if (document.visibilityState && document.visibilityState !== "visible") return
-      scheduleHydration()
-    }
-
-    scheduleHydration()
-    window.addEventListener("focus", onFocusOrVisible)
-    document.addEventListener("visibilitychange", onFocusOrVisible)
-
-    return () => {
-      cancelled = true
-      if (timer) clearInterval(timer)
-      window.removeEventListener("focus", onFocusOrVisible)
-      document.removeEventListener("visibilitychange", onFocusOrVisible)
-    }
-  }, [form])
 
   return (
     <Card>
@@ -247,13 +145,12 @@ function ProfileSection({
 
           <div className="relative overflow-hidden rounded-xl border border-dashed border-border p-6">
             <AvatarDropzone
-              value={String(form.watch("image") || "") || null}
+              value={form.watch("image") || oauthImage || null}
               alt="Avatar"
               className="flex flex-col items-center text-center"
               uploadType="user.avatar"
               maxSizeBytes={1 * 1024 * 1024}
               onChange={(url) => {
-                oauthImageHydratedRef.current = true
                 form.clearErrors("root")
                 form.setValue("image", url ?? "", { shouldDirty: true, shouldTouch: true })
               }}
@@ -752,9 +649,7 @@ function SkillsAndToolsSection({
 
 export default function OnboardingPage() {
   const router = useRouter()
-  const searchParams = useSearchParams()
-
-  const returnToUrl = searchParams.get("returnToUrl") || ""
+  const { data: session, update: updateSession } = useSession()
 
   const form = useForm<OnboardingValues>({
     resolver: zodResolver(OnboardingSchema),
@@ -779,6 +674,23 @@ export default function OnboardingPage() {
   const { toolOptions, toolQuery, setToolQuery, addToolOption } = useToolsState()
 
   const countryItems = React.useMemo(() => getCountryItems(), [])
+
+  // Pre-populate form fields from the OAuth session so they're included on submit.
+  const oauthHydratedRef = React.useRef(false)
+  React.useEffect(() => {
+    if (oauthHydratedRef.current || !session?.user) return
+    oauthHydratedRef.current = true
+
+    const image = session.user.image ?? null
+    const name = session.user.name ?? null
+
+    if (image && !form.getValues("image")) {
+      form.setValue("image", image)
+    }
+    if (name && !form.getValues("name")) {
+      form.setValue("name", name)
+    }
+  }, [session, form])
 
   async function onSubmit(values: OnboardingValues) {
     form.clearErrors("root")
@@ -811,9 +723,12 @@ export default function OnboardingPage() {
 
     if (result.ok) {
       try { sessionStorage.setItem("atlas-onboarded", "1") } catch {}
-      const next = returnToUrl.startsWith("/") ? returnToUrl : userSettingsPath(result.value.user.handle)
-      router.replace(next)
-      router.refresh()
+      const handle = result.value.user.handle
+      // Refresh the NextAuth session so OnboardingGuard sees onboarded=true.
+      // Pass handle + onboarded explicitly to avoid a race where the DB query
+      // in the session callback hasn't picked up the freshly committed row yet.
+      await updateSession({ handle, onboarded: true })
+      router.replace(userSettingsPath(handle))
       return
     }
 
@@ -872,7 +787,7 @@ export default function OnboardingPage() {
           </Alert>
         ) : null}
 
-        <ProfileSection form={form} />
+        <ProfileSection form={form} oauthImage={session?.user?.image ?? null} />
 
         <AboutSection form={form} />
 

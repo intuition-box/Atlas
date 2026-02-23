@@ -144,10 +144,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
       return true;
     },
-    async session({ session, user }) {
+    async session({ session, user, trigger, newSession }) {
       if (!session.user) return session;
 
       session.user.id = user.id;
+
+      // When update() is called with data (e.g. after onboarding), merge the
+      // provided values first. This avoids a race where the DB query below
+      // might not yet see a freshly committed handle/onboarded row.
+      if (trigger === "update" && newSession && typeof newSession === "object") {
+        const ns = newSession as Record<string, unknown>;
+        if (typeof ns.handle === "string") session.user.handle = ns.handle;
+        if (typeof ns.onboarded === "boolean") session.user.onboarded = ns.onboarded;
+      }
 
       // AdapterUser typing does not include our custom columns, so refetch.
       const [dbUser, owner] = await Promise.all([
@@ -173,10 +182,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         }),
       ]);
 
-      session.user.avatarUrl = dbUser?.avatarUrl ?? dbUser?.image ?? user.image ?? null;
-      session.user.handle = owner?.handle.name ?? null;
-      // Use onboardedAt from DB as the source of truth
-      session.user.onboarded = Boolean(dbUser?.onboardedAt);
+      // Raw OAuth image (e.g. Discord CDN URL) — used for onboarding preview.
+      session.user.image = dbUser?.image ?? user.image ?? null;
+      // Preferred avatar (may be an R2-mirrored URL after onboarding).
+      session.user.avatarUrl = dbUser?.avatarUrl ?? session.user.image ?? null;
+      // DB is authoritative, but fall back to the value from update() if the
+      // DB query hasn't picked up the new handle yet.
+      session.user.handle = owner?.handle.name ?? session.user.handle ?? null;
+      session.user.onboarded = Boolean(dbUser?.onboardedAt) || session.user.onboarded;
       session.user.walletAddress = dbUser?.walletAddress ?? null;
       session.user.discordHandle = dbUser?.discordHandle ?? null;
       session.user.twitterHandle = dbUser?.twitterHandle ?? null;
