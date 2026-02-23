@@ -63,11 +63,11 @@ type DecisionAction = "approve" | "reject" | "ban"
 
 // === STATUS CONFIG ===
 
-const STATUS_CONFIG: Record<string, { label: string; className: string }> = {
-  PENDING: { label: "Pending", className: "bg-amber-500/10 text-amber-500" },
-  APPROVED: { label: "Approved", className: "bg-emerald-500/10 text-emerald-500" },
-  REJECTED: { label: "Rejected", className: "bg-destructive/10 text-destructive" },
-  BANNED: { label: "Banned", className: "bg-destructive/10 text-destructive" },
+const STATUS_CONFIG: Record<string, { label: string; className: string; textColor: string }> = {
+  PENDING: { label: "Pending", className: "bg-amber-500/10 text-amber-500", textColor: "text-amber-500" },
+  APPROVED: { label: "Approved", className: "bg-emerald-500/10 text-emerald-500", textColor: "text-emerald-500" },
+  REJECTED: { label: "Rejected", className: "bg-destructive/10 text-destructive", textColor: "text-destructive" },
+  BANNED: { label: "Banned", className: "bg-destructive/10 text-destructive", textColor: "text-destructive" },
 }
 
 // === UTILITY FUNCTIONS ===
@@ -457,19 +457,19 @@ function ReviewInfo({ app }: { app: ApplicationItem }) {
   const processed = isProcessedStatus(app.status)
   if (!processed) return null
 
-  const status = normalizeStatus(app.status)
-  const label = STATUS_CONFIG[status]?.label ?? status
   const reviewer = app.reviewerHandle
   const reviewDate = app.reviewedAt ? formatDate(app.reviewedAt) : null
 
   return (
     <>
-      <span className="text-xs text-muted-foreground hidden sm:inline">
-        <span className="font-medium">{label}</span>
-        {reviewer && <> by <Link href={userPath(reviewer)} className="text-primary hover:underline" onClick={(e) => e.stopPropagation()}>@{reviewer}</Link></>}
-        {reviewDate && <> on {reviewDate}</>}
-      </span>
-      <span className="text-xs font-medium text-muted-foreground sm:hidden">{label}</span>
+      <StatusBadge status={app.status} />
+      {(reviewer || reviewDate) && (
+        <span className="text-xs text-muted-foreground hidden sm:inline">
+          {reviewer && <>by <Link href={userPath(reviewer)} className="text-primary hover:underline" onClick={(e) => e.stopPropagation()}>@{reviewer}</Link></>}
+          {reviewer && reviewDate && " "}
+          {reviewDate && <>on {reviewDate}</>}
+        </span>
+      )}
     </>
   )
 }
@@ -655,14 +655,17 @@ function ApplicationDialog({
             </div>
 
             {processed && (
-              <div className="flex flex-col gap-1 rounded-lg border border-border/60 bg-muted/40 px-4 py-3">
-                <span className="text-xs text-muted-foreground">
-                  <span className="font-medium">{STATUS_CONFIG[normalizeStatus(active.status)]?.label ?? normalizeStatus(active.status)}</span>
-                  {active.reviewerHandle && <> by <Link href={userPath(active.reviewerHandle)} className="text-primary hover:underline">@{active.reviewerHandle}</Link></>}
-                  {active.reviewedAt && <> on {formatDate(active.reviewedAt)}</>}
-                </span>
+              <div className="flex flex-col gap-2 rounded-lg border border-border/60 bg-muted/40 px-4 py-3">
+                <div className="flex items-center gap-2">
+                  <StatusBadge status={active.status} />
+                  <span className="text-xs text-muted-foreground">
+                    {active.reviewerHandle && <>by <Link href={userPath(active.reviewerHandle)} className="text-primary hover:underline">@{active.reviewerHandle}</Link></>}
+                    {active.reviewerHandle && active.reviewedAt && " "}
+                    {active.reviewedAt && <>on {formatDate(active.reviewedAt)}</>}
+                  </span>
+                </div>
                 {active.reviewNote && (
-                  <div className="text-sm whitespace-pre-wrap break-words mt-1">{active.reviewNote}</div>
+                  <div className="text-sm whitespace-pre-wrap break-words">{active.reviewNote}</div>
                 )}
               </div>
             )}

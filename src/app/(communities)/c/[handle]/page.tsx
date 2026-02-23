@@ -793,44 +793,83 @@ function MemberCard({ member, isAdmin, viewerUserId, communityHandle, onOrbitOve
   )
 }
 
-function MemberRow({ member }: { member: CommunityMember }) {
+function MemberRow({ member, isAdmin, viewerUserId, communityHandle, onOrbitOverride, onBanSuccess }: {
+  member: CommunityMember
+  isAdmin?: boolean
+  viewerUserId?: string | null
+  communityHandle?: string
+  onOrbitOverride?: (userId: string, newOverride: string | null) => void
+  onBanSuccess?: (membershipId: string) => void
+}) {
   const u = member.user
   const displayName = u.name?.trim() || `@${u.handle}`
   const href = userPath(u.handle)
+  const hasScores = u.gravity != null || u.love != null || u.reach != null
+
+  const isOrbitOverridden = u.orbitLevelOverride != null
+  const effectiveOrbit = u.orbitLevelOverride ?? u.orbitLevel
+  const orbitLabel = formatOrbitLevel(effectiveOrbit)
+  const isSelf = !!viewerUserId && viewerUserId === u.id
+  const isOwner = member.role === "OWNER"
+  const showAdminMenu = isAdmin && communityHandle && onOrbitOverride && !isSelf && !isOwner
 
   return (
-    <Link
-      href={href}
-      className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3 px-4 py-3 text-sm transition-colors hover:bg-card/50"
-      aria-label={`View ${displayName}'s profile`}
-    >
-      <div className="flex min-w-0 items-center gap-3">
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 p-3 transition-colors hover:bg-card/50">
+      <Link href={href} className="flex min-w-0 items-center gap-3 hover:opacity-80 transition-opacity">
         <ProfileAvatar type="user" src={u.image} name={displayName} className="h-8 w-8" />
         <div className="min-w-0">
-          <div className="truncate font-medium">{displayName}</div>
+          <div className="truncate text-sm font-medium">{displayName}</div>
           <div className="truncate text-xs text-muted-foreground">@{u.handle}</div>
-          {u.headline && <div className="truncate text-xs text-foreground/70">{u.headline}</div>}
         </div>
-      </div>
+      </Link>
 
-      <div className="flex items-center">
-        {member.role !== "MEMBER" ? (
-          <Badge variant="secondary">{ROLE_LABELS[member.role]}</Badge>
-        ) : (
-          <span className="text-sm text-muted-foreground">{"\u2014"}</span>
+      <div className="flex items-center gap-2 shrink-0">
+        {orbitLabel && (
+          isOrbitOverridden ? (
+            <Tooltip>
+              <TooltipTrigger>
+                <Badge variant="secondary" className="gap-2 bg-destructive/15 text-destructive">
+                  <Lock className="size-2.5" />
+                  {orbitLabel}
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent>
+                {member.role === "OWNER" ? "Owner — always Advocate" : "Manually set by admin"}
+              </TooltipContent>
+            </Tooltip>
+          ) : (
+            <Badge variant="secondary">{orbitLabel}</Badge>
+          )
+        )}
+        {member.role !== "MEMBER" && (
+          <Badge variant="secondary" className="bg-amber-500/15 text-amber-600">{ROLE_LABELS[member.role]}</Badge>
+        )}
+        {hasScores && (
+          <div className="hidden sm:inline-flex items-center divide-x divide-border/60 rounded-full border border-border/60 text-xs">
+            <div className="flex items-center gap-1 px-2 py-0.5">
+              <span className="text-[10px] text-muted-foreground">L</span>
+              <span className="font-medium">{u.love != null ? formatCompact(u.love) : "\u2014"}</span>
+            </div>
+            <div className="flex items-center gap-1 px-2 py-0.5">
+              <span className="text-[10px] text-muted-foreground">R</span>
+              <span className="font-medium">{u.reach != null ? formatCompact(u.reach) : "\u2014"}</span>
+            </div>
+            <div className="flex items-center gap-1 px-2 py-0.5">
+              <span className="text-[10px] text-muted-foreground">G</span>
+              <span className="font-medium">{u.gravity != null ? formatCompact(u.gravity) : "\u2014"}</span>
+            </div>
+          </div>
+        )}
+        {showAdminMenu && (
+          <AdminMemberMenu
+            member={member}
+            communityHandle={communityHandle}
+            onOrbitOverride={onOrbitOverride}
+            onBanSuccess={onBanSuccess}
+          />
         )}
       </div>
-
-      <div className="flex items-center">
-        <span className="truncate text-sm text-foreground/80">{u.location || "\u2014"}</span>
-      </div>
-
-      <div className="flex items-center justify-end gap-2 text-xs text-muted-foreground">
-        {u.gravity != null && <span>G {formatCompact(u.gravity)}</span>}
-        {u.love != null && <span>L {formatCompact(u.love)}</span>}
-        {u.reach != null && <span>R {formatCompact(u.reach)}</span>}
-      </div>
-    </Link>
+    </div>
   )
 }
 
@@ -1120,17 +1159,25 @@ function MembersGrid({ items, view, isAdmin, viewerUserId, communityHandle, onOr
   }
 
   return (
-    <div className="rounded-2xl border border-border/60 bg-card/30 overflow-hidden">
-      <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3 border-b border-border/60 px-4 py-3 text-xs font-medium text-foreground/70">
-        <div>Member</div>
-        <div>Role</div>
-        <div>Location</div>
-        <div className="text-right">Score</div>
-      </div>
-      {items.map((m) => (
-        <MemberRow key={m.membershipId} member={m} />
-      ))}
-    </div>
+    <Card>
+      <CardHeader>
+        <CardTitle>Members</CardTitle>
+        <CardDescription>Community members directory.</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-2">
+        {items.map((m) => (
+          <MemberRow
+            key={m.membershipId}
+            member={m}
+            isAdmin={isAdmin}
+            viewerUserId={viewerUserId}
+            communityHandle={communityHandle}
+            onOrbitOverride={onOrbitOverride}
+            onBanSuccess={onBanSuccess}
+          />
+        ))}
+      </CardContent>
+    </Card>
   )
 }
 
@@ -1159,12 +1206,14 @@ function BannedMemberRow({
         </div>
       </Link>
       <div className="flex items-center gap-3 shrink-0">
-        <span className="text-xs text-muted-foreground hidden sm:inline">
-          <span className="font-medium">Banned</span>
-          {bannedBy && <> by <Link href={userPath(bannedBy)} className="text-primary hover:underline">@{bannedBy}</Link></>}
-          {bannedDate && <> on {bannedDate}</>}
-        </span>
-        <span className="text-xs font-medium text-muted-foreground sm:hidden">Banned</span>
+        <Badge variant="secondary" className="shrink-0 bg-destructive/10 text-destructive">Banned</Badge>
+        {(bannedBy || bannedDate) && (
+          <span className="text-xs text-muted-foreground hidden sm:inline">
+            {bannedBy && <>by <Link href={userPath(bannedBy)} className="text-primary hover:underline">@{bannedBy}</Link></>}
+            {bannedBy && bannedDate && " "}
+            {bannedDate && <>on {bannedDate}</>}
+          </span>
+        )}
         <Button
           type="button"
           variant="destructive"
@@ -1249,18 +1298,22 @@ function BannedMembersList({
 
 function MembersEmptyState({ hasFilters, onClearFilters }: { hasFilters: boolean; onClearFilters: () => void }) {
   return (
-    <div className="rounded-2xl border border-border/60 bg-card/30 px-4 py-10 text-center text-sm text-muted-foreground">
-      <p>No members match your filters.</p>
-      {hasFilters && (
-        <button
-          type="button"
-          onClick={onClearFilters}
-          className="mt-2 text-primary hover:underline"
-        >
-          Clear all filters
-        </button>
-      )}
-    </div>
+    <Card>
+      <CardContent>
+        <div className="rounded-lg border border-border/60 px-4 py-10 text-center text-sm text-muted-foreground">
+          <p>No members match your filters.</p>
+          {hasFilters && (
+            <button
+              type="button"
+              onClick={onClearFilters}
+              className="mt-2 text-primary hover:underline"
+            >
+              Clear all filters
+            </button>
+          )}
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 
