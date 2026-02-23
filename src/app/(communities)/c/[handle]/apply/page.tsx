@@ -420,7 +420,8 @@ export default function CommunityApplyPage() {
       return
     }
 
-    const answers: Record<string, string> = {}
+    const answers: Record<string, unknown> = {}
+    const _questionLabels: Record<string, string> = {}
 
     for (const q of questions) {
       const v = String((values as any)[q.id] ?? "").trim()
@@ -429,7 +430,11 @@ export default function CommunityApplyPage() {
         return
       }
       answers[q.id] = v
+      _questionLabels[q.id] = q.label
     }
+
+    // Snapshot question labels so they survive admin config changes.
+    answers._questionLabels = _questionLabels
 
     const note = String((values as any).note ?? "").trim()
 

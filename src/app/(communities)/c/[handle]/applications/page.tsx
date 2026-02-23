@@ -18,7 +18,6 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
@@ -42,6 +41,7 @@ type ApplicationItem = {
   createdAt: string | Date
   reviewedAt?: string | Date | null
   reviewNote?: string | null
+  reviewerHandle?: string | null
   user: ApplicationUser
   answers?: unknown
 }
@@ -55,6 +55,7 @@ type CommunityInfo = {
 
 type ReviewListResponse = {
   community: CommunityInfo
+  questionLabels: Record<string, string>
   applications: ApplicationItem[]
 }
 
@@ -91,12 +92,22 @@ function formatRelativeTime(value: string | Date): string {
   return formatDate(value)
 }
 
-function parseAnswers(value: unknown): Array<[string, string]> {
+function parseAnswers(value: unknown, fallbackLabels?: Record<string, string>): Array<[string, string]> {
   if (!value || typeof value !== "object") return []
 
   const rec = value as Record<string, unknown>
+
+  // Prefer snapshotted labels (saved at submission time), then fall back to
+  // the community's current membershipConfig labels.
+  const snapshot = rec._questionLabels
+  const labels: Record<string, string> =
+    snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
+      ? (snapshot as Record<string, string>)
+      : (fallbackLabels ?? {})
+
   return Object.entries(rec)
-    .map(([k, v]) => [k, typeof v === "string" ? v : JSON.stringify(v)] as [string, string])
+    .filter(([k]) => k !== "_questionLabels")
+    .map(([k, v]) => [labels[k] ?? k, typeof v === "string" ? v : JSON.stringify(v)] as [string, string])
     .filter(([, v]) => String(v || "").trim())
 }
 
@@ -442,6 +453,27 @@ function FiltersPanel({
   )
 }
 
+function ReviewInfo({ app }: { app: ApplicationItem }) {
+  const processed = isProcessedStatus(app.status)
+  if (!processed) return null
+
+  const status = normalizeStatus(app.status)
+  const label = STATUS_CONFIG[status]?.label ?? status
+  const reviewer = app.reviewerHandle
+  const reviewDate = app.reviewedAt ? formatDate(app.reviewedAt) : null
+
+  return (
+    <>
+      <span className="text-xs text-muted-foreground hidden sm:inline">
+        <span className="font-medium">{label}</span>
+        {reviewer && <> by <Link href={userPath(reviewer)} className="text-primary hover:underline" onClick={(e) => e.stopPropagation()}>@{reviewer}</Link></>}
+        {reviewDate && <> on {reviewDate}</>}
+      </span>
+      <span className="text-xs font-medium text-muted-foreground sm:hidden">{label}</span>
+    </>
+  )
+}
+
 function ApplicationRow({
   app,
   onRowClick,
@@ -451,6 +483,7 @@ function ApplicationRow({
 }) {
   const user = app.user
   const display = getDisplayName(user)
+  const processed = isProcessedStatus(app.status)
 
   return (
     <div
@@ -470,10 +503,16 @@ function ApplicationRow({
       </Link>
 
       <div className="flex items-center gap-2 shrink-0">
-        <StatusBadge status={app.status} />
-        <span className="text-xs text-muted-foreground hidden sm:inline">
-          {formatRelativeTime(app.createdAt)}
-        </span>
+        {processed ? (
+          <ReviewInfo app={app} />
+        ) : (
+          <>
+            <StatusBadge status={app.status} />
+            <span className="text-xs text-muted-foreground hidden sm:inline">
+              {formatRelativeTime(app.createdAt)}
+            </span>
+          </>
+        )}
       </div>
     </div>
   )
@@ -517,6 +556,7 @@ function ApplicationDialog({
   confirmAction,
   dialogError,
   acting,
+  questionLabels,
   onClose,
   onDecide,
 }: {
@@ -525,6 +565,7 @@ function ApplicationDialog({
   confirmAction: "reject" | "ban" | null
   dialogError: string | null
   acting: DecisionAction | null
+  questionLabels: Record<string, string>
   onClose: () => void
   onDecide: (app: ApplicationItem, decision: DecisionAction) => void
 }) {
@@ -541,7 +582,7 @@ function ApplicationDialog({
       }}
     >
       <DialogContent className="sm:max-w-3xl [&_a:focus-visible]:outline-none [&_button:focus-visible]:outline-none [&_a:focus-visible]:ring-0 [&_button:focus-visible]:ring-0" showCloseButton={false} initialFocus={false}>
-        <div className="flex items-center gap-3">
+        <div className="flex items-start gap-3">
           {active && (
             <Link
               href={userPath(active.user.handle)}
@@ -559,13 +600,50 @@ function ApplicationDialog({
               {active ? `Submitted on ${formatDate(active.createdAt)} by @${active.user.handle}` : ""}
             </DialogDescription>
           </DialogHeader>
+
+          {active && (
+            <div className="flex items-center gap-2 shrink-0">
+              {!isBanned && (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  disabled={acting !== null}
+                  onClick={() => onDecide(active, "ban")}
+                >
+                  {acting === "ban" ? "Banning…" : confirmAction === "ban" ? "Confirm Ban" : "Ban"}
+                </Button>
+              )}
+              {!processed && (
+                <>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={acting !== null}
+                    onClick={() => onDecide(active, "reject")}
+                  >
+                    {acting === "reject" ? "Rejecting…" : confirmAction === "reject" ? "Confirm Reject" : "Reject"}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={acting !== null}
+                    onClick={() => onDecide(active, "approve")}
+                  >
+                    {acting === "approve" ? "Approving…" : "Approve"}
+                  </Button>
+                </>
+              )}
+            </div>
+          )}
         </div>
 
         {active && (
           <div className="flex flex-col gap-5">
             <div className="rounded-lg border border-border/60 p-4 flex flex-col gap-4">
-              {parseAnswers(active.answers).length > 0 ? (
-                parseAnswers(active.answers).map(([question, answer]) => (
+              {parseAnswers(active.answers, questionLabels).length > 0 ? (
+                parseAnswers(active.answers, questionLabels).map(([question, answer]) => (
                   <div key={question} className="flex flex-col gap-1">
                     <div className="text-xs font-medium text-muted-foreground">{question}</div>
                     <div className="text-sm whitespace-pre-wrap break-words">{answer}</div>
@@ -578,14 +656,11 @@ function ApplicationDialog({
 
             {processed && (
               <div className="flex flex-col gap-1 rounded-lg border border-border/60 bg-muted/40 px-4 py-3">
-                <div className="flex items-center gap-2">
-                  <StatusBadge status={active.status} />
-                  {active.reviewedAt && (
-                    <span className="text-xs text-muted-foreground">
-                      on {formatDate(active.reviewedAt)}
-                    </span>
-                  )}
-                </div>
+                <span className="text-xs text-muted-foreground">
+                  <span className="font-medium">{STATUS_CONFIG[normalizeStatus(active.status)]?.label ?? normalizeStatus(active.status)}</span>
+                  {active.reviewerHandle && <> by <Link href={userPath(active.reviewerHandle)} className="text-primary hover:underline">@{active.reviewerHandle}</Link></>}
+                  {active.reviewedAt && <> on {formatDate(active.reviewedAt)}</>}
+                </span>
                 {active.reviewNote && (
                   <div className="text-sm whitespace-pre-wrap break-words mt-1">{active.reviewNote}</div>
                 )}
@@ -609,43 +684,6 @@ function ApplicationDialog({
             )}
           </div>
         )}
-
-        <DialogFooter className="flex-col-reverse sm:flex-row sm:justify-between gap-3">
-          {active && !isBanned ? (
-            <Button
-              type="button"
-              variant="destructive"
-              disabled={acting !== null}
-              onClick={() => onDecide(active, "ban")}
-            >
-              {acting === "ban" ? "Banning…" : confirmAction === "ban" ? "Confirm Ban" : "Ban"}
-            </Button>
-          ) : active ? (
-            <StatusBadge status={active.status} />
-          ) : <div />}
-
-          {active && !processed ? (
-            <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                variant="destructive"
-                disabled={acting !== null}
-                onClick={() => onDecide(active, "reject")}
-              >
-                {acting === "reject" ? "Rejecting…" : confirmAction === "reject" ? "Confirm Reject" : "Reject"}
-              </Button>
-              <Button
-                type="button"
-                disabled={acting !== null}
-                onClick={() => onDecide(active, "approve")}
-              >
-                {acting === "approve" ? "Approving…" : "Approve"}
-              </Button>
-            </div>
-          ) : active ? (
-            <StatusBadge status={active.status} />
-          ) : null}
-        </DialogFooter>
       </DialogContent>
     </Dialog>
   )
@@ -699,12 +737,13 @@ export default function CommunityApplicationsPage() {
 
     const previousStatus = app.status
     const newStatus = decision === "approve" ? "APPROVED" : decision === "ban" ? "BANNED" : "REJECTED"
+    const nowIso = new Date().toISOString()
 
     // Optimistic update
-    setItems((prev) => prev.map((x) => (x.id === app.id ? { ...x, status: newStatus } : x)))
+    setItems((prev) => prev.map((x) => (x.id === app.id ? { ...x, status: newStatus, reviewedAt: nowIso } : x)))
 
     if (active?.id === app.id) {
-      setActive({ ...app, status: newStatus })
+      setActive({ ...app, status: newStatus, reviewedAt: nowIso })
     }
 
     const res = await apiPost<{ ok: true }>("/api/membership/review", {
@@ -809,6 +848,7 @@ export default function CommunityApplicationsPage() {
         confirmAction={confirmAction}
         dialogError={dialogError}
         acting={acting}
+        questionLabels={data?.questionLabels ?? {}}
         onClose={closeDialog}
         onDecide={handleDecide}
       />

@@ -87,6 +87,8 @@ type ReviewListOk = {
     name: string
     avatarUrl: string | null
   }
+  /** Map of question ID → question label, derived from membershipConfig. */
+  questionLabels: Record<string, string>
   applications: Array<{
     id: string
     status: string
@@ -94,6 +96,7 @@ type ReviewListOk = {
     answers: unknown
     reviewedAt: string | null
     reviewNote: string | null
+    reviewerHandle: string | null
     user: {
       id: string
       handle: string | null
@@ -102,6 +105,31 @@ type ReviewListOk = {
       createdAt: string
     }
   }>
+}
+
+/** Extract { questionId → label } from the community's membershipConfig JSON. */
+function parseQuestionLabels(config: unknown): Record<string, string> {
+  if (!config || typeof config !== "object") return {}
+
+  const record = config as Record<string, unknown>
+  const arr = [
+    record.applicationQuestions,
+    record.membershipQuestions,
+    record.applyQuestions,
+    record.questions,
+  ].find((v) => Array.isArray(v)) as unknown[] | undefined
+
+  if (!arr) return {}
+
+  const labels: Record<string, string> = {}
+  for (const raw of arr) {
+    if (!raw || typeof raw !== "object") continue
+    const q = raw as Record<string, unknown>
+    const id = typeof q.id === "string" ? q.id.trim() : ""
+    const label = typeof q.label === "string" ? q.label.trim() : ""
+    if (id && label) labels[id] = label
+  }
+  return labels
 }
 
 export async function GET(req: NextRequest) {
@@ -154,7 +182,7 @@ export async function GET(req: NextRequest) {
     // Fetch community info for the page header.
     const community = await db.community.findUnique({
       where: { id: communityId },
-      select: { id: true, name: true, avatarUrl: true },
+      select: { id: true, name: true, avatarUrl: true, membershipConfig: true },
     })
 
     if (!community) {
@@ -196,6 +224,7 @@ export async function GET(req: NextRequest) {
         answers: true,
         reviewedAt: true,
         reviewNote: true,
+        reviewerId: true,
         user: {
           select: {
             id: true,
@@ -207,7 +236,8 @@ export async function GET(req: NextRequest) {
       },
     })
 
-    const userIds = Array.from(new Set(apps.map((a) => a.user.id)))
+    const reviewerIds = apps.map((a) => a.reviewerId).filter((id): id is string => !!id)
+    const userIds = Array.from(new Set([...apps.map((a) => a.user.id), ...reviewerIds]))
 
     const owners = await db.handleOwner.findMany({
       where: {
@@ -233,6 +263,8 @@ export async function GET(req: NextRequest) {
       if (h) handleByUserId.set(String(o.ownerId), h)
     }
 
+    const questionLabels = parseQuestionLabels(community.membershipConfig)
+
     return okJson<ReviewListOk>({
       community: {
         id: community.id,
@@ -240,6 +272,7 @@ export async function GET(req: NextRequest) {
         name: community.name,
         avatarUrl: community.avatarUrl ?? null,
       },
+      questionLabels,
       applications: apps.map((a) => ({
         id: a.id,
         status: a.status,
@@ -247,6 +280,7 @@ export async function GET(req: NextRequest) {
         answers: a.answers,
         reviewedAt: a.reviewedAt?.toISOString() ?? null,
         reviewNote: a.reviewNote ?? null,
+        reviewerHandle: a.reviewerId ? (handleByUserId.get(a.reviewerId) ?? null) : null,
         user: {
           id: a.user.id,
           handle: handleByUserId.get(a.user.id) ?? null,
