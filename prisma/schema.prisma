@@ -136,6 +136,7 @@ model User {
   attestationsRevoked   Attestation[] @relation("attestationsRevokedBy")
   scoringEvents         ScoringEvent[] @relation("scoringActor")
   scoringSubjects       ScoringEvent[] @relation("ScoringSubject")
+  bannedMemberships     Membership[]   @relation("BannedByUser")
 
   // Security
   securityPrefs   UserSecurityPrefs? @relation("UserSecurityPrefs")
@@ -428,6 +429,8 @@ model Membership {
   reachScore        Int        @default(0)
   gravityScore      Int        @default(0)
 
+  bannedById    String?
+
   lastActiveAt DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -435,6 +438,7 @@ model Membership {
 
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  bannedBy  User?     @relation("BannedByUser", fields: [bannedById], references: [id], onDelete: SetNull)
 
   @@unique([userId, communityId])
   @@index([communityId, status])

@@ -177,6 +177,13 @@ export async function POST(req: NextRequest) {
         data.approvedAt = now;
       }
 
+      // Track who banned the member; clear on unban.
+      if (input.status === MembershipStatus.BANNED) {
+        data.bannedBy = { connect: { id: actorId } };
+      } else if (membership.status === MembershipStatus.BANNED) {
+        data.bannedBy = { disconnect: true };
+      }
+
       const prevStatus = membership.status;
 
       const updated = await tx.membership.update({

@@ -65,7 +65,6 @@ import { InfiniteScroll } from "@/components/ui/infinite-scroll"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 // === CONSTANTS ===
@@ -145,6 +144,8 @@ type CommunityMember = {
   status: string
   approvedAt?: string | null
   lastActiveAt?: string | null
+  updatedAt?: string | null
+  bannedByHandle?: string | null
   user: MemberProfile
 }
 
@@ -190,6 +191,8 @@ type ApiMemberItem = {
     gravityScore: number | null
     approvedAt: string | null
     lastActiveAt: string | null
+    updatedAt: string | null
+    bannedByHandle: string | null
   }
   user: {
     id: string
@@ -278,6 +281,8 @@ function normalizeMembersPayload(raw: unknown, _fallbackHandle: string): Members
     status: item.membership.status,
     approvedAt: item.membership.approvedAt,
     lastActiveAt: item.membership.lastActiveAt,
+    updatedAt: item.membership.updatedAt,
+    bannedByHandle: item.membership.bannedByHandle,
     user: {
       id: item.user.id,
       handle: item.user.handle ?? "",
@@ -829,10 +834,70 @@ function MemberRow({ member }: { member: CommunityMember }) {
   )
 }
 
+function MemberCardSkeleton() {
+  return (
+    <Card size="sm">
+      <CardHeader className="!gap-0">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-start gap-3 min-w-0">
+            <Skeleton className="size-10 rounded-full shrink-0" />
+            <div className="flex flex-col gap-1.5">
+              <Skeleton className="h-4 w-24" />
+              <Skeleton className="h-3 w-16" />
+            </div>
+          </div>
+          <Skeleton className="h-5 w-16 rounded-full" />
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-3 divide-x divide-border/60 rounded-lg border border-border/60 py-2">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="flex flex-col items-center gap-1">
+              <Skeleton className="h-2.5 w-8" />
+              <Skeleton className="h-3 w-6" />
+            </div>
+          ))}
+        </div>
+      </CardContent>
+      <CardContent>
+        <Skeleton className="h-2.5 w-10 mb-2" />
+        <div className="flex gap-1">
+          <Skeleton className="h-5 w-14 rounded-full" />
+          <Skeleton className="h-5 w-18 rounded-full" />
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 function MembersLoadingState() {
   return (
-    <div className="flex items-center justify-center py-20" aria-busy="true">
-      <Spinner className="size-8 text-muted-foreground" />
+    <div className="grid gap-4 sm:grid-cols-2" aria-busy="true">
+      {Array.from({ length: 6 }).map((_, i) => (
+        <MemberCardSkeleton key={i} />
+      ))}
+    </div>
+  )
+}
+
+function BannedMembersLoadingSkeleton() {
+  return (
+    <div className="flex flex-col gap-2" aria-busy="true">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div key={i} className="flex items-center justify-between gap-3 rounded-lg border border-border/60 p-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <Skeleton className="size-8 rounded-full shrink-0" />
+            <div className="flex flex-col gap-1">
+              <Skeleton className="h-4 w-24" />
+              <Skeleton className="h-3 w-16" />
+            </div>
+          </div>
+          <div className="flex items-center gap-3 shrink-0">
+            <Skeleton className="h-4 w-32 hidden sm:block" />
+            <Skeleton className="h-8 w-16 rounded-md" />
+          </div>
+        </div>
+      ))}
     </div>
   )
 }
@@ -1081,6 +1146,8 @@ function BannedMemberRow({
   const u = member.user
   const displayName = u.name?.trim() || `@${u.handle}`
   const href = userPath(u.handle)
+  const bannedDate = member.updatedAt ? fmtDate(member.updatedAt) : null
+  const bannedBy = member.bannedByHandle
 
   return (
     <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 p-3">
@@ -1091,15 +1158,23 @@ function BannedMemberRow({
           <div className="truncate text-xs text-muted-foreground">@{u.handle}</div>
         </div>
       </Link>
-      <Button
-        type="button"
-        variant="secondary"
-        size="sm"
-        disabled={unbanning}
-        onClick={() => onUnban(member.membershipId)}
-      >
-        {unbanning ? "Unbanning\u2026" : "Unban"}
-      </Button>
+      <div className="flex items-center gap-3 shrink-0">
+        <span className="text-xs text-muted-foreground hidden sm:inline">
+          <span className="font-medium">Banned</span>
+          {bannedBy && <> by <Link href={userPath(bannedBy)} className="text-primary hover:underline">@{bannedBy}</Link></>}
+          {bannedDate && <> on {bannedDate}</>}
+        </span>
+        <span className="text-xs font-medium text-muted-foreground sm:hidden">Banned</span>
+        <Button
+          type="button"
+          variant="destructive"
+          size="sm"
+          disabled={unbanning}
+          onClick={() => onUnban(member.membershipId)}
+        >
+          {unbanning ? "Unbanning\u2026" : "Unban"}
+        </Button>
+      </div>
     </div>
   )
 }
@@ -1140,7 +1215,7 @@ function BannedMembersList({
           <CardDescription>Members who have been banned from this community.</CardDescription>
         </CardHeader>
         <CardContent>
-          <MembersLoadingState />
+          <BannedMembersLoadingSkeleton />
         </CardContent>
       </Card>
     )
@@ -1336,9 +1411,10 @@ export default function CommunityProfilePage() {
   const [showBanned, setShowBanned] = React.useState(false)
   const [bannedMembers, setBannedMembers] = React.useState<CommunityMember[]>([])
   const [bannedLoading, setBannedLoading] = React.useState(false)
+  const bannedFetchedRef = React.useRef(false)
 
   React.useEffect(() => {
-    if (!showBanned || !canViewDirectory) return
+    if (!showBanned || !canViewDirectory || bannedFetchedRef.current) return
 
     const ac = new AbortController()
     setBannedLoading(true)
@@ -1355,6 +1431,7 @@ export default function CommunityProfilePage() {
       if (res.ok) {
         const parsed = normalizeMembersPayload(res.value, handle)
         setBannedMembers(parsed.members)
+        bannedFetchedRef.current = true
       }
 
       setBannedLoading(false)
@@ -1385,62 +1462,24 @@ export default function CommunityProfilePage() {
 
   if (state.status === "loading" || state.status === "idle") {
     return (
-      <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-7 pb-40">
-        <div className="w-full flex flex-wrap gap-3 p-5">
-          <Skeleton className="size-12 rounded-full" />
-          <div className="flex flex-col gap-2">
-            <Skeleton className="h-7 w-48" />
-            <Skeleton className="h-3 w-24" />
+      <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
+        {/* PageHeader skeleton */}
+        <div className="w-full flex flex-wrap items-center gap-3 p-5">
+          <Skeleton className="size-12 rounded-full shrink-0" />
+          <div className="flex flex-col gap-1.5">
+            <Skeleton className="h-6 w-40" />
+            <Skeleton className="h-3.5 w-20" />
           </div>
-          <div className="flex gap-3 ml-auto sm:align-center sm:justify-end">
-            <Skeleton className="h-9 w-20" />
+          <div className="flex items-center gap-2 ml-auto">
+            <Skeleton className="h-9 w-18 rounded-4xl" />
+            <Skeleton className="h-9 w-20 rounded-lg" />
+            <Skeleton className="h-9 w-16 rounded-4xl" />
+            <Skeleton className="h-9 w-9 rounded-full" />
           </div>
         </div>
 
-        <Card>
-          <CardHeader className="gap-4">
-            <CardTitle>
-              <Skeleton className="h-5 w-24" />
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="grid grid-cols-2 gap-3">
-            <Skeleton className="h-19 w-full" />
-            <Skeleton className="h-19 w-full" />
-            <Skeleton className="h-19 w-full" />
-            <Skeleton className="h-19 w-full" />
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="gap-4">
-            <CardTitle>
-              <Skeleton className="h-5 w-24" />
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="flex items-center gap-3">
-                <Skeleton className="size-8 rounded-full" />
-                <div className="flex flex-col gap-1">
-                  <Skeleton className="h-4 w-28" />
-                  <Skeleton className="h-3 w-20" />
-                </div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="gap-4">
-            <CardTitle>
-              <Skeleton className="h-5 w-32" />
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="flex items-center gap-3">
-            <Skeleton className="h-5 w-16 rounded-full" />
-            <Skeleton className="h-5 w-14 rounded-full" />
-          </CardContent>
-        </Card>
+        {/* Member cards skeleton grid */}
+        <MembersLoadingState />
       </div>
     )
   }

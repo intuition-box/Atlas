@@ -87,6 +87,8 @@ type MemberListItem = {
     gravityScore: number | null
     approvedAt: string | null
     lastActiveAt: string | null
+    updatedAt: string
+    bannedByHandle: string | null
   }
   user: {
     id: string
@@ -279,6 +281,8 @@ export async function GET(req: NextRequest) {
       gravityScore: true,
       approvedAt: true,
       lastActiveAt: true,
+      updatedAt: true,
+      bannedById: true,
       user: {
         select: {
           id: true,
@@ -301,7 +305,8 @@ export async function GET(req: NextRequest) {
   const slice = hasMore ? rows.slice(0, q.limit) : rows
   const nextCursor = hasMore ? slice[slice.length - 1]?.id ?? null : null
 
-  const userIds = Array.from(new Set(slice.map((r) => r.user.id)))
+  const bannerIds = slice.map((r) => r.bannedById).filter((id): id is string => !!id)
+  const userIds = Array.from(new Set([...slice.map((r) => r.user.id), ...bannerIds]))
   const userHandles = await db.handle.findMany({
     where: {
       status: HandleStatus.ACTIVE,
@@ -329,6 +334,8 @@ export async function GET(req: NextRequest) {
         gravityScore: r.gravityScore ?? null,
         approvedAt: r.approvedAt ? r.approvedAt.toISOString() : null,
         lastActiveAt: r.lastActiveAt ? r.lastActiveAt.toISOString() : null,
+        updatedAt: r.updatedAt.toISOString(),
+        bannedByHandle: r.bannedById ? (handleByUserId.get(r.bannedById) ?? null) : null,
       },
       user: {
         id: r.user.id,
