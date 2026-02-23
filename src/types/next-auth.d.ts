@@ -18,6 +18,7 @@ declare module "next-auth" {
       walletAddress: string | null;
       discordHandle: string | null;
       twitterHandle: string | null;
+      githubHandle: string | null;
       authAt?: string | null;
     };
   }

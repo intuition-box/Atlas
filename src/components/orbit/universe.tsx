@@ -393,7 +393,7 @@ export function UniverseView({
 
       s.mode = "zoom-in";
       s.fetchDone = false;
-      sounds.play("whoosh", { volume: 0.3 });
+      sounds.play("whoosh", { volume: 0.15 });
 
       // Fire fetch now — it runs during the zoom animation.
       // Store result on window so the orbit page can grab it without re-fetching.

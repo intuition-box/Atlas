@@ -3,6 +3,7 @@ import "server-only";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import NextAuth from "next-auth";
 import Discord from "next-auth/providers/discord";
+import GitHub from "next-auth/providers/github";
 import Twitter from "next-auth/providers/twitter";
 import { HandleOwnerType } from "@prisma/client";
 
@@ -79,6 +80,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           }),
         ]
       : []),
+    ...(process.env.AUTH_GITHUB_ID
+      ? [
+          GitHub({
+            clientId: process.env.AUTH_GITHUB_ID,
+            clientSecret: process.env.AUTH_GITHUB_SECRET!,
+          }),
+        ]
+      : []),
   ],
   session: { strategy: "database", maxAge: SESSION_MAX_AGE_SEC },
   secret: requiredEnv("AUTH_SECRET"),
@@ -142,6 +151,21 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         }
       }
 
+      if (account?.provider === "github") {
+        const githubId = account.providerAccountId;
+        const githubHandle = readString(profile as Record<string, unknown>, "login") ?? null;
+
+        try {
+          await db.user.update({
+            where: { id: user.id },
+            data: { githubId, githubHandle, lastActiveAt: new Date() },
+            select: { id: true },
+          });
+        } catch (err) {
+          if (isDev) console.warn("[auth] failed to persist github profile fields", err);
+        }
+      }
+
       return true;
     },
     async session({ session, user, trigger, newSession }) {
@@ -169,6 +193,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             walletAddress: true,
             discordHandle: true,
             twitterHandle: true,
+            githubHandle: true,
           },
         }),
         db.handleOwner.findUnique({
@@ -193,6 +218,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       session.user.walletAddress = dbUser?.walletAddress ?? null;
       session.user.discordHandle = dbUser?.discordHandle ?? null;
       session.user.twitterHandle = dbUser?.twitterHandle ?? null;
+      session.user.githubHandle = dbUser?.githubHandle ?? null;
 
       return session;
     },

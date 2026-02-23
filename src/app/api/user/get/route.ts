@@ -44,6 +44,7 @@ type GetUserOk = {
     discordId: string | null;
     discordHandle: string | null;
     twitterHandle: string | null;
+    githubHandle: string | null;
     walletAddresses: string[];
     createdAt: Date;
     lastActiveAt: Date | null;
@@ -124,6 +125,7 @@ export async function GET(req: NextRequest) {
         discordId: true,
         discordHandle: true,
         twitterHandle: true,
+        githubHandle: true,
         wallets: { select: { address: true }, orderBy: { createdAt: "desc" as const } },
         createdAt: true,
         lastActiveAt: true,
@@ -226,6 +228,7 @@ export async function GET(req: NextRequest) {
         discordId: user.discordId,
         discordHandle: user.discordHandle,
         twitterHandle: user.twitterHandle,
+        githubHandle: user.githubHandle,
         walletAddresses: user.wallets.map((w) => w.address),
         createdAt: user.createdAt,
         lastActiveAt: user.lastActiveAt,

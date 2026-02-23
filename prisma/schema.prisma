@@ -100,6 +100,8 @@ model User {
   discordHandle String?
   twitterId     String?  @unique
   twitterHandle String?
+  githubId      String?  @unique
+  githubHandle  String?
   walletAddress String?  @unique   // denormalized linked wallet (lowercase hex)
   avatarUrl     String?  // preferred profile image URL (e.g., Cloudflare R2)
 

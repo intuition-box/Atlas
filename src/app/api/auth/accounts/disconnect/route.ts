@@ -10,7 +10,7 @@ export const runtime = "nodejs";
 ──────────────────────────── */
 
 const schema = z.object({
-  provider: z.enum(["twitter"]),
+  provider: z.enum(["twitter", "github"]),
 });
 
 /* ────────────────────────────
@@ -20,8 +20,7 @@ const schema = z.object({
 /**
  * Disconnect a linked OAuth provider from the authenticated user.
  *
- * Only Twitter is unlinkable — Discord is the primary sign-in provider
- * and cannot be disconnected.
+ * Discord is the primary sign-in provider and cannot be disconnected.
  */
 export const POST = api(
   schema,
@@ -53,6 +52,12 @@ export const POST = api(
       await db.user.update({
         where: { id: userId },
         data: { twitterId: null, twitterHandle: null },
+        select: { id: true },
+      });
+    } else if (provider === "github") {
+      await db.user.update({
+        where: { id: userId },
+        data: { githubId: null, githubHandle: null },
         select: { id: true },
       });
     }

@@ -1033,6 +1033,103 @@ function TwitterAccountRow() {
   )
 }
 
+function GitHubAccountRow() {
+  const { data: session, update: updateSession } = useSession()
+  const [disconnecting, setDisconnecting] = React.useState(false)
+
+  const githubHandle = session?.user?.githubHandle
+  const isLinked = !!githubHandle
+
+  async function handleConnect() {
+    await signIn("github", { callbackUrl: window.location.href })
+  }
+
+  async function handleDisconnect() {
+    setDisconnecting(true)
+
+    const result = await apiPost<{ disconnected: boolean }>(
+      "/api/auth/accounts/disconnect",
+      { provider: "github" },
+    )
+
+    if (result.ok) {
+      await updateSession()
+    }
+
+    setDisconnecting(false)
+  }
+
+  return (
+    <div className={isLinked ? "rounded-lg border border-border/60 p-3 text-sm" : "rounded-lg border border-dashed border-amber-400/40 p-3 text-sm"}>
+      <h2 className={isLinked ? "text-xs font-medium text-muted-foreground mb-3" : "text-xs font-medium text-amber-400/70 mb-3"}>
+        GitHub
+      </h2>
+      <div className="flex items-center gap-2 justify-between">
+        <div className="flex items-center gap-2 min-w-0">
+          <GitHubIcon className={isLinked ? "size-4 shrink-0 text-muted-foreground" : "size-4 shrink-0 text-amber-400"} />
+          {isLinked ? (
+            <span className="text-sm font-medium">{githubHandle}</span>
+          ) : (
+            <EncryptedText
+              text="@username"
+              scrambleOnly
+              scrambleOneChar
+              className="text-sm text-amber-400"
+            />
+          )}
+        </div>
+
+        {isLinked ? (
+          <AlertDialog>
+            <AlertDialogTrigger
+              render={
+                <Button
+                  variant="destructive"
+                  size="xs"
+                  disabled={disconnecting}
+                />
+              }
+            >
+              {disconnecting ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                "Disconnect"
+              )}
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Disconnect GitHub?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will unlink your GitHub account (@{githubHandle}) from your profile.
+                  You can always reconnect later.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  type="button"
+                  variant="destructive"
+                  onClick={handleDisconnect}
+                >
+                  Disconnect
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        ) : (
+          <Button
+            size="xs"
+            onClick={handleConnect}
+            className="bg-amber-400/15 text-amber-400 hover:bg-amber-400/25"
+          >
+            Connect
+          </Button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function ConnectedAccountsSection() {
   const { data: session } = useSession()
 
@@ -1060,27 +1157,7 @@ function ConnectedAccountsSection() {
 
           <TwitterAccountRow />
 
-          <div className="rounded-lg border border-dashed border-amber-400/40 p-3 text-sm">
-            <h2 className="text-xs font-medium text-amber-400/70 mb-3">GitHub</h2>
-            <div className="flex items-center gap-2 justify-between">
-              <div className="flex items-center gap-2 min-w-0">
-                <GitHubIcon className="size-4 shrink-0 text-amber-400" />
-                <EncryptedText
-                  text="@username"
-                  scrambleOnly
-                  scrambleOneChar
-                  className="text-sm text-amber-400"
-                />
-              </div>
-              <Button
-                size="xs"
-                disabled
-                className="bg-amber-400/15 text-amber-400 hover:bg-amber-400/25"
-              >
-                Coming soon
-              </Button>
-            </div>
-          </div>
+          <GitHubAccountRow />
         </div>
       </CardContent>
     </Card>
