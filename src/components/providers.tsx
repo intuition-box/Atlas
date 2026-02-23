@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { Suspense, useCallback, useEffect, useRef } from "react";
 import { SessionProvider, useSession } from "next-auth/react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
@@ -221,7 +221,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
             <TooltipProvider delay={300}>
               <NavigationProvider>
                 <AttestationQueueProvider>
-                  <OnboardingGuard>{children}</OnboardingGuard>
+                  <Suspense>
+                    <OnboardingGuard>{children}</OnboardingGuard>
+                  </Suspense>
                 </AttestationQueueProvider>
               </NavigationProvider>
             </TooltipProvider>

@@ -153,7 +153,7 @@ export type TotpProblem = ApiError<
 
 export type TotpResult<T> = Result<T, TotpProblem>;
 
-function totpProblem(code: TotpErrorCode, reason: TotpProblem["meta"]["reason"], message: string): TotpProblem {
+function totpProblem(code: TotpErrorCode, reason: NonNullable<TotpProblem["meta"]>["reason"], message: string): TotpProblem {
   return { code, status: 400, message, meta: { reason } };
 }
 
