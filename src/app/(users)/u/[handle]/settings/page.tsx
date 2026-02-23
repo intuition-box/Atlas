@@ -1131,7 +1131,14 @@ function GitHubAccountRow() {
 }
 
 function ConnectedAccountsSection() {
-  const { data: session } = useSession()
+  const { data: session, update: updateSession } = useSession()
+
+  // Force session refresh on mount to pick up newly-linked accounts after
+  // OAuth redirect (signIn() causes a full page navigation, so the client
+  // session may be stale when the page first renders).
+  React.useEffect(() => {
+    void updateSession()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <Card>

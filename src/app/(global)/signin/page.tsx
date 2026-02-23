@@ -26,9 +26,10 @@ function sanitizeReturnTo(value: string | undefined) {
 export default async function SignInPage({
   searchParams,
 }: {
-  searchParams?: SearchParams;
+  searchParams?: Promise<SearchParams>;
 }) {
-  const returnTo = sanitizeReturnTo(searchParams?.returnTo);
+  const params = await searchParams;
+  const returnTo = sanitizeReturnTo(params?.returnTo);
 
   // Pick a small pool of real avatars for the orbit (server-side).
   const avatarRows = await db.user.findMany({

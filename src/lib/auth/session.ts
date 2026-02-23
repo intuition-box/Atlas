@@ -128,8 +128,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             }
           }
         } catch (err) {
-          // Don't block sign-in if this write fails.
-          if (isDev) console.warn("[auth] failed to persist discord profile fields", err);
+          console.error("[auth] failed to persist discord profile fields", err);
         }
       }
 
@@ -147,7 +146,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             select: { id: true },
           });
         } catch (err) {
-          if (isDev) console.warn("[auth] failed to persist twitter profile fields", err);
+          console.error("[auth] failed to persist twitter profile fields", err);
         }
       }
 
@@ -162,7 +161,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             select: { id: true },
           });
         } catch (err) {
-          if (isDev) console.warn("[auth] failed to persist github profile fields", err);
+          console.error("[auth] failed to persist github profile fields", err);
         }
       }
 

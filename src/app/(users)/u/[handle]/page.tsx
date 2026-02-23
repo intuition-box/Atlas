@@ -20,7 +20,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { EncryptedText } from "@/components/ui/encrypted-text"
-import { DiscordIcon, XIcon } from "@/components/ui/icons"
+import { DiscordIcon, GitHubIcon, XIcon } from "@/components/ui/icons"
 import { Skeleton } from "@/components/ui/skeleton"
 
 // === TYPES ===
@@ -43,6 +43,7 @@ type UserGetResponse = {
     discordId: string | null
     discordHandle: string | null
     twitterHandle: string | null
+    githubHandle: string | null
     walletAddresses: string[]
     createdAt: string
     lastActiveAt: string | null
@@ -198,10 +199,11 @@ function ProfileSkeleton() {
 // === SUB-COMPONENTS ===
 
 function SocialsCard({ user }: { user: UserGetResponse["user"] }) {
-  const hasDiscord = !!user.discordId
+  const hasDiscord = !!user.discordId || !!user.discordHandle
   const hasTwitter = !!user.twitterHandle
+  const hasGitHub = !!user.githubHandle
   const wallets = user.walletAddresses ?? []
-  const hasSocials = hasDiscord || hasTwitter || wallets.length > 0
+  const hasSocials = hasDiscord || hasTwitter || hasGitHub || wallets.length > 0
 
   if (!hasSocials) return null
 
@@ -236,6 +238,21 @@ function SocialsCard({ user }: { user: UserGetResponse["user"] }) {
               <div className="flex items-center gap-2">
                 <XIcon className="size-4 shrink-0 text-muted-foreground group-hover:transition-colors group-hover:text-accent" />
                 <span className="text-sm font-medium">{user.twitterHandle}</span>
+              </div>
+            </a>
+          )}
+
+          {hasGitHub && (
+            <a
+              href={`https://github.com/${user.githubHandle}`}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-lg border border-border/60 p-3 text-sm transition-colors hover:border-accent/20 hover:text-accent group"
+            >
+              <h2 className="text-xs font-medium text-muted-foreground mb-3 group-hover:transition-colors group-hover:text-accent">GitHub</h2>
+              <div className="flex items-center gap-2">
+                <GitHubIcon className="size-4 shrink-0 text-muted-foreground group-hover:transition-colors group-hover:text-accent" />
+                <span className="text-sm font-medium">{user.githubHandle}</span>
               </div>
             </a>
           )}
