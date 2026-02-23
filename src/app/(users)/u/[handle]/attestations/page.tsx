@@ -11,7 +11,6 @@ import {
   Link2,
   List,
   Loader2,
-  RefreshCw,
   Undo2,
   X,
 } from "lucide-react"
@@ -953,7 +952,6 @@ export default function AttestationsPage() {
   const { lastSavedAt } = useAttestationQueue()
 
   const [view, setView] = React.useState<"cards" | "list">("cards")
-  const [refreshKey, setRefreshKey] = React.useState(0)
   const [cursor, setCursor] = React.useState<string | null>(null)
   const [isFiltersOpen, setIsFiltersOpen] = React.useState(false)
   const [localItems, setLocalItems] = React.useState<Attestation[]>([])
@@ -980,7 +978,6 @@ export default function AttestationsPage() {
     filters,
     cursor,
     lastSavedAt,
-    refreshKey,
   )
 
   // Sync fetched items to local state (allows optimistic removal on retract)
@@ -1174,27 +1171,6 @@ export default function AttestationsPage() {
     })
   }
 
-  const [refreshing, setRefreshing] = React.useState(false)
-  const refreshStartedRef = React.useRef(false)
-
-  function handleRefresh() {
-    setRefreshing(true)
-    refreshStartedRef.current = false
-    setCursor(null)
-    setRefreshKey((k) => k + 1)
-  }
-
-  // Clear refreshing once the fetch cycle completes (filtering: false→true→false)
-  React.useEffect(() => {
-    if (!refreshing) return
-    if (filtering || loading) {
-      refreshStartedRef.current = true
-    } else if (refreshStartedRef.current) {
-      setRefreshing(false)
-      refreshStartedRef.current = false
-    }
-  }, [refreshing, filtering, loading])
-
   if (!handle) return null
 
   // Full-page skeleton only on the very first load
@@ -1211,10 +1187,6 @@ export default function AttestationsPage() {
         actionsAsFormActions={false}
         actions={
           <div className="flex items-center gap-2">
-            <Button type="button" variant="secondary" disabled={refreshing} onClick={handleRefresh}>
-              {refreshing && <RefreshCw className="size-4 animate-spin" />}
-              {refreshing ? "Refreshing…" : "Refresh"}
-            </Button>
             <Button type="button" variant={isFiltersOpen ? "default" : "secondary"} onClick={() => setIsFiltersOpen((v) => !v)}>
               Filters
             </Button>

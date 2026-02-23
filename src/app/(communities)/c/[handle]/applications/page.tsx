@@ -3,8 +3,6 @@
 import * as React from "react"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
-import { RefreshCw } from "lucide-react"
-
 import { apiGet, apiPost } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
 import { ROUTES, userPath, communityPath, communityOrbitPath, communitySettingsPath } from "@/lib/routes"
@@ -677,7 +675,6 @@ export default function CommunityApplicationsPage() {
 
   const [filters, setFilters] = React.useState<FilterState>(EMPTY_FILTERS)
   const [isFiltersOpen, setIsFiltersOpen] = React.useState(false)
-  const [refreshing, setRefreshing] = React.useState(false)
   const [acting, setActing] = React.useState<DecisionAction | null>(null)
   const [actingId, setActingId] = React.useState<string | null>(null)
 
@@ -750,17 +747,6 @@ export default function CommunityApplicationsPage() {
     setDialogError(parsed.formError || "Couldn't update application.")
   }
 
-  async function handleRefresh() {
-    setRefreshing(true)
-    try {
-      await loadApplications()
-    } finally {
-      if (mountedRef.current) {
-        setRefreshing(false)
-      }
-    }
-  }
-
   if (!handle) return null
 
   if (loading || !data) {
@@ -783,10 +769,6 @@ export default function CommunityApplicationsPage() {
         actionsAsFormActions={false}
         actions={
           <div className="flex items-center gap-2">
-            <Button type="button" variant="secondary" disabled={refreshing} onClick={handleRefresh}>
-              {refreshing && <RefreshCw className="size-4 animate-spin" />}
-              {refreshing ? "Refreshing…" : "Refresh"}
-            </Button>
             <Button type="button" variant={isFiltersOpen ? "default" : "secondary"} onClick={() => setIsFiltersOpen((v) => !v)}>
               Filters
             </Button>

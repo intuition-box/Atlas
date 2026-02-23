@@ -3,7 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
-import { Globe, LayoutGrid, List, Lock, MoreVertical, RefreshCw } from "lucide-react"
+import { Globe, LayoutGrid, List, Lock, MoreVertical } from "lucide-react"
 import { useSession } from "next-auth/react"
 import { DiscordIcon, GitHubIcon, TelegramIcon, XIcon } from "@/components/ui/icons"
 
@@ -568,10 +568,12 @@ function AdminMemberMenu({
   member,
   communityHandle,
   onOrbitOverride,
+  onBanSuccess,
 }: {
   member: CommunityMember
   communityHandle: string
   onOrbitOverride: (userId: string, newOverride: string | null) => void
+  onBanSuccess?: (membershipId: string) => void
 }) {
   const [banDialogOpen, setBanDialogOpen] = React.useState(false)
   const [banning, setBanning] = React.useState(false)
@@ -594,9 +596,18 @@ function AdminMemberMenu({
 
   async function handleBan() {
     setBanning(true)
-    // TODO: wire to POST /api/membership/ban when implemented
+
+    const result = await apiPost("/api/membership/status", {
+      membershipId: member.membershipId,
+      status: "BANNED",
+    })
+
     setBanning(false)
     setBanDialogOpen(false)
+
+    if (result.ok) {
+      onBanSuccess?.(member.membershipId)
+    }
   }
 
   return (
@@ -650,12 +661,13 @@ function AdminMemberMenu({
   )
 }
 
-function MemberCard({ member, isAdmin, viewerUserId, communityHandle, onOrbitOverride }: {
+function MemberCard({ member, isAdmin, viewerUserId, communityHandle, onOrbitOverride, onBanSuccess }: {
   member: CommunityMember
   isAdmin?: boolean
   viewerUserId?: string | null
   communityHandle?: string
   onOrbitOverride?: (userId: string, newOverride: string | null) => void
+  onBanSuccess?: (membershipId: string) => void
 }) {
   const u = member.user
   const displayName = u.name?.trim() || `@${u.handle}`
@@ -711,6 +723,7 @@ function MemberCard({ member, isAdmin, viewerUserId, communityHandle, onOrbitOve
                 member={member}
                 communityHandle={communityHandle}
                 onOrbitOverride={onOrbitOverride}
+                onBanSuccess={onBanSuccess}
               />
             )}
           </div>
@@ -1014,13 +1027,14 @@ function FiltersPanel({
   )
 }
 
-function MembersGrid({ items, view, isAdmin, viewerUserId, communityHandle, onOrbitOverride }: {
+function MembersGrid({ items, view, isAdmin, viewerUserId, communityHandle, onOrbitOverride, onBanSuccess }: {
   items: CommunityMember[]
   view: "cards" | "list"
   isAdmin?: boolean
   viewerUserId?: string | null
   communityHandle?: string
   onOrbitOverride?: (userId: string, newOverride: string | null) => void
+  onBanSuccess?: (membershipId: string) => void
 }) {
   if (view === "cards") {
     return (
@@ -1033,6 +1047,7 @@ function MembersGrid({ items, view, isAdmin, viewerUserId, communityHandle, onOr
             viewerUserId={viewerUserId}
             communityHandle={communityHandle}
             onOrbitOverride={onOrbitOverride}
+            onBanSuccess={onBanSuccess}
           />
         ))}
       </div>
@@ -1051,6 +1066,109 @@ function MembersGrid({ items, view, isAdmin, viewerUserId, communityHandle, onOr
         <MemberRow key={m.membershipId} member={m} />
       ))}
     </div>
+  )
+}
+
+function BannedMemberRow({
+  member,
+  onUnban,
+  unbanning,
+}: {
+  member: CommunityMember
+  onUnban: (membershipId: string) => void
+  unbanning: boolean
+}) {
+  const u = member.user
+  const displayName = u.name?.trim() || `@${u.handle}`
+  const href = userPath(u.handle)
+
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 p-3">
+      <Link href={href} className="flex items-center gap-3 min-w-0 hover:opacity-80 transition-opacity">
+        <ProfileAvatar type="user" src={u.image} name={displayName} className="h-8 w-8" />
+        <div className="min-w-0">
+          <div className="truncate text-sm font-medium">{displayName}</div>
+          <div className="truncate text-xs text-muted-foreground">@{u.handle}</div>
+        </div>
+      </Link>
+      <Button
+        type="button"
+        variant="secondary"
+        size="sm"
+        disabled={unbanning}
+        onClick={() => onUnban(member.membershipId)}
+      >
+        {unbanning ? "Unbanning\u2026" : "Unban"}
+      </Button>
+    </div>
+  )
+}
+
+function BannedMembersList({
+  members,
+  loading,
+  communityHandle,
+  onUnbanSuccess,
+}: {
+  members: CommunityMember[]
+  loading: boolean
+  communityHandle: string
+  onUnbanSuccess: (membershipId: string) => void
+}) {
+  const [unbanningId, setUnbanningId] = React.useState<string | null>(null)
+
+  async function handleUnban(membershipId: string) {
+    setUnbanningId(membershipId)
+
+    const result = await apiPost("/api/membership/status", {
+      membershipId,
+      status: "APPROVED",
+    })
+
+    setUnbanningId(null)
+
+    if (result.ok) {
+      onUnbanSuccess(membershipId)
+    }
+  }
+
+  if (loading) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Banned members</CardTitle>
+          <CardDescription>Members who have been banned from this community.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <MembersLoadingState />
+        </CardContent>
+      </Card>
+    )
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Banned members</CardTitle>
+        <CardDescription>Members who have been banned from this community.</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-2">
+        {members.length > 0 ? (
+          members.map((m) => (
+            <BannedMemberRow
+              key={m.membershipId}
+              member={m}
+              onUnban={handleUnban}
+              unbanning={unbanningId === m.membershipId}
+            />
+          ))
+        ) : (
+          <div className="rounded-lg border border-border/60 px-4 py-10 text-center text-sm text-muted-foreground">
+            No banned members.
+          </div>
+        )}
+      </CardContent>
+    </Card>
   )
 }
 
@@ -1161,8 +1279,6 @@ export default function CommunityProfilePage() {
       // Storage full or disabled
     }
   }, [isAboutOpen])
-  const [refreshing, setRefreshing] = React.useState(false)
-  const refreshStartedRef = React.useRef(false)
 
   const [filters, setFilters] = React.useState<FilterState>({
     q: "", role: "", country: "", skills: [], tools: [], orbitLevel: "", orbitLevelType: "", language: "",
@@ -1194,22 +1310,6 @@ export default function CommunityProfilePage() {
     setFilters((prev) => ({ ...prev, tools: [...prev.tools, tool] }))
   }
 
-  function handleRefresh() {
-    setRefreshing(true)
-    refreshStartedRef.current = false
-    setCursor(null)
-  }
-
-  React.useEffect(() => {
-    if (!refreshing) return
-    if (membersLoading) {
-      refreshStartedRef.current = true
-    } else if (refreshStartedRef.current) {
-      setRefreshing(false)
-      refreshStartedRef.current = false
-    }
-  }, [refreshing, membersLoading])
-
   // --- Orbit override optimistic state ---
   const [orbitOverrides, setOrbitOverrides] = React.useState<Map<string, string | null>>(new Map())
 
@@ -1221,15 +1321,65 @@ export default function CommunityProfilePage() {
     })
   }, [])
 
-  // Apply optimistic overrides on top of server data
+  // --- Banned member optimistic state ---
+  const [bannedMemberIds, setBannedMemberIds] = React.useState<Set<string>>(new Set())
+
+  const handleBanSuccess = React.useCallback((membershipId: string) => {
+    setBannedMemberIds((prev) => {
+      const next = new Set(prev)
+      next.add(membershipId)
+      return next
+    })
+  }, [])
+
+  // --- Banned members view ---
+  const [showBanned, setShowBanned] = React.useState(false)
+  const [bannedMembers, setBannedMembers] = React.useState<CommunityMember[]>([])
+  const [bannedLoading, setBannedLoading] = React.useState(false)
+
+  React.useEffect(() => {
+    if (!showBanned || !canViewDirectory) return
+
+    const ac = new AbortController()
+    setBannedLoading(true)
+
+    void (async () => {
+      const res = await apiGet<unknown>("/api/membership/list", {
+        handle,
+        status: "BANNED",
+        limit: 100,
+      }, { signal: ac.signal })
+
+      if (ac.signal.aborted) return
+
+      if (res.ok) {
+        const parsed = normalizeMembersPayload(res.value, handle)
+        setBannedMembers(parsed.members)
+      }
+
+      setBannedLoading(false)
+    })()
+
+    return () => { ac.abort() }
+  }, [showBanned, canViewDirectory, handle])
+
+  // Apply optimistic overrides on top of server data, and filter out banned members
   const displayItems = React.useMemo(() => {
-    if (orbitOverrides.size === 0) return memberItems
-    return memberItems.map((m) => {
+    let items = memberItems
+
+    // Filter out optimistically banned members
+    if (bannedMemberIds.size > 0) {
+      items = items.filter((m) => !bannedMemberIds.has(m.membershipId))
+    }
+
+    // Apply orbit level overrides
+    if (orbitOverrides.size === 0) return items
+    return items.map((m) => {
       const override = orbitOverrides.get(m.user.id)
       if (override === undefined) return m
       return { ...m, user: { ...m.user, orbitLevelOverride: override } }
     })
-  }, [memberItems, orbitOverrides])
+  }, [memberItems, orbitOverrides, bannedMemberIds])
 
   // --- SKELETON ---
 
@@ -1356,25 +1506,39 @@ export default function CommunityProfilePage() {
             ) : null}
             {canViewDirectory ? (
               <>
-                <Button type="button" variant="secondary" disabled={refreshing} onClick={handleRefresh}>
-                  {refreshing && <RefreshCw className="size-4 animate-spin" />}
-                  {refreshing ? "Refreshing\u2026" : "Refresh"}
-                </Button>
-                <Button type="button" variant={isFiltersOpen ? "default" : "secondary"} onClick={() => setIsFiltersOpen((v) => !v)}>
-                  Filters
-                </Button>
-                <Tabs className="gap-0" value={view} onValueChange={(v) => setView(v === "list" ? "list" : "cards")}>
-                  <TabsList>
-                    <TabsTrigger value="cards" aria-label="Cards view" className="cursor-pointer px-3 !border-transparent data-active:!bg-primary data-active:!text-primary-foreground">
-                      <LayoutGrid className="size-4" />
-                    </TabsTrigger>
-                    <TabsTrigger value="list" aria-label="List view" className="cursor-pointer px-3 !border-transparent data-active:!bg-primary data-active:!text-primary-foreground">
-                      <List className="size-4" />
-                    </TabsTrigger>
-                  </TabsList>
-                  <TabsContent value="cards" />
-                  <TabsContent value="list" />
-                </Tabs>
+                {!showBanned && (
+                  <>
+                    <Button type="button" variant={isFiltersOpen ? "default" : "secondary"} onClick={() => setIsFiltersOpen((v) => !v)}>
+                      Filters
+                    </Button>
+                    <Tabs className="gap-0" value={view} onValueChange={(v) => setView(v === "list" ? "list" : "cards")}>
+                      <TabsList>
+                        <TabsTrigger value="cards" aria-label="Cards view" className="cursor-pointer px-3 !border-transparent data-active:!bg-primary data-active:!text-primary-foreground">
+                          <LayoutGrid className="size-4" />
+                        </TabsTrigger>
+                        <TabsTrigger value="list" aria-label="List view" className="cursor-pointer px-3 !border-transparent data-active:!bg-primary data-active:!text-primary-foreground">
+                          <List className="size-4" />
+                        </TabsTrigger>
+                      </TabsList>
+                      <TabsContent value="cards" />
+                      <TabsContent value="list" />
+                    </Tabs>
+                  </>
+                )}
+                {isAdmin && (
+                  <Tabs className="gap-0" value={showBanned ? "banned" : "members"} onValueChange={(v) => setShowBanned(v === "banned")}>
+                    <TabsList>
+                      <TabsTrigger value="members" className="cursor-pointer px-3 !border-transparent data-active:!bg-primary data-active:!text-primary-foreground">
+                        Members
+                      </TabsTrigger>
+                      <TabsTrigger value="banned" className="cursor-pointer px-3 !border-transparent data-active:!bg-primary data-active:!text-primary-foreground">
+                        Banned
+                      </TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="members" />
+                    <TabsContent value="banned" />
+                  </Tabs>
+                )}
               </>
             ) : null}
             <button
@@ -1490,51 +1654,64 @@ export default function CommunityProfilePage() {
       {/* Member directory */}
       {canViewDirectory ? (
         <>
-
-          {isFiltersOpen && (
-            <FiltersPanel
-              filters={filters}
-              onFiltersChange={handleFiltersChange}
-              onAddSkill={handleAddSkill}
-              onAddTool={handleAddTool}
-              onClearAll={handleClearAll}
-              memberCount={memberItems.length}
-              hasMorePages={!!membersData?.page?.nextCursor}
+          {showBanned ? (
+            <BannedMembersList
+              members={bannedMembers}
+              loading={bannedLoading}
+              communityHandle={handleLabel}
+              onUnbanSuccess={(membershipId) => {
+                setBannedMembers((prev) => prev.filter((m) => m.membershipId !== membershipId))
+              }}
             />
-          )}
-
-          {membersError && (
-            <div
-              className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive"
-              role="alert"
-            >
-              {membersError}
-            </div>
-          )}
-
-          <div aria-live="polite" aria-atomic="true" className="sr-only">
-            {membersLoading ? "Loading members..." : `${memberItems.length} members loaded`}
-          </div>
-
-          {membersLoading ? (
-            <MembersLoadingState />
-          ) : memberItems.length === 0 ? (
-            <MembersEmptyState hasFilters={activeFilters} onClearFilters={handleClearAll} />
           ) : (
-            <InfiniteScroll
-              onLoadMore={() => setCursor(membersData?.page?.nextCursor ?? null)}
-              hasMore={!!membersData?.page?.nextCursor}
-              isLoading={loadingMore}
-            >
-              <MembersGrid
-                items={displayItems}
-                view={view}
-                isAdmin={isAdmin}
-                viewerUserId={viewerUserId}
-                communityHandle={handleLabel}
-                onOrbitOverride={handleOrbitOverride}
-              />
-            </InfiniteScroll>
+            <>
+              {isFiltersOpen && (
+                <FiltersPanel
+                  filters={filters}
+                  onFiltersChange={handleFiltersChange}
+                  onAddSkill={handleAddSkill}
+                  onAddTool={handleAddTool}
+                  onClearAll={handleClearAll}
+                  memberCount={memberItems.length}
+                  hasMorePages={!!membersData?.page?.nextCursor}
+                />
+              )}
+
+              {membersError && (
+                <div
+                  className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive"
+                  role="alert"
+                >
+                  {membersError}
+                </div>
+              )}
+
+              <div aria-live="polite" aria-atomic="true" className="sr-only">
+                {membersLoading ? "Loading members..." : `${memberItems.length} members loaded`}
+              </div>
+
+              {membersLoading ? (
+                <MembersLoadingState />
+              ) : memberItems.length === 0 ? (
+                <MembersEmptyState hasFilters={activeFilters} onClearFilters={handleClearAll} />
+              ) : (
+                <InfiniteScroll
+                  onLoadMore={() => setCursor(membersData?.page?.nextCursor ?? null)}
+                  hasMore={!!membersData?.page?.nextCursor}
+                  isLoading={loadingMore}
+                >
+                  <MembersGrid
+                    items={displayItems}
+                    view={view}
+                    isAdmin={isAdmin}
+                    viewerUserId={viewerUserId}
+                    communityHandle={handleLabel}
+                    onOrbitOverride={handleOrbitOverride}
+                    onBanSuccess={handleBanSuccess}
+                  />
+                </InfiniteScroll>
+              )}
+            </>
           )}
         </>
       ) : null}

@@ -7,7 +7,6 @@ import {
   ArrowUpRight,
   CalendarIcon,
   Globe,
-  RefreshCw,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -174,16 +173,10 @@ function useActivityFeed(filters: FilterState) {
     if (nextCursor && !loadingMore) void load(nextCursor)
   }, [nextCursor, loadingMore, load])
 
-  const refresh = React.useCallback(() => {
-    setEvents([])
-    setNextCursor(null)
-    void load()
-  }, [load])
-
-  return { events, loading, loadingMore, hasMore: !!nextCursor, loadMore, refresh }
+  return { events, loading, loadingMore, hasMore: !!nextCursor, loadMore }
 }
 
-function useLeaderboard(refreshKey: number) {
+function useLeaderboard() {
   const [entries, setEntries] = React.useState<LeaderboardEntry[]>([])
   const [loading, setLoading] = React.useState(true)
 
@@ -203,7 +196,7 @@ function useLeaderboard(refreshKey: number) {
     })()
 
     return () => { ac.abort() }
-  }, [refreshKey])
+  }, [])
 
   return { entries, loading }
 }
@@ -663,8 +656,8 @@ function ActivityFeedContent({
   )
 }
 
-function LeaderboardContent({ refreshKey }: { refreshKey: number }) {
-  const { entries, loading } = useLeaderboard(refreshKey)
+function LeaderboardContent() {
+  const { entries, loading } = useLeaderboard()
 
   if (loading) {
     return (
@@ -755,9 +748,6 @@ export default function ActivityPage() {
   const [tab, setTab] = React.useState<"activity" | "leaderboard">("activity")
   const [isFiltersOpen, setIsFiltersOpen] = React.useState(false)
   const [filters, setFilters] = React.useState<FilterState>(EMPTY_FILTERS)
-  const [refreshKey, setRefreshKey] = React.useState(0)
-  const [refreshing, setRefreshing] = React.useState(false)
-  const refreshStartedRef = React.useRef(false)
 
   // Debounce only the text search; other filters apply immediately
   const debouncedQ = useDebouncedValue(filters.q, 300)
@@ -766,7 +756,7 @@ export default function ActivityPage() {
     [filters, debouncedQ],
   )
 
-  const { events, loading, loadingMore, hasMore, loadMore, refresh } = useActivityFeed(apiFilters)
+  const { events, loading, loadingMore, hasMore, loadMore } = useActivityFeed(apiFilters)
 
   const activeFilters = hasActiveFilters(filters)
 
@@ -777,24 +767,6 @@ export default function ActivityPage() {
   function handleClearAll() {
     setFilters(EMPTY_FILTERS)
   }
-
-  function handleRefresh() {
-    setRefreshing(true)
-    refreshStartedRef.current = false
-    refresh()
-    setRefreshKey((k) => k + 1)
-  }
-
-  // Clear refreshing once the fetch cycle completes (loading: false→true→false)
-  React.useEffect(() => {
-    if (!refreshing) return
-    if (loading) {
-      refreshStartedRef.current = true
-    } else if (refreshStartedRef.current) {
-      setRefreshing(false)
-      refreshStartedRef.current = false
-    }
-  }, [refreshing, loading])
 
   if (loading && !hasActiveFilters(apiFilters)) {
     return <ActivitySkeleton />
@@ -814,10 +786,6 @@ export default function ActivityPage() {
           actionsAsFormActions={false}
           actions={
             <div className="flex w-full items-center gap-3">
-              <Button type="button" variant="secondary" disabled={refreshing} onClick={handleRefresh}>
-                {refreshing && <RefreshCw className="size-4 animate-spin" />}
-                {refreshing ? "Refreshing…" : "Refresh"}
-              </Button>
               {tab === "activity" && (
                 <Button type="button" variant={isFiltersOpen ? "default" : "secondary"} onClick={() => setIsFiltersOpen((v) => !v)}>
                   Filters
@@ -864,7 +832,7 @@ export default function ActivityPage() {
               <CardDescription>Most attested users on the platform</CardDescription>
             </CardHeader>
             <CardContent>
-              <LeaderboardContent refreshKey={refreshKey} />
+              <LeaderboardContent />
             </CardContent>
           </Card>
         </TabsContent>
