@@ -83,6 +83,9 @@ const SOUNDS = {
   presentation: "/sounds/presentation.mp3",
   coins: "/sounds/coins.mp3",
 
+  // Lifecycle
+  onboarding: "/sounds/onboarding.mp3",
+
   // Scene / Ambient
   drum: "/sounds/drum.mp3",
   whoosh: "/sounds/whoosh.mp3",
@@ -644,6 +647,11 @@ class SoundEffects {
   /** Play coins sound */
   coins(options?: PlayOptions): Promise<void> {
     return this.play("coins", { group: "feedback", priority: 1, ...options });
+  }
+
+  /** Play onboarding celebration sound */
+  onboarding(options?: PlayOptions): Promise<void> {
+    return this.play("onboarding", { group: "critical", priority: 3, ...options });
   }
 
   /* ──────────────────────────

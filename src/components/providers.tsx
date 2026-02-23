@@ -6,6 +6,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { ROUTES, isPublicRoute, isOnboardingRoute } from "@/lib/routes";
 import { apiPost, resetCsrf, initCsrfVisibilityRefresh } from "@/lib/api/client";
+import { sounds } from "@/lib/sounds";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { NavigationProvider } from "@/components/navigation/navigation-provider";
 import { AttestationQueueProvider } from "@/components/attestation/queue-provider";
@@ -164,6 +165,19 @@ function OnboardingGuard({ children }: { children: React.ReactNode }) {
       }
     }
   }, [session, status, pathname, searchParams, router]);
+
+  // Play celebration sound after first-time onboarding redirect
+  useEffect(() => {
+    if (status !== "authenticated") return;
+    try {
+      if (sessionStorage.getItem("atlas-onboarded") === "1") {
+        sessionStorage.removeItem("atlas-onboarded");
+        // Small delay to let the page render before playing
+        const t = setTimeout(() => { void sounds.onboarding(); }, 400);
+        return () => clearTimeout(t);
+      }
+    } catch {}
+  }, [status, pathname]);
 
   // Show nothing while checking or redirecting to prevent flash
   if (status === "loading" || needsRedirect) {
