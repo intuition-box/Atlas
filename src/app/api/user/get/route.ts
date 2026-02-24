@@ -46,6 +46,8 @@ type GetUserOk = {
     twitterHandle: string | null;
     githubHandle: string | null;
     walletAddresses: string[];
+    /** Provider names with an Account record (source of truth for linked status). */
+    linkedProviders: string[];
     createdAt: Date;
     lastActiveAt: Date | null;
   };
@@ -127,6 +129,7 @@ export async function GET(req: NextRequest) {
         twitterHandle: true,
         githubHandle: true,
         wallets: { select: { address: true }, orderBy: { createdAt: "desc" as const } },
+        accounts: { select: { provider: true } },
         createdAt: true,
         lastActiveAt: true,
       },
@@ -230,6 +233,7 @@ export async function GET(req: NextRequest) {
         twitterHandle: user.twitterHandle,
         githubHandle: user.githubHandle,
         walletAddresses: user.wallets.map((w) => w.address),
+        linkedProviders: user.accounts.map((a) => a.provider),
         createdAt: user.createdAt,
         lastActiveAt: user.lastActiveAt,
       },

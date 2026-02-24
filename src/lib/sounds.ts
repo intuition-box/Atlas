@@ -64,15 +64,15 @@ export type LoopControl = {
 const SOUNDS = {
   // Feedback
   success: "/sounds/success.mp3",
-  error: "/sounds/error.wav",
+  error: "/sounds/error.mp3",
   alert: "/sounds/alert.mp3",
   save: "/sounds/save.mp3",
 
   // Interactions
   hover: "/sounds/hover.mp3",
   select: "/sounds/select.mp3",
-  tap: "/sounds/tap.wav",
-  pop: "/sounds/pop.wav",
+  tap: "/sounds/tap.mp3",
+  pop: "/sounds/pop.mp3",
 
   // Actions
   achievement: "/sounds/achievement.mp3",

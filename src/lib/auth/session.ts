@@ -96,12 +96,16 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   },
   trustHost: true,
   debug: isDev,
-  callbacks: {
+  events: {
     async signIn({ user, account, profile }) {
-      if (account?.provider === "discord") {
+      if (!account || !user.id) return;
+
+      const p = isRecord(profile) ? profile : {};
+
+      if (account.provider === "discord") {
         const discordId = account.providerAccountId;
         const imageUrl = discordImageUrl(profile, user.image);
-        const discordHandle = readString(profile as Record<string, unknown>, "username") ?? null;
+        const discordHandle = readString(p, "username") ?? null;
 
         try {
           await db.user.update({
@@ -116,9 +120,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             select: { id: true },
           });
 
-          // Mirror external avatar to R2 in the background (non-blocking).
-          // Only mirror if the user doesn't already have an R2-hosted avatar.
-          if (imageUrl && user.id) {
+          if (imageUrl) {
             const existing = await db.user.findUnique({
               where: { id: user.id },
               select: { avatarUrl: true },
@@ -132,11 +134,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         }
       }
 
-      if (account?.provider === "twitter") {
+      if (account.provider === "twitter") {
         const twitterId = account.providerAccountId;
         const twitterHandle =
-          readString(profile as Record<string, unknown>, "username") ??
-          readString((profile as Record<string, unknown>)?.data as Record<string, unknown> ?? {}, "username") ??
+          readString(p, "username") ??
+          readString(isRecord(p.data) ? p.data : {}, "username") ??
           null;
 
         try {
@@ -150,9 +152,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         }
       }
 
-      if (account?.provider === "github") {
+      if (account.provider === "github") {
         const githubId = account.providerAccountId;
-        const githubHandle = readString(profile as Record<string, unknown>, "login") ?? null;
+        const githubHandle = readString(p, "login") ?? null;
 
         try {
           await db.user.update({
@@ -164,9 +166,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           console.error("[auth] failed to persist github profile fields", err);
         }
       }
-
-      return true;
     },
+  },
+  callbacks: {
     async session({ session, user, trigger, newSession }) {
       if (!session.user) return session;
 

@@ -88,6 +88,8 @@ type UserData = {
   skills: string[]
   tags: string[]
   contactPreference: string | null
+  /** Provider names with an Account record (source of truth for linked status). */
+  linkedProviders: string[]
 }
 
 type UserGetResponse = {
@@ -936,12 +938,11 @@ function SkillsAndToolsSection({
 
 // === CONNECTED ACCOUNTS SECTION ===
 
-function TwitterAccountRow() {
-  const { data: session, update: updateSession } = useSession()
+function TwitterAccountRow({ isLinked }: { isLinked: boolean }) {
+  const { data: session } = useSession()
   const [disconnecting, setDisconnecting] = React.useState(false)
 
   const twitterHandle = session?.user?.twitterHandle
-  const isLinked = !!twitterHandle
 
   async function handleConnect() {
     await signIn("twitter", { callbackUrl: window.location.href })
@@ -956,7 +957,8 @@ function TwitterAccountRow() {
     )
 
     if (result.ok) {
-      await updateSession()
+      window.location.reload()
+      return
     }
 
     setDisconnecting(false)
@@ -971,7 +973,7 @@ function TwitterAccountRow() {
         <div className="flex items-center gap-2 min-w-0">
           <XIcon className={isLinked ? "size-4 shrink-0 text-muted-foreground" : "size-4 shrink-0 text-amber-400"} />
           {isLinked ? (
-            <span className="text-sm font-medium">{twitterHandle}</span>
+            <span className="text-sm font-medium">{twitterHandle ?? "Connected"}</span>
           ) : (
             <EncryptedText
               text="@username"
@@ -1033,12 +1035,11 @@ function TwitterAccountRow() {
   )
 }
 
-function GitHubAccountRow() {
-  const { data: session, update: updateSession } = useSession()
+function GitHubAccountRow({ isLinked }: { isLinked: boolean }) {
+  const { data: session } = useSession()
   const [disconnecting, setDisconnecting] = React.useState(false)
 
   const githubHandle = session?.user?.githubHandle
-  const isLinked = !!githubHandle
 
   async function handleConnect() {
     await signIn("github", { callbackUrl: window.location.href })
@@ -1053,7 +1054,8 @@ function GitHubAccountRow() {
     )
 
     if (result.ok) {
-      await updateSession()
+      window.location.reload()
+      return
     }
 
     setDisconnecting(false)
@@ -1068,7 +1070,7 @@ function GitHubAccountRow() {
         <div className="flex items-center gap-2 min-w-0">
           <GitHubIcon className={isLinked ? "size-4 shrink-0 text-muted-foreground" : "size-4 shrink-0 text-amber-400"} />
           {isLinked ? (
-            <span className="text-sm font-medium">{githubHandle}</span>
+            <span className="text-sm font-medium">{githubHandle ?? "Connected"}</span>
           ) : (
             <EncryptedText
               text="@username"
@@ -1130,15 +1132,8 @@ function GitHubAccountRow() {
   )
 }
 
-function ConnectedAccountsSection() {
-  const { data: session, update: updateSession } = useSession()
-
-  // Force session refresh on mount to pick up newly-linked accounts after
-  // OAuth redirect (signIn() causes a full page navigation, so the client
-  // session may be stale when the page first renders).
-  React.useEffect(() => {
-    void updateSession()
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+function ConnectedAccountsSection({ linkedProviders }: { linkedProviders: string[] }) {
+  const { data: session } = useSession()
 
   return (
     <Card>
@@ -1162,9 +1157,9 @@ function ConnectedAccountsSection() {
             </div>
           </div>
 
-          <TwitterAccountRow />
+          <TwitterAccountRow isLinked={linkedProviders.includes("twitter")} />
 
-          <GitHubAccountRow />
+          <GitHubAccountRow isLinked={linkedProviders.includes("github")} />
         </div>
       </CardContent>
     </Card>
@@ -1440,7 +1435,7 @@ export default function UserSettingsPage() {
           </Alert>
         ) : null}
 
-        <ConnectedAccountsSection />
+        <ConnectedAccountsSection linkedProviders={userData?.linkedProviders ?? []} />
 
         <WalletLinkSection />
 

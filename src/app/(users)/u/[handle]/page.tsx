@@ -45,6 +45,7 @@ type UserGetResponse = {
     twitterHandle: string | null
     githubHandle: string | null
     walletAddresses: string[]
+    linkedProviders: string[]
     createdAt: string
     lastActiveAt: string | null
   }
@@ -199,10 +200,10 @@ function ProfileSkeleton() {
 // === SUB-COMPONENTS ===
 
 function SocialsCard({ user }: { user: UserGetResponse["user"] }) {
-  const hasDiscord = !!user.discordId || !!user.discordHandle
+  const wallets = user.walletAddresses ?? []
+  const hasDiscord = !!user.discordHandle
   const hasTwitter = !!user.twitterHandle
   const hasGitHub = !!user.githubHandle
-  const wallets = user.walletAddresses ?? []
   const hasSocials = hasDiscord || hasTwitter || hasGitHub || wallets.length > 0
 
   if (!hasSocials) return null
@@ -220,9 +221,7 @@ function SocialsCard({ user }: { user: UserGetResponse["user"] }) {
               <h2 className="text-xs font-medium text-muted-foreground mb-3">Discord</h2>
               <div className="flex items-center gap-2">
                 <DiscordIcon className="size-4 shrink-0 text-muted-foreground" />
-                <span className="text-sm font-medium">
-                  {user.discordHandle ?? user.name ?? "Connected"}
-                </span>
+                <span className="text-sm font-medium">{user.discordHandle}</span>
               </div>
             </div>
           )}
@@ -237,7 +236,7 @@ function SocialsCard({ user }: { user: UserGetResponse["user"] }) {
               <h2 className="text-xs font-medium text-muted-foreground mb-3 group-hover:transition-colors group-hover:text-accent">X</h2>
               <div className="flex items-center gap-2">
                 <XIcon className="size-4 shrink-0 text-muted-foreground group-hover:transition-colors group-hover:text-accent" />
-                <span className="text-sm font-medium">{user.twitterHandle}</span>
+                <span className="text-sm font-medium">@{user.twitterHandle}</span>
               </div>
             </a>
           )}

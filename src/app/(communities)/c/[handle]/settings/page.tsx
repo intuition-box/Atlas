@@ -748,10 +748,15 @@ function SocialLinksSection({ form }: { form: ReturnType<typeof useForm<Communit
               <h2 className="text-xs font-medium text-muted-foreground mb-2">{label}</h2>
               <div className="flex items-center gap-2">
                 <Icon className="size-4 shrink-0 text-muted-foreground" />
-                <Input
-                  {...form.register(name)}
-                  placeholder={placeholder}
-                  className="h-8 text-sm"
+                <FormField<CommunitySettingsValues, typeof name>
+                  name={name}
+                  render={({ id, field, fieldState }) => (
+                    <Input
+                      {...fieldControlProps(field, { id, invalid: fieldState.invalid })}
+                      placeholder={placeholder}
+                      className="h-8 text-sm"
+                    />
+                  )}
                 />
               </div>
             </div>
