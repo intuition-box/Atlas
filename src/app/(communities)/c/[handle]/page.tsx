@@ -7,6 +7,7 @@ import { Globe, LayoutGrid, List, Lock, MoreVertical } from "lucide-react"
 import { useSession } from "next-auth/react"
 import { DiscordIcon, GitHubIcon, TelegramIcon, XIcon } from "@/components/ui/icons"
 
+import { cn } from "@/lib/utils"
 import { apiGet, apiPost } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
 import { normalizeHandle, validateHandle } from "@/lib/handle"
@@ -1317,6 +1318,100 @@ function MembersEmptyState({ hasFilters, onClearFilters }: { hasFilters: boolean
   )
 }
 
+// === JOIN BANNER ===
+
+function usePageHeaderHeight() {
+  const [height, setHeight] = React.useState(0)
+
+  React.useEffect(() => {
+    const header = document.querySelector("[data-slot='page-header']") as HTMLElement | null
+    if (!header) return
+
+    const measure = () => setHeight(header.offsetHeight)
+    measure()
+
+    const ro = new ResizeObserver(measure)
+    ro.observe(header)
+    return () => ro.disconnect()
+  }, [])
+
+  return height
+}
+
+function JoinBanner({ name, handle }: { name: string; handle: string }) {
+  const inlineRef = React.useRef<HTMLDivElement>(null)
+  const headerHeight = usePageHeaderHeight()
+  const [showFixedBar, setShowFixedBar] = React.useState(false)
+
+  React.useEffect(() => {
+    const el = inlineRef.current
+    if (!el) return
+
+    const observer = new IntersectionObserver(
+      ([entry]) => setShowFixedBar(!entry.isIntersecting),
+      { threshold: 0, rootMargin: "0px 0px 0px 0px" },
+    )
+
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
+  return (
+    <>
+      {/* Inline banner */}
+      <section
+        ref={inlineRef}
+        className={cn(
+          "relative overflow-hidden rounded-2xl border border-border/60",
+          "bg-gradient-to-b from-card/80 via-card/60 to-primary/5",
+          "transition-opacity duration-300",
+          showFixedBar && "opacity-0",
+        )}
+      >
+        <div className="flex flex-col items-center gap-4 p-6 text-center">
+          <div>
+            <h3 className="text-base font-semibold tracking-tight">
+              {name} is accepting new members
+            </h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Apply to join the community and connect with other members.
+            </p>
+          </div>
+          <Button render={<Link href={communityJoinPath(handle)} />}>
+            Apply to join
+          </Button>
+        </div>
+      </section>
+
+      {/* Fixed sticky bar */}
+      <div
+        className={cn(
+          "fixed left-0 right-0 z-30",
+          "transition-all duration-300 ease-out",
+          showFixedBar
+            ? "translate-y-0 opacity-100"
+            : "-translate-y-2 opacity-0 pointer-events-none",
+        )}
+        style={{ top: headerHeight > 0 ? `${headerHeight}px` : 0 }}
+      >
+        <div
+          className={cn(
+            "mx-auto flex w-full max-w-3xl items-center justify-center",
+            "rounded-b-2xl border-x border-b border-border/60",
+            "bg-gradient-to-br from-card/95 via-card/90 to-primary/10",
+            "backdrop-blur-md shadow-md",
+            "-mt-4 px-5 pb-3 pt-7",
+          )}
+        >
+          <Button size="sm" render={<Link href={communityJoinPath(handle)} />}>
+            Apply to join {name}
+          </Button>
+        </div>
+      </div>
+    </>
+  )
+}
+
 // === PAGE ===
 
 export default function CommunityProfilePage() {
@@ -1591,11 +1686,6 @@ export default function CommunityProfilePage() {
         sticky
         actions={
           <div className="flex items-center gap-2">
-            {viewerMembership?.status !== "APPROVED" && community.isMembershipOpen ? (
-              <Button variant="secondary" render={<Link href={communityJoinPath(handleLabel)} />}>
-                Join
-              </Button>
-            ) : null}
             {canViewDirectory ? (
               <>
                 {!showBanned && (
@@ -1661,6 +1751,11 @@ export default function CommunityProfilePage() {
         }
         actionsAsFormActions={false}
       />
+
+      {/* Join banner for non-members when membership is open */}
+      {viewerMembership?.status !== "APPROVED" && community.isMembershipOpen ? (
+        <JoinBanner name={community.name} handle={handleLabel} />
+      ) : null}
 
       {/* Social accounts (toggled via info button in header) */}
       {isAboutOpen && (() => {
