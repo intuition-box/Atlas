@@ -15,6 +15,7 @@ export const runtime = "nodejs";
 
 type SubmitOk = {
   submitted: true;
+  /** Whether this was the first application (true) or an update (false). */
   created: boolean;
 };
 
@@ -102,8 +103,15 @@ export async function POST(req: NextRequest) {
     }
 
     const now = new Date();
+    const answersJson = body.answers as unknown as Prisma.InputJsonValue;
 
-    const result = await db.$transaction(async (tx) => {
+    // Check if an application already exists (to distinguish create vs update).
+    const existingApp = await db.application.findUnique({
+      where: { userId_communityId: { userId, communityId } },
+      select: { id: true },
+    });
+
+    await db.$transaction(async (tx) => {
       // Ensure membership exists (or is reset back to PENDING).
       await tx.membership.upsert({
         where: { userId_communityId: { userId, communityId } },
@@ -122,29 +130,36 @@ export async function POST(req: NextRequest) {
         select: { id: true },
       });
 
-      await tx.application.create({
-        data: {
+      // One application per user per community — upsert to update on resubmit.
+      await tx.application.upsert({
+        where: { userId_communityId: { userId, communityId } },
+        create: {
           userId,
           communityId,
           status: MembershipStatus.PENDING,
-          answers: body.answers as unknown as Prisma.InputJsonValue,
+          answers: answersJson,
+        },
+        update: {
+          status: MembershipStatus.PENDING,
+          answers: answersJson,
+          // Clear previous review state on resubmit.
+          reviewerId: null,
+          reviewedAt: null,
+          reviewNote: null,
         },
         select: { id: true },
       });
-
-      return { created: true };
     });
 
-    // Keep recompute outside the transaction.
-    // Best-effort: application submission itself shouldn't score, but membership state changes
-    // and downstream calculations can depend on being in-sync.
+    // Best-effort scoring — submission itself shouldn't score, but membership
+    // state changes and downstream calculations can depend on being in-sync.
     try {
       await recomputeMemberScores({ communityId, userId });
     } catch {
       // Ignore scoring failures; submission is already committed.
     }
 
-    return okJson<SubmitOk>({ submitted: true, created: result.created });
+    return okJson<SubmitOk>({ submitted: true, created: !existingApp });
   } catch {
     return errJson({ code: "INTERNAL_ERROR", message: "Something went wrong", status: 500 });
   }

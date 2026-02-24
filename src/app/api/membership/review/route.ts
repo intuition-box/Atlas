@@ -361,10 +361,9 @@ export async function POST(req: NextRequest) {
         return errJson({ code: "INVALID_REQUEST", message: "Invalid request", status: 400 });
       }
 
-      app = await db.application.findFirst({
-        where: { communityId, userId: targetUserId },
+      app = await db.application.findUnique({
+        where: { userId_communityId: { userId: targetUserId, communityId } },
         select: { id: true, communityId: true, userId: true, status: true },
-        orderBy: { createdAt: "desc" },
       });
     }
 

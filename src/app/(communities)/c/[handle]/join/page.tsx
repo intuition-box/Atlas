@@ -51,6 +51,20 @@ type CommunityGetResponse = {
   } | null
 }
 
+type ExistingApplication = {
+  id: string
+  status: string
+  answers: unknown
+  createdAt: string
+  updatedAt: string
+  reviewedAt: string | null
+  reviewNote: string | null
+}
+
+type ApplicationGetResponse = {
+  application: ExistingApplication | null
+}
+
 type SubmitResponse = {
   membership?: {
     status: string
@@ -102,27 +116,39 @@ function parseQuestions(config: unknown): JoinQuestion[] {
     .filter((q): q is JoinQuestion => q !== null)
 }
 
-function getStatusLabel(status: string): string {
-  switch (status) {
-    case "PENDING":
-      return "In review"
-    case "APPROVED":
-      return "Accepted"
-    case "REJECTED":
-      return "Rejected"
-    case "WITHDRAWN":
-      return "Cancelled"
-    case "BANNED":
-      return "Banned"
-    default:
-      return status
+/** Extract previous answers from an existing application's JSON. */
+function extractPreviousAnswers(
+  answers: unknown,
+  questions: JoinQuestion[],
+): Record<string, string> {
+  if (!answers || typeof answers !== "object" || Array.isArray(answers)) return {}
+
+  const rec = answers as Record<string, unknown>
+  const result: Record<string, string> = {}
+
+  for (const q of questions) {
+    const v = rec[q.id]
+    if (typeof v === "string") {
+      result[q.id] = v
+    }
   }
+
+  // Extract note if present
+  const note = rec.note
+  if (typeof note === "string") {
+    result.note = note
+  }
+
+  return result
 }
 
-function createStatusBanner(status: string | null): StatusBanner | null {
-  if (!status) return null
+function createStatusBanner(
+  membershipStatus: string | null,
+  existingApp: ExistingApplication | null,
+): StatusBanner | null {
+  if (!membershipStatus) return null
 
-  if (status === "WITHDRAWN") {
+  if (membershipStatus === "WITHDRAWN") {
     return {
       tone: "neutral",
       title: "Previous request cancelled",
@@ -130,15 +156,19 @@ function createStatusBanner(status: string | null): StatusBanner | null {
     }
   }
 
-  if (status === "PENDING") {
+  if (membershipStatus === "PENDING") {
+    const updatedAt = existingApp?.updatedAt
+    const timeAgo = updatedAt ? formatRelativeTime(updatedAt) : null
     return {
       tone: "neutral",
-      title: "Join request in review",
-      body: "Your join request is being reviewed. You can still submit a new one.",
+      title: "Application in review",
+      body: timeAgo
+        ? `Submitted ${timeAgo.toLowerCase()}. You can update your answers and resubmit.`
+        : "Your application is being reviewed. You can update your answers and resubmit.",
     }
   }
 
-  if (status === "APPROVED") {
+  if (membershipStatus === "APPROVED") {
     return {
       tone: "success",
       title: "Accepted",
@@ -146,7 +176,7 @@ function createStatusBanner(status: string | null): StatusBanner | null {
     }
   }
 
-  if (status === "BANNED") {
+  if (membershipStatus === "BANNED") {
     return {
       tone: "danger",
       title: "Banned",
@@ -154,18 +184,20 @@ function createStatusBanner(status: string | null): StatusBanner | null {
     }
   }
 
-  if (status === "REJECTED") {
+  if (membershipStatus === "REJECTED") {
     return {
       tone: "danger",
-      title: "Request rejected",
-      body: "Your previous join request was not accepted. You may submit a new one.",
+      title: "Application not accepted",
+      body: existingApp?.reviewNote
+        ? `Your previous application was not accepted. You can update your answers and resubmit.`
+        : "Your previous application was not accepted. You can update your answers and resubmit.",
     }
   }
 
   return {
     tone: "neutral",
-    title: `Status: ${getStatusLabel(status)}`,
-    body: "You can't submit again right now.",
+    title: `Status: ${membershipStatus}`,
+    body: "You can't submit right now.",
   }
 }
 
@@ -179,6 +211,24 @@ function canUserJoin(community: CommunityInfo | null, membershipStatus: string |
   if (membershipStatus === "REJECTED") return true
 
   return false
+}
+
+function formatRelativeTime(value: string | Date): string {
+  const d = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(d.getTime())) return ""
+
+  const diff = Date.now() - d.getTime()
+  const minutes = Math.floor(diff / (1000 * 60))
+  const hours = Math.floor(diff / (1000 * 60 * 60))
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24))
+
+  if (minutes < 1) return "Just now"
+  if (minutes < 60) return `${minutes}m ago`
+  if (hours < 24) return `${hours}h ago`
+  if (days === 1) return "Yesterday"
+  if (days < 7) return `${days}d ago`
+  if (days < 30) return `${Math.floor(days / 7)}w ago`
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
 }
 
 function buildDynamicSchema(questions: JoinQuestion[]) {
@@ -196,12 +246,26 @@ function buildDynamicSchema(questions: JoinQuestion[]) {
   return z.object(shape)
 }
 
+/** Returns the submit button label based on application state. */
+function getSubmitLabel(
+  membershipStatus: string | null,
+  existingApp: ExistingApplication | null,
+  isSubmitting: boolean,
+): string {
+  if (isSubmitting) return "Submitting\u2026"
+
+  if (membershipStatus === "PENDING" && existingApp) return "Update"
+  if (membershipStatus === "REJECTED" && existingApp) return "Resubmit"
+  return "Submit"
+}
+
 // === CUSTOM HOOKS ===
 
 function useCommunityData(handle: string) {
   const [community, setCommunity] = React.useState<CommunityInfo | null>(null)
   const [questions, setQuestions] = React.useState<JoinQuestion[]>([])
   const [membershipStatus, setMembershipStatus] = React.useState<string | null>(null)
+  const [existingApp, setExistingApp] = React.useState<ExistingApplication | null>(null)
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
 
@@ -219,6 +283,7 @@ function useCommunityData(handle: string) {
       setError(null)
 
       try {
+        // Fetch community info + viewer membership status.
         const communityRes = await apiGet<CommunityGetResponse>(
           "/api/community/get",
           { handle },
@@ -234,6 +299,7 @@ function useCommunityData(handle: string) {
           setCommunity(null)
           setQuestions([])
           setMembershipStatus(null)
+          setExistingApp(null)
           setLoading(false)
           return
         }
@@ -246,6 +312,23 @@ function useCommunityData(handle: string) {
 
         const viewerStatus = communityRes.value.viewerMembership?.status ?? null
         setMembershipStatus(viewerStatus)
+
+        // If user has an active/past application, fetch it for pre-filling.
+        if (viewerStatus === "PENDING" || viewerStatus === "REJECTED" || viewerStatus === "WITHDRAWN") {
+          const appRes = await apiGet<ApplicationGetResponse>(
+            "/api/application/get",
+            { communityHandle: handle },
+            { signal: controller.signal },
+          )
+
+          if (cancelled) return
+
+          if (appRes.ok) {
+            setExistingApp(appRes.value.application)
+          }
+        } else {
+          setExistingApp(null)
+        }
 
         setLoading(false)
       } catch {
@@ -264,7 +347,7 @@ function useCommunityData(handle: string) {
     }
   }, [handle])
 
-  return { community, questions, membershipStatus, loading, error }
+  return { community, questions, membershipStatus, existingApp, loading, error }
 }
 
 // === SUB-COMPONENTS ===
@@ -367,7 +450,8 @@ export default function CommunityJoinPage() {
   const params = useParams<{ handle: string }>()
   const communityHandle = String(params?.handle || "").trim()
 
-  const { community, questions, membershipStatus, loading, error } = useCommunityData(communityHandle)
+  const { community, questions, membershipStatus, existingApp, loading, error } =
+    useCommunityData(communityHandle)
 
   const schema = React.useMemo(() => buildDynamicSchema(questions), [questions])
   type JoinValues = z.infer<typeof schema>
@@ -384,8 +468,8 @@ export default function CommunityJoinPage() {
   )
 
   const statusBanner = React.useMemo(
-    () => createStatusBanner(membershipStatus),
-    [membershipStatus]
+    () => createStatusBanner(membershipStatus, existingApp),
+    [membershipStatus, existingApp]
   )
 
   // Redirect to sign-in if not authenticated
@@ -395,15 +479,29 @@ export default function CommunityJoinPage() {
     }
   }, [sessionStatus, router])
 
-  // Initialize form values for dynamic questions
+  // Pre-fill form with previous answers when an existing application loads.
+  const hasPreFilled = React.useRef(false)
   React.useEffect(() => {
+    if (hasPreFilled.current) return
+    if (!existingApp || questions.length === 0) return
+
+    const prev = extractPreviousAnswers(existingApp.answers, questions)
+    if (Object.keys(prev).length === 0) return
+
+    hasPreFilled.current = true
+    form.reset({ ...form.getValues(), ...prev }, { keepDefaultValues: true })
+  }, [existingApp, questions, form])
+
+  // Initialize form values for dynamic questions (only when no existing app).
+  React.useEffect(() => {
+    if (existingApp) return
     for (const q of questions) {
       const current = form.getValues(q.id as keyof JoinValues)
       if (typeof current === "undefined") {
         form.setValue(q.id as keyof JoinValues, "" as any, { shouldDirty: false })
       }
     }
-  }, [questions, form])
+  }, [questions, form, existingApp])
 
   // Set error from hook
   React.useEffect(() => {
@@ -475,6 +573,8 @@ export default function CommunityJoinPage() {
   const rootError = form.formState.errors.root?.message
 
   const communityName = String(community?.name || "").trim() || "Community"
+
+  const submitLabel = getSubmitLabel(membershipStatus, existingApp, form.formState.isSubmitting)
 
   if (!communityHandle) return null
 
@@ -583,8 +683,8 @@ export default function CommunityJoinPage() {
             sticky
             actions={
               <FormActions className="flex items-center gap-3">
-                <Button type="submit" disabled={!canJoin || form.formState.isSubmitting}>
-                  {form.formState.isSubmitting ? "Submitting…" : "Submit"}
+                <Button type="submit" variant="solid" disabled={!canJoin || form.formState.isSubmitting}>
+                  {submitLabel}
                 </Button>
               </FormActions>
             }

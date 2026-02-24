@@ -470,8 +470,8 @@ model Application {
   user      User      @relation("ApplicationApplicant", fields: [userId], references: [id], onDelete: Cascade)
   community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
 
-  // Multiple applications allowed per user/community (full history)
-  @@index([userId, communityId, createdAt])
+  // One application per user per community (upsert on resubmit)
+  @@unique([userId, communityId])
   @@index([communityId, status, createdAt])
 }
 
