@@ -8,7 +8,7 @@ import { parseApiError } from "@/lib/api/errors"
 import { ROUTES, userPath, communityPath, communityOrbitPath, communitySettingsPath } from "@/lib/routes"
 
 import { PageHeader } from "@/components/common/page-header"
-import { PageHeaderMenu } from "@/components/common/page-header-menu"
+import { PageToolbar } from "@/components/common/page-toolbar"
 import { ProfileAvatar } from "@/components/common/profile-avatar"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -314,9 +314,7 @@ function ApplicationsSkeleton() {
           <Skeleton className="h-3 w-24" />
         </div>
         <div className="flex gap-2 ml-auto sm:align-center sm:justify-end">
-          <Skeleton className="h-9 w-24" />
-          <Skeleton className="h-9 w-20" />
-          <Skeleton className="h-9 w-20" />
+          <Skeleton className="h-9 w-64 rounded-4xl" />
         </div>
       </div>
 
@@ -810,18 +808,16 @@ export default function CommunityApplicationsPage() {
         description={`@${handle}`}
         actionsAsFormActions={false}
         actions={
-          <div className="flex items-center gap-2">
-            <Button type="button" variant={isFiltersOpen ? "default" : "secondary"} onClick={() => setIsFiltersOpen((v) => !v)}>
-              Filters
-            </Button>
-            <PageHeaderMenu
-              items={[
-                { label: "Orbit", href: communityOrbitPath(handle) },
-                { label: "Profile", href: communityPath(handle) },
-                { label: "Settings", href: communitySettingsPath(handle) },
-              ]}
-            />
-          </div>
+          <PageToolbar
+            actions={[
+              { label: "Filters", active: isFiltersOpen, onClick: () => setIsFiltersOpen((v) => !v) },
+            ]}
+            nav={[
+              { label: "Orbit", href: communityOrbitPath(handle) },
+              { label: "Profile", href: communityPath(handle) },
+              { label: "Settings", href: communitySettingsPath(handle) },
+            ]}
+          />
         }
       />
 

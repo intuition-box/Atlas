@@ -13,7 +13,7 @@ import { userPath, userSettingsPath, userAttestationsPath } from "@/lib/routes"
 import { AttestationBadge } from "@/components/attestation/badge"
 import { AttestationButtons } from "@/components/attestation/buttons"
 import { PageHeader } from "@/components/common/page-header"
-import { PageHeaderMenu } from "@/components/common/page-header-menu"
+import { PageToolbar } from "@/components/common/page-toolbar"
 import { ProfileAvatar } from "@/components/common/profile-avatar"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -137,7 +137,7 @@ function ProfileSkeleton() {
           <Skeleton className="h-3 w-24" />
         </div>
         <div className="flex gap-3 ml-auto sm:align-center sm:justify-end">
-          <Skeleton className="h-9 w-24" />
+          <Skeleton className="h-9 w-64 rounded-4xl" />
         </div>
       </div>
 
@@ -382,10 +382,11 @@ export default function UserProfilePage() {
         description={`@${handleLabel}`}
         actionsAsFormActions={false}
         actions={
-          <PageHeaderMenu
-            items={[
-              ...(isSelf ? [{ label: "Settings", href: userSettingsPath(handleLabel) }] : []),
+          <PageToolbar
+            nav={[
+              { label: "Profile", href: userPath(handleLabel) },
               { label: "Attestations", href: userAttestationsPath(handleLabel) },
+              ...(isSelf ? [{ label: "Settings", href: userSettingsPath(handleLabel) }] : []),
             ]}
           />
         }

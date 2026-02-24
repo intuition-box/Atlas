@@ -12,7 +12,7 @@ import { communityPath, communitySettingsPath, communityOrbitPath, communityAppl
 import { AvatarDropzone } from "@/components/common/avatar-dropzone"
 import { HandleField } from "@/components/common/handle-field"
 import { PageHeader } from "@/components/common/page-header"
-import { PageHeaderMenu } from "@/components/common/page-header-menu"
+import { PageToolbar } from "@/components/common/page-toolbar"
 import { ProfileAvatar } from "@/components/common/profile-avatar"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -252,8 +252,7 @@ function SettingsSkeleton() {
           <Skeleton className="h-3 w-24" />
         </div>
         <div className="flex gap-2 ml-auto">
-          <Skeleton className="h-9 w-16 rounded-4xl" />
-          <Skeleton className="h-9 w-20 rounded-4xl" />
+          <Skeleton className="h-9 w-64 rounded-4xl" />
         </div>
       </div>
 
@@ -575,8 +574,8 @@ export default function CommunitySettingsPage() {
             >
               {form.formState.isSubmitting ? "Saving…" : "Save"}
             </Button>
-            <PageHeaderMenu
-              items={[
+            <PageToolbar
+              nav={[
                 { label: "Orbit", href: communityOrbitPath(communityHandle) },
                 { label: "Applications", href: communityApplicationsPath(communityHandle) },
                 { label: "Profile", href: communityPath(communityHandle) },

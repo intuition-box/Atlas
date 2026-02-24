@@ -2,6 +2,8 @@
 
 import * as React from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
+import { useSession } from "next-auth/react"
 import {
   ArrowDownLeft,
   ArrowUpRight,
@@ -11,12 +13,13 @@ import {
 
 import { cn } from "@/lib/utils"
 import { apiGet } from "@/lib/api/client"
-import { userPath, communityPath } from "@/lib/routes"
+import { ROUTES, userPath, communityPath } from "@/lib/routes"
 import { ATTESTATION_TYPES, ATTESTATION_TYPE_LIST, type AttestationType } from "@/lib/attestations/definitions"
 import { AttestationBadge } from "@/components/attestation/badge"
 
 import { ProfileAvatar } from "@/components/common/profile-avatar"
 import { PageHeader } from "@/components/common/page-header"
+import { PageToolbar } from "@/components/common/page-toolbar"
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
@@ -28,7 +31,6 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 // === TYPES ===
 
@@ -433,16 +435,16 @@ function FiltersPanel({
   const active = hasActiveFilters(filters)
 
   return (
-    <Card aria-label="Activity filters" className="bg-card/30 border-border/30">
+    <Card aria-label="Event filters" className="bg-card/30 border-border/30">
       <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {/* Row 1: Search, Date, Activity type */}
+        {/* Row 1: Search, Date, Event type */}
         <div className="flex flex-col gap-2">
           <div className="text-xs font-medium text-foreground/70">Search</div>
           <Input
             placeholder="Name, handle, community…"
             value={filters.q}
             onChange={(e) => onFiltersChange({ q: e.target.value })}
-            aria-label="Search activity"
+            aria-label="Search events"
           />
         </div>
 
@@ -459,7 +461,7 @@ function FiltersPanel({
         </div>
 
         <div className="flex flex-col gap-2">
-          <div className="text-xs font-medium text-foreground/70">Activity type</div>
+          <div className="text-xs font-medium text-foreground/70">Event type</div>
           <Select
             value={filters.kind || null}
             onValueChange={(v) => onFiltersChange({ kind: (v ?? "") as FilterState["kind"] })}
@@ -577,9 +579,7 @@ function ActivitySkeleton() {
           <Skeleton className="h-3 w-24" />
         </div>
         <div className="flex gap-3 ml-auto sm:align-center sm:justify-end">
-          <Skeleton className="h-9 w-14" />
-          <Skeleton className="h-9 w-14" />
-          <Skeleton className="h-9 w-14" />
+          <Skeleton className="h-9 w-64 rounded-4xl" />
         </div>
       </div>
 
@@ -631,7 +631,7 @@ function ActivityFeedContent({
   if (events.length === 0) {
     return (
       <div className="rounded-lg border border-border/60 px-4 py-10 text-center text-sm text-muted-foreground">
-        No activity found.
+        No events found.
       </div>
     )
   }
@@ -745,7 +745,17 @@ function LeaderboardContent() {
 // === MAIN ===
 
 export default function ActivityPage() {
-  const [tab, setTab] = React.useState<"activity" | "leaderboard">("activity")
+  const { status } = useSession()
+  const router = useRouter()
+
+  // Redirect unauthenticated users to sign-in
+  React.useEffect(() => {
+    if (status === "unauthenticated") {
+      router.replace(`${ROUTES.signIn}?returnToUrl=${encodeURIComponent(ROUTES.activity)}`)
+    }
+  }, [status, router])
+
+  const [tab, setTab] = React.useState<"events" | "leaderboard">("leaderboard")
   const [isFiltersOpen, setIsFiltersOpen] = React.useState(false)
   const [filters, setFilters] = React.useState<FilterState>(EMPTY_FILTERS)
 
@@ -768,38 +778,52 @@ export default function ActivityPage() {
     setFilters(EMPTY_FILTERS)
   }
 
-  if (loading && !hasActiveFilters(apiFilters)) {
+  if (status !== "authenticated" || (loading && !hasActiveFilters(apiFilters))) {
     return <ActivitySkeleton />
   }
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
-      <Tabs className="gap-6" value={tab} onValueChange={(v) => setTab(v as "activity" | "leaderboard")}>
-        <PageHeader
-          leading={
-            <Avatar className="h-12 w-12 has-[[data-slot=avatar-fallback]]:after:border-primary/15">
-              <AvatarFallback className="bg-primary/10 text-primary"><Globe className="size-5" /></AvatarFallback>
-            </Avatar>
-          }
-          title="Activity"
-          description="Global feed"
-          actionsAsFormActions={false}
-          actions={
-            <div className="flex w-full items-center gap-3">
-              {tab === "activity" && (
-                <Button type="button" variant={isFiltersOpen ? "default" : "secondary"} onClick={() => setIsFiltersOpen((v) => !v)}>
-                  Filters
-                </Button>
-              )}
-              <TabsList>
-                <TabsTrigger value="activity" className="data-active:bg-primary dark:data-active:bg-primary data-active:text-primary-foreground dark:data-active:text-primary-foreground dark:data-active:border-transparent">Activity</TabsTrigger>
-                <TabsTrigger value="leaderboard" className="data-active:bg-primary dark:data-active:bg-primary data-active:text-primary-foreground dark:data-active:text-primary-foreground dark:data-active:border-transparent">Leaderboard</TabsTrigger>
-              </TabsList>
-            </div>
-          }
-        />
+      <PageHeader
+        leading={
+          <Avatar className="h-12 w-12 has-[[data-slot=avatar-fallback]]:after:border-primary/15">
+            <AvatarFallback className="bg-primary/10 text-primary"><Globe className="size-5" /></AvatarFallback>
+          </Avatar>
+        }
+        title="Activity"
+        description="Global feed"
+        actionsAsFormActions={false}
+        actions={
+          <PageToolbar
+            actions={tab === "events" ? [
+              { label: "Filters", active: isFiltersOpen, onClick: () => setIsFiltersOpen((v) => !v) },
+            ] : undefined}
+            viewSwitch={{
+              value: tab,
+              onChange: (v) => setTab(v as "events" | "leaderboard"),
+              options: [
+                { value: "leaderboard", label: "Leaderboard" },
+                { value: "events", label: "Events" },
+              ],
+            }}
+          />
+        }
+      />
 
-        <TabsContent value="activity" className="flex flex-col gap-6">
+      {tab === "leaderboard" && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Leaderboard</CardTitle>
+            <CardDescription>Most attested users on the platform</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <LeaderboardContent />
+          </CardContent>
+        </Card>
+      )}
+
+      {tab === "events" && (
+        <div className="flex flex-col gap-6">
           {isFiltersOpen && (
             <FiltersPanel
               filters={filters}
@@ -823,20 +847,8 @@ export default function ActivityPage() {
               />
             </CardContent>
           </Card>
-        </TabsContent>
-
-        <TabsContent value="leaderboard">
-          <Card>
-            <CardHeader>
-              <CardTitle>Leaderboard</CardTitle>
-              <CardDescription>Most attested users on the platform</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <LeaderboardContent />
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+        </div>
+      )}
     </div>
   )
 }

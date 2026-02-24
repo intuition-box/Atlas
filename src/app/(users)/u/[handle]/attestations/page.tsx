@@ -25,7 +25,7 @@ import { OnchainBanner } from "@/components/attestation/onchain-banner"
 import { useAttestationQueue } from "@/components/attestation/queue-provider"
 
 import { PageHeader } from "@/components/common/page-header"
-import { PageHeaderMenu } from "@/components/common/page-header-menu"
+import { PageToolbar } from "@/components/common/page-toolbar"
 import { ProfileAvatar } from "@/components/common/profile-avatar"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -37,7 +37,6 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 // === CONSTANTS ===
 
@@ -709,10 +708,7 @@ function AttestationsSkeleton() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Skeleton className="h-9 w-24 rounded-lg" />
-          <Skeleton className="h-9 w-20 rounded-lg" />
-          <Skeleton className="h-9 w-20 rounded-lg" />
-          <Skeleton className="h-9 w-9 rounded-lg" />
+          <Skeleton className="h-9 w-64 rounded-4xl" />
         </div>
       </div>
 
@@ -1186,25 +1182,24 @@ export default function AttestationsPage() {
         description={`@${handle}`}
         actionsAsFormActions={false}
         actions={
-          <div className="flex items-center gap-2">
-            <Button type="button" variant={isFiltersOpen ? "default" : "secondary"} onClick={() => setIsFiltersOpen((v) => !v)}>
-              Filters
-            </Button>
-            <Tabs className="gap-0" value={view} onValueChange={(v) => setView(v === "list" ? "list" : "cards")}>
-              <TabsList>
-                <TabsTrigger value="cards" aria-label="Cards view" className="cursor-pointer px-3 !border-transparent data-active:!bg-primary data-active:!text-primary-foreground"><LayoutGrid className="size-4" /></TabsTrigger>
-                <TabsTrigger value="list" aria-label="List view" className="cursor-pointer px-3 !border-transparent data-active:!bg-primary data-active:!text-primary-foreground"><List className="size-4" /></TabsTrigger>
-              </TabsList>
-              <TabsContent value="cards" />
-              <TabsContent value="list" />
-            </Tabs>
-            <PageHeaderMenu
-              items={[
-                { label: "Profile", href: userPath(handle) },
-                { label: "Settings", href: userSettingsPath(handle) },
-              ]}
-            />
-          </div>
+          <PageToolbar
+            actions={[
+              { label: "Filters", active: isFiltersOpen, onClick: () => setIsFiltersOpen((v) => !v) },
+            ]}
+            viewSwitch={{
+              value: view,
+              onChange: (v) => setView(v as "cards" | "list"),
+              options: [
+                { value: "cards", icon: LayoutGrid, label: "Cards" },
+                { value: "list", icon: List, label: "List" },
+              ],
+            }}
+            nav={[
+              { label: "Profile", href: userPath(handle) },
+              { label: "Attestations", href: userAttestationsPath(handle) },
+              ...(viewerId ? [{ label: "Settings", href: userSettingsPath(handle) }] : []),
+            ]}
+          />
         }
       />
 

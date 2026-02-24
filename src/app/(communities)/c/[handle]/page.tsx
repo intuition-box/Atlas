@@ -25,7 +25,7 @@ import { LANGUAGE_LIST as LANGUAGES } from "@/config/languages"
 import { SKILL_LIST as SKILLS, TOOL_LIST as TOOLS } from "@/lib/attestations/definitions"
 
 import { PageHeader } from "@/components/common/page-header"
-import { PageHeaderMenu } from "@/components/common/page-header-menu"
+import { PageToolbar, type OverflowItem } from "@/components/common/page-toolbar"
 import { ProfileAvatar } from "@/components/common/profile-avatar"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -66,7 +66,6 @@ import { InfiniteScroll } from "@/components/ui/infinite-scroll"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 // === CONSTANTS ===
 
@@ -537,7 +536,7 @@ function FilterCombobox<T extends string>({
                 <ComboboxItem
                   key={item}
                   value={item}
-                  className="data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground flex items-center gap-2 rounded-xl px-3 py-2 text-sm"
+                  className="data-[highlighted]:bg-accent/10 data-[highlighted]:text-primary flex items-center gap-2 rounded-xl px-3 py-2 text-sm"
                 >
                   <span className="flex-1">{renderItem ? renderItem(item) : item}</span>
                 </ComboboxItem>
@@ -621,7 +620,7 @@ function AdminMemberMenu({
       <div onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
         <Menu>
           <MenuTrigger
-            className="inline-flex h-6 w-6 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:text-foreground hover:bg-accent cursor-pointer"
+            className="inline-flex h-6 w-6 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:text-primary hover:bg-accent/10 cursor-pointer"
             aria-label="Member actions"
           >
             <MoreVertical className="size-3.5" />
@@ -1377,7 +1376,7 @@ function JoinBanner({ name, handle }: { name: string; handle: string }) {
               Apply to join the community and connect with other members.
             </p>
           </div>
-          <Button render={<Link href={communityJoinPath(handle)} />}>
+          <Button variant="solid" render={<Link href={communityJoinPath(handle)} />}>
             Apply to join
           </Button>
         </div>
@@ -1403,7 +1402,7 @@ function JoinBanner({ name, handle }: { name: string; handle: string }) {
             "-mt-4 px-5 pb-3 pt-7",
           )}
         >
-          <Button size="sm" render={<Link href={communityJoinPath(handle)} />}>
+          <Button variant="solid" size="sm" render={<Link href={communityJoinPath(handle)} />}>
             Apply to join {name}
           </Button>
         </div>
@@ -1467,7 +1466,17 @@ export default function CommunityProfilePage() {
   }, [handle])
 
   // --- Members data ---
-  const [view, setView] = React.useState<"cards" | "list">("cards")
+  const [view, setView] = React.useState<"cards" | "list">(() => {
+    if (typeof window === "undefined") return "cards"
+    try {
+      const stored = localStorage.getItem("community-view")
+      if (stored === "cards" || stored === "list") return stored
+    } catch {
+      // Ignore
+    }
+    return "cards"
+  })
+  const [isAboutOpen, setIsAboutOpen] = React.useState(false)
   const [cursor, setCursor] = React.useState<string | null>(null)
   const [isFiltersOpen, setIsFiltersOpen] = React.useState(() => {
     if (typeof window === "undefined") return false
@@ -1475,15 +1484,6 @@ export default function CommunityProfilePage() {
       return localStorage.getItem("community-filters-open") === "true"
     } catch {
       return false
-    }
-  })
-  const [isAboutOpen, setIsAboutOpen] = React.useState(() => {
-    if (typeof window === "undefined") return true
-    try {
-      const stored = localStorage.getItem("community-about-open")
-      return stored === null ? true : stored === "true"
-    } catch {
-      return true
     }
   })
 
@@ -1497,11 +1497,11 @@ export default function CommunityProfilePage() {
 
   React.useEffect(() => {
     try {
-      localStorage.setItem("community-about-open", String(isAboutOpen))
+      localStorage.setItem("community-view", view)
     } catch {
       // Storage full or disabled
     }
-  }, [isAboutOpen])
+  }, [view])
 
   const [filters, setFilters] = React.useState<FilterState>({
     q: "", role: "", country: "", skills: [], tools: [], orbitLevel: "", orbitLevelType: "", language: "",
@@ -1619,10 +1619,7 @@ export default function CommunityProfilePage() {
             <Skeleton className="h-3.5 w-20" />
           </div>
           <div className="flex items-center gap-2 ml-auto">
-            <Skeleton className="h-9 w-18 rounded-4xl" />
-            <Skeleton className="h-9 w-20 rounded-lg" />
-            <Skeleton className="h-9 w-16 rounded-4xl" />
-            <Skeleton className="h-9 w-9 rounded-full" />
+            <Skeleton className="h-9 w-64 rounded-4xl" />
           </div>
         </div>
 
@@ -1685,69 +1682,35 @@ export default function CommunityProfilePage() {
         description={`@${handleLabel}`}
         sticky
         actions={
-          <div className="flex items-center gap-2">
-            {canViewDirectory ? (
-              <>
-                {!showBanned && (
-                  <>
-                    <Button type="button" variant={isFiltersOpen ? "default" : "secondary"} onClick={() => setIsFiltersOpen((v) => !v)}>
-                      Filters
-                    </Button>
-                    <Tabs className="gap-0" value={view} onValueChange={(v) => setView(v === "list" ? "list" : "cards")}>
-                      <TabsList>
-                        <TabsTrigger value="cards" aria-label="Cards view" className="cursor-pointer px-3 !border-transparent data-active:!bg-primary data-active:!text-primary-foreground">
-                          <LayoutGrid className="size-4" />
-                        </TabsTrigger>
-                        <TabsTrigger value="list" aria-label="List view" className="cursor-pointer px-3 !border-transparent data-active:!bg-primary data-active:!text-primary-foreground">
-                          <List className="size-4" />
-                        </TabsTrigger>
-                      </TabsList>
-                      <TabsContent value="cards" />
-                      <TabsContent value="list" />
-                    </Tabs>
-                  </>
-                )}
-                {isAdmin && (
-                  <Tabs className="gap-0" value={showBanned ? "banned" : "members"} onValueChange={(v) => setShowBanned(v === "banned")}>
-                    <TabsList>
-                      <TabsTrigger value="members" className="cursor-pointer px-3 !border-transparent data-active:!bg-primary data-active:!text-primary-foreground">
-                        Members
-                      </TabsTrigger>
-                      <TabsTrigger value="banned" className="cursor-pointer px-3 !border-transparent data-active:!bg-primary data-active:!text-primary-foreground">
-                        Banned
-                      </TabsTrigger>
-                    </TabsList>
-                    <TabsContent value="members" />
-                    <TabsContent value="banned" />
-                  </Tabs>
-                )}
-              </>
-            ) : null}
-            <button
-              type="button"
-              onClick={() => setIsAboutOpen((v) => !v)}
-              aria-label={isAboutOpen ? "Hide community info" : "Show community info"}
-              aria-expanded={isAboutOpen}
-              className={`inline-flex h-9 items-center justify-center rounded-4xl px-4 text-sm font-medium transition-colors cursor-pointer ${
-                isAboutOpen
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              About
-            </button>
-            <PageHeaderMenu
-              items={[
-                { label: "Orbit", href: communityOrbitPath(handleLabel) },
-                ...(isAdmin
-                  ? [{ label: "Applications", href: communityApplicationsPath(handleLabel) }]
-                  : []),
-                ...(isAdmin
-                  ? [{ label: "Settings", href: communitySettingsPath(handleLabel) }]
-                  : []),
-              ]}
-            />
-          </div>
+          <PageToolbar
+            actions={[
+              { label: "About", active: isAboutOpen, onClick: () => setIsAboutOpen((v) => !v) },
+              ...(canViewDirectory && !showBanned
+                ? [{ label: "Filters", active: isFiltersOpen, onClick: () => setIsFiltersOpen((v) => !v) }]
+                : []),
+            ]}
+            viewSwitch={canViewDirectory ? {
+              value: view,
+              onChange: (v) => setView(v as "cards" | "list"),
+              options: [
+                { value: "cards", icon: LayoutGrid, label: "Cards" },
+                { value: "list", icon: List, label: "List" },
+              ],
+            } : undefined}
+            nav={[
+              { label: "Orbit", href: communityOrbitPath(handleLabel) },
+              { label: "Profile", href: communityPath(handleLabel) },
+            ]}
+            overflow={isAdmin ? [
+              { label: "Applications", href: communityApplicationsPath(handleLabel) },
+              ...(canViewDirectory ? [{
+                label: showBanned ? "Members" : "Banned",
+                onClick: () => setShowBanned((v) => !v),
+                active: showBanned,
+              } as OverflowItem] : []),
+              { label: "Settings", href: communitySettingsPath(handleLabel) },
+            ] : undefined}
+          />
         }
         actionsAsFormActions={false}
       />
@@ -1757,7 +1720,7 @@ export default function CommunityProfilePage() {
         <JoinBanner name={community.name} handle={handleLabel} />
       ) : null}
 
-      {/* Social accounts (toggled via info button in header) */}
+      {/* Social accounts (shown in about view) */}
       {isAboutOpen && (() => {
         const socials = SOCIAL_LINKS.filter(
           (s) => community[s.key],
@@ -1796,7 +1759,7 @@ export default function CommunityProfilePage() {
         ) : null
       })()}
 
-      {/* About (toggled via info button in header) */}
+      {/* About (shown when toggled) */}
       {isAboutOpen && (
         <Card>
           <CardHeader>

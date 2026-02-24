@@ -18,7 +18,7 @@ import { SKILL_LIST as SKILLS, TOOL_LIST as TOOLS } from "@/lib/attestations/def
 import { AvatarDropzone } from "@/components/common/avatar-dropzone"
 import { HandleField } from "@/components/common/handle-field"
 import { PageHeader } from "@/components/common/page-header"
-import { PageHeaderMenu } from "@/components/common/page-header-menu"
+import { PageToolbar } from "@/components/common/page-toolbar"
 import { ProfileAvatar } from "@/components/common/profile-avatar"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import {
@@ -285,8 +285,7 @@ function SettingsSkeleton() {
           <Skeleton className="h-3 w-24" />
         </div>
         <div className="flex gap-3 ml-auto sm:align-center sm:justify-end">
-          <Skeleton className="h-9 w-14" />
-          <Skeleton className="h-9 w-14" />
+          <Skeleton className="h-9 w-64 rounded-4xl" />
         </div>
       </div>
 
@@ -543,7 +542,7 @@ function CountryLanguageSection({
                         <ComboboxItem
                           key={item}
                           value={item}
-                          className="data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground flex items-center gap-2 rounded-xl px-3 py-2 text-sm"
+                          className="data-[highlighted]:bg-accent/10 data-[highlighted]:text-primary flex items-center gap-2 rounded-xl px-3 py-2 text-sm"
                         >
                           <span className="flex-1">{item}</span>
                         </ComboboxItem>
@@ -622,7 +621,7 @@ function CountryLanguageSection({
                           <ComboboxItem
                             key={item}
                             value={item}
-                            className="data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground flex items-center gap-2 rounded-xl px-3 py-2 text-sm"
+                            className="data-[highlighted]:bg-accent/10 data-[highlighted]:text-primary flex items-center gap-2 rounded-xl px-3 py-2 text-sm"
                           >
                             <span className="flex-1">{item}</span>
                           </ComboboxItem>
@@ -813,7 +812,7 @@ function SkillsAndToolsSection({
                           <ComboboxItem
                             key={item}
                             value={item}
-                            className="data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground flex items-center gap-2 rounded-xl px-3 py-2 text-sm"
+                            className="data-[highlighted]:bg-accent/10 data-[highlighted]:text-primary flex items-center gap-2 rounded-xl px-3 py-2 text-sm"
                           >
                             <span className="flex-1">{item}</span>
                           </ComboboxItem>
@@ -902,7 +901,7 @@ function SkillsAndToolsSection({
                           <ComboboxItem
                             key={item}
                             value={item}
-                            className="data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground flex items-center gap-2 rounded-xl px-3 py-2 text-sm"
+                            className="data-[highlighted]:bg-accent/10 data-[highlighted]:text-primary flex items-center gap-2 rounded-xl px-3 py-2 text-sm"
                           >
                             <span className="flex-1">{item}</span>
                           </ComboboxItem>
@@ -1418,10 +1417,11 @@ export default function UserSettingsPage() {
             >
               {form.formState.isSubmitting ? "Saving…" : "Save"}
             </Button>
-            <PageHeaderMenu
-              items={[
+            <PageToolbar
+              nav={[
                 { label: "Profile", href: userPath(handle) },
                 { label: "Attestations", href: userAttestationsPath(handle) },
+                { label: "Settings", href: userSettingsPath(handle) },
               ]}
             />
           </div>
