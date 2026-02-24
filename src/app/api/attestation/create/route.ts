@@ -4,7 +4,7 @@ import { z } from "zod";
 import { api, okJson, errJson } from "@/lib/api/server";
 import { ATTESTATION_TYPES, type AttestationType } from "@/lib/attestations/definitions";
 import { db } from "@/lib/db/client";
-import { logScoringEvent } from "@/lib/scoring";
+import { logScoringEvent, recomputeScoresForAttestationPair } from "@/lib/scoring";
 
 export const runtime = "nodejs";
 
@@ -99,6 +99,7 @@ export const POST = api(BodySchema, async (ctx) => {
     });
 
     logScoringEvent({ fromUserId: viewerId!, toUserId, type: ScoringType.ATTESTED });
+    recomputeScoresForAttestationPair({ fromUserId: viewerId!, toUserId });
 
     return okJson<CreateAttestationOk>({
       attestation: { id: created.id },
@@ -118,6 +119,7 @@ export const POST = api(BodySchema, async (ctx) => {
   });
 
   logScoringEvent({ fromUserId: viewerId!, toUserId, type: ScoringType.ATTESTED });
+  recomputeScoresForAttestationPair({ fromUserId: viewerId!, toUserId });
 
   return okJson<CreateAttestationOk>({
     attestation: { id: attestation.id },

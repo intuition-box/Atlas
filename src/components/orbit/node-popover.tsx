@@ -16,7 +16,7 @@ import {
 import { Tooltip, TooltipContent } from "@/components/ui/tooltip";
 import { Popover, PopoverContent } from "@/components/ui/popover";
 import { AttestationButtons } from "@/components/attestation/buttons";
-import { communityPath } from "@/lib/routes";
+import { communityPath, communityJoinPath } from "@/lib/routes";
 import { LEVEL_COLORS } from "./constants";
 import type { SimulatedNode } from "./types";
 
@@ -374,10 +374,17 @@ export function CommunityPopoverContent({
         </div>
       )}
 
-      {/* View Profile */}
-      <Button size="sm" variant="outline" className="w-full">
-        <Link href={communityPath(community.handle)}>View Profile</Link>
-      </Button>
+      {/* Actions */}
+      <div className="flex flex-col gap-2">
+        <Button size="sm" variant="outline" className="w-full">
+          <Link href={communityPath(community.handle)}>View profile</Link>
+        </Button>
+        {community.isMembershipOpen && community.viewerMembership?.status !== "APPROVED" ? (
+          <Button size="sm" className="w-full" render={<Link href={communityJoinPath(community.handle)} />}>
+            Apply to join
+          </Button>
+        ) : null}
+      </div>
     </>
   );
 }

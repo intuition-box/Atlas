@@ -514,6 +514,51 @@ export async function recomputeOrbitLevelsForCommunity(params: { communityId: st
 // ---------------------------------------------------------------------------
 
 /**
+ * Fire-and-forget: recompute love, reach, and gravity for both users in every
+ * community where both are approved members. Called after attestation
+ * create/retract so scores update immediately instead of waiting for the
+ * daily cron.
+ */
+export function recomputeScoresForAttestationPair(params: {
+  fromUserId: string;
+  toUserId: string;
+}) {
+  const { fromUserId, toUserId } = params;
+
+  db.membership
+    .findMany({
+      where: {
+        userId: { in: [fromUserId, toUserId] },
+        status: MembershipStatus.APPROVED,
+      },
+      select: { userId: true, communityId: true },
+    })
+    .then(async (memberships) => {
+      const byCommunity = new Map<string, Set<string>>();
+      for (const m of memberships) {
+        let users = byCommunity.get(m.communityId);
+        if (!users) {
+          users = new Set();
+          byCommunity.set(m.communityId, users);
+        }
+        users.add(m.userId);
+      }
+
+      for (const [communityId, users] of byCommunity) {
+        if (users.has(fromUserId) && users.has(toUserId)) {
+          await recomputeMemberScoresBatch({
+            communityId,
+            userIds: [fromUserId, toUserId],
+          });
+        }
+      }
+    })
+    .catch(() => {
+      // Best-effort; never block the caller's response.
+    });
+}
+
+/**
  * Fire-and-forget: log a ScoringEvent for every community where both users are
  * approved members. Used by attestation create/retract routes.
  *

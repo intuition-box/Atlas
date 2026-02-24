@@ -220,6 +220,16 @@ export function OrbitView({
     }
   }, [sim, popover, centerPopover]);
 
+  // When navigating from the homepage universe, the pointer is already
+  // inside the container on mount so mouseenter never fires. Detect
+  // presence on the first pointermove instead.
+  const handlePointerMoveContainer = useCallback(() => {
+    if (!mouseInsideRef.current) {
+      mouseInsideRef.current = true;
+      sim.setPaused(true);
+    }
+  }, [sim]);
+
   /* ────────────────────────────
      Build community popover data from props
   ──────────────────────────── */
@@ -259,6 +269,7 @@ export function OrbitView({
       style={{ width: "100%", height: "100%", cursor }}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
+      onPointerMove={handlePointerMoveContainer}
     >
       {size.w > 0 && size.h > 0 && (
         <OrbitCanvas

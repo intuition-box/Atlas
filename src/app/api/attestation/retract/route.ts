@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { api, okJson, errJson } from "@/lib/api/server";
 import { db } from "@/lib/db/client";
-import { logScoringEvent } from "@/lib/scoring";
+import { logScoringEvent, recomputeScoresForAttestationPair } from "@/lib/scoring";
 
 export const runtime = "nodejs";
 
@@ -64,6 +64,7 @@ export const POST = api(BodySchema, async (ctx) => {
   });
 
   logScoringEvent({ fromUserId: row.fromUserId, toUserId: row.toUserId, type: ScoringType.ATTESTATION_RETRACTED });
+  recomputeScoresForAttestationPair({ fromUserId: row.fromUserId, toUserId: row.toUserId });
 
   return okJson<RetractOk>({ attestation: { id: row.id }, alreadyRevoked: false });
 }, { auth: "auth" });
