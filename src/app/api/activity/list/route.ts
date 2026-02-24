@@ -293,4 +293,4 @@ export const GET = api(QuerySchema, async (ctx) => {
     : null;
 
   return okJson<ActivityListOk>({ events: result, nextCursor });
-}, { methods: ["GET"], auth: "public" });
+}, { methods: ["GET"], auth: "auth" });
