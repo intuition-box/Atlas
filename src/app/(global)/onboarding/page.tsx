@@ -284,7 +284,7 @@ function CountryLanguageSection({
                         <ComboboxItem
                           key={item}
                           value={item}
-                          className="data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground flex items-center gap-2 rounded-xl px-3 py-2 text-sm"
+                          className="data-[highlighted]:bg-accent/10 data-[highlighted]:text-primary flex items-center gap-2 rounded-xl px-3 py-2 text-sm"
                         >
                           <span className="flex-1">{item}</span>
                         </ComboboxItem>
@@ -361,7 +361,7 @@ function CountryLanguageSection({
                           <ComboboxItem
                             key={item}
                             value={item}
-                            className="data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground flex items-center gap-2 rounded-xl px-3 py-2 text-sm"
+                            className="data-[highlighted]:bg-accent/10 data-[highlighted]:text-primary flex items-center gap-2 rounded-xl px-3 py-2 text-sm"
                           >
                             <span className="flex-1">{item}</span>
                           </ComboboxItem>
@@ -524,7 +524,7 @@ function SkillsAndToolsSection({
                           <ComboboxItem
                             key={item}
                             value={item}
-                            className="data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground flex items-center gap-2 rounded-xl px-3 py-2 text-sm"
+                            className="data-[highlighted]:bg-accent/10 data-[highlighted]:text-primary flex items-center gap-2 rounded-xl px-3 py-2 text-sm"
                           >
                             <span className="flex-1">{item}</span>
                           </ComboboxItem>
@@ -611,7 +611,7 @@ function SkillsAndToolsSection({
                           <ComboboxItem
                             key={item}
                             value={item}
-                            className="data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground flex items-center gap-2 rounded-xl px-3 py-2 text-sm"
+                            className="data-[highlighted]:bg-accent/10 data-[highlighted]:text-primary flex items-center gap-2 rounded-xl px-3 py-2 text-sm"
                           >
                             <span className="flex-1">{item}</span>
                           </ComboboxItem>

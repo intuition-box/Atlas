@@ -9,6 +9,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useAttestationQueue } from "./queue-provider";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
 /* ────────────────────────────
@@ -40,19 +41,12 @@ export function AttestationQueueButton({ className }: { className?: string }) {
         >
           <FileCheck className="size-5" />
           {count > 0 && (
-            <span
-              className={cn(
-                "absolute -top-1 -right-1",
-                "flex items-center justify-center",
-                "min-w-5 h-5 px-1.5",
-                "text-[10px] font-semibold",
-                "bg-primary text-primary-foreground",
-                "rounded-full",
-                "border-2 border-background"
-              )}
+            <Badge
+              variant="solid"
+              className="absolute -top-1 -right-1 min-w-5 h-5 px-1.5 text-[10px] font-semibold border-2 border-background"
             >
               {count > 99 ? "99+" : count}
-            </span>
+            </Badge>
           )}
         </Button>
       </TooltipTrigger>

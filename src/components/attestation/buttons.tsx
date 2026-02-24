@@ -274,7 +274,7 @@ export function AttestationButtons({
                 top: { duration: ANIMATION.flightDuration, ease: [0.0, 0.55, 0.35, 1] },
               }}
             >
-              <div className="w-full h-full rounded-full bg-primary text-primary-foreground flex items-center justify-center shadow-lg shadow-primary/50">
+              <div className="w-full h-full rounded-full bg-primary/10 text-primary flex items-center justify-center shadow-lg shadow-primary/50">
                 <Check className="size-3" strokeWidth={3} />
               </div>
             </motion.div>

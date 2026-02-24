@@ -136,7 +136,7 @@ export default async function SignInPage({
 
           <div className="space-y-3">
             <form action={signinDiscord}>
-              <Button type="submit" className="w-full py-6 text-base">
+              <Button type="submit" variant="solid" className="w-full py-6 text-base">
                 Continue with Discord
               </Button>
             </form>
