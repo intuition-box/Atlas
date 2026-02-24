@@ -191,7 +191,7 @@ function AutocompleteItem({ className, ...props }: AutocompleteItemProps) {
       data-slot="autocomplete-item"
       className={cn(
         "group/autocomplete-item relative flex cursor-default items-center gap-2 rounded-xl px-3 py-2 text-sm outline-none select-none",
-        "data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground",
+        "data-[highlighted]:bg-accent/10 data-[highlighted]:text-primary",
         "data-[selected]:font-medium",
         "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
         "[&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0",

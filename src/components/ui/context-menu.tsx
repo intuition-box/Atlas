@@ -127,10 +127,10 @@ function ContextMenuItem({
         "group/context-menu-item relative flex cursor-default items-center gap-2.5 rounded-xl px-3 py-2 text-sm",
         "outline-hidden select-none",
         "data-disabled:pointer-events-none data-disabled:opacity-50",
-        "focus:bg-accent focus:text-accent-foreground",
+        "focus:bg-accent/10 focus:text-primary",
         "data-[inset]:pl-8",
         "[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
-        "focus:*:[svg]:text-accent-foreground",
+        "focus:*:[svg]:text-primary",
         "data-[variant=destructive]:text-destructive data-[variant=destructive]:*:[svg]:text-destructive",
         "data-[variant=destructive]:focus:bg-destructive/10 dark:data-[variant=destructive]:focus:bg-destructive/20",
         "data-[variant=destructive]:focus:text-destructive",
@@ -153,8 +153,8 @@ function ContextMenuSubTrigger({ className, inset, children, ...props }: Context
       className={cn(
         "flex cursor-default items-center rounded-xl px-3 py-2 text-sm",
         "outline-hidden select-none",
-        "focus:bg-accent focus:text-accent-foreground",
-        "data-open:bg-accent data-open:text-accent-foreground",
+        "focus:bg-accent/10 focus:text-primary",
+        "data-open:bg-accent/10 data-open:text-primary",
         "data-[inset]:pl-8",
         "[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
         className,
@@ -186,7 +186,7 @@ function ContextMenuCheckboxItem({ className, children, checked, ...props }: Con
         "relative flex cursor-default items-center gap-2 rounded-xl py-2 pr-8 pl-3 text-sm",
         "outline-hidden select-none",
         "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
-        "focus:bg-accent focus:text-accent-foreground",
+        "focus:bg-accent/10 focus:text-primary",
         "[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
         className,
       )}
@@ -215,7 +215,7 @@ function ContextMenuRadioItem({ className, children, ...props }: ContextMenuRadi
         "relative flex cursor-default items-center gap-2 rounded-sm py-1.5 pr-8 pl-2 text-sm",
         "outline-hidden select-none",
         "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
-        "focus:bg-accent focus:text-accent-foreground",
+        "focus:bg-accent/10 focus:text-primary",
         "[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
         className,
       )}
@@ -246,7 +246,7 @@ function ContextMenuShortcut({ className, ...props }: ContextMenuShortcutProps) 
     <span
       data-slot="context-menu-shortcut"
       className={cn(
-        "text-muted-foreground group-focus/context-menu-item:text-accent-foreground ml-auto text-xs tracking-widest",
+        "text-muted-foreground group-focus/context-menu-item:text-primary ml-auto text-xs tracking-widest",
         className,
       )}
       {...props}

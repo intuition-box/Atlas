@@ -157,7 +157,7 @@ function ToastAction({ className, ...props }: ToastActionProps) {
       data-slot="toast-action"
       className={cn(
         "inline-flex h-8 shrink-0 items-center justify-center rounded-xl border bg-background px-3 text-sm font-medium transition-colors",
-        "hover:bg-accent hover:text-accent-foreground",
+        "hover:bg-accent/10 hover:text-primary",
         "focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:outline-none focus-visible:ring-[3px]",
         "disabled:pointer-events-none disabled:opacity-50",
         className,
@@ -173,7 +173,7 @@ function ToastClose({ className, ...props }: ToastCloseProps) {
       data-slot="toast-close"
       className={cn(
         "absolute right-2 top-2 inline-flex size-8 items-center justify-center rounded-xl text-muted-foreground transition-colors",
-        "hover:bg-accent hover:text-accent-foreground",
+        "hover:bg-accent/10 hover:text-primary",
         "focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:outline-none focus-visible:ring-[3px]",
         className,
       )}
