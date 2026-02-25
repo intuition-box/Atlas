@@ -1,20 +1,29 @@
 "use client";
 
 import * as React from "react";
+import { useSession } from "next-auth/react";
+
 import type { AttestationType } from "@/lib/attestations/definitions";
-
-/* ────────────────────────────
-   Constants
-──────────────────────────── */
-
-const STORAGE_KEY = "attestation-queue";
+import { apiGet, apiPost } from "@/lib/api/client";
+import { sounds } from "@/lib/sounds";
 
 /* ────────────────────────────
    Types
 ──────────────────────────── */
 
-export type QueuedAttestation = {
-  id: string; // Client-side unique ID for the queue item
+export type UnmintedAttestation = {
+  id: string;
+  type: AttestationType;
+  createdAt: string;
+  toUser: {
+    id: string;
+    handle: string | null;
+    name: string | null;
+    avatarUrl: string | null;
+  };
+};
+
+type CreateAttestationParams = {
   toUserId: string;
   toName: string;
   toHandle?: string;
@@ -22,153 +31,287 @@ export type QueuedAttestation = {
   type: AttestationType;
 };
 
-type AttestationQueueContextValue = {
-  queue: QueuedAttestation[];
-  addToQueue: (attestation: Omit<QueuedAttestation, "id">) => void;
-  removeFromQueue: (id: string) => void;
-  removeMultiple: (ids: string[]) => void;
-  clearQueue: () => void;
-  isInQueue: (toUserId: string, type: AttestationType) => boolean;
+type AttestationCartContextValue = {
+  /** Unminted attestations from DB (given by viewer) */
+  unminted: UnmintedAttestation[];
+  /** Whether the cart panel is open */
   isOpen: boolean;
+  /** Whether fetching unminted attestations */
+  isFetching: boolean;
+  /** Timestamp of last change — use to trigger refetches downstream */
+  lastChangedAt: number;
+  /** Ref to the cart button for flying animation target */
+  buttonRef: React.RefObject<HTMLButtonElement | null>;
+
+  /** Create attestation immediately in DB */
+  createAttestation: (params: CreateAttestationParams) => Promise<{ ok: boolean; id?: string }>;
+  /** Retract (soft-delete) a single attestation */
+  retractAttestation: (id: string) => Promise<void>;
+  /** Retract all unminted attestations */
+  retractAll: () => Promise<void>;
+  /** Remove a minted item from unminted list and notify downstream */
+  onItemMinted: (id: string) => void;
+
   setIsOpen: (open: boolean) => void;
   toggleOpen: () => void;
-  /** Ref to the queue button for flying animation target */
-  buttonRef: React.RefObject<HTMLButtonElement | null>;
-  /** Timestamp of last successful save - use to trigger refetches */
-  lastSavedAt: number;
-  /** Call after successfully saving attestations to trigger button refetches */
-  markSaved: () => void;
 };
 
 /* ────────────────────────────
-   Helpers
+   API response types
 ──────────────────────────── */
 
-function loadQueueFromStorage(): QueuedAttestation[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (!stored) return [];
-    const parsed = JSON.parse(stored);
-    if (!Array.isArray(parsed)) return [];
-    return parsed;
-  } catch {
-    return [];
-  }
-}
+type ListResponse = {
+  attestations: Array<{
+    id: string;
+    type: string;
+    confidence: number | null;
+    createdAt: string;
+    mintedAt: string | null;
+    fromUser: {
+      id: string;
+      handle: string | null;
+      name: string | null;
+      avatarUrl: string | null;
+      headline: string | null;
+    };
+    toUser: {
+      id: string;
+      handle: string | null;
+      name: string | null;
+      avatarUrl: string | null;
+      headline: string | null;
+    };
+  }>;
+  nextCursor: string | null;
+};
 
-function saveQueueToStorage(queue: QueuedAttestation[]): void {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(queue));
-  } catch {
-    // Storage full or disabled - fail silently
-  }
-}
+type CreateResponse = {
+  attestation: { id: string };
+  alreadyExists: boolean;
+};
 
 /* ────────────────────────────
    Context
 ──────────────────────────── */
 
-const AttestationQueueContext = React.createContext<AttestationQueueContextValue | null>(null);
+const AttestationCartContext = React.createContext<AttestationCartContextValue | null>(null);
 
 /* ────────────────────────────
    Provider
 ──────────────────────────── */
 
 export function AttestationQueueProvider({ children }: { children: React.ReactNode }) {
-  const [queue, setQueue] = React.useState<QueuedAttestation[]>([]);
-  const [isHydrated, setIsHydrated] = React.useState(false);
+  const { data: session } = useSession();
+  const viewerId = session?.user?.id ?? null;
+
+  const [unminted, setUnminted] = React.useState<UnmintedAttestation[]>([]);
+  const [isFetching, setIsFetching] = React.useState(false);
   const [isOpen, setIsOpen] = React.useState(false);
-  const [lastSavedAt, setLastSavedAt] = React.useState(0);
+  const [lastChangedAt, setLastChangedAt] = React.useState(0);
   const buttonRef = React.useRef<HTMLButtonElement | null>(null);
 
-  // Load from localStorage on mount
-  React.useEffect(() => {
-    const stored = loadQueueFromStorage();
-    setQueue(stored);
-    setIsHydrated(true);
-  }, []);
+  // Track previous isOpen to detect open transitions
+  const prevIsOpenRef = React.useRef(false);
 
-  // Persist to localStorage when queue changes (after hydration)
-  React.useEffect(() => {
-    if (isHydrated) {
-      saveQueueToStorage(queue);
+  /* ── Fetch unminted attestations from DB ── */
+
+  const fetchUnminted = React.useCallback(async (userId: string, signal?: AbortSignal) => {
+    setIsFetching(true);
+    try {
+      const result = await apiGet<ListResponse>("/api/attestation/list", {
+        fromUserId: userId,
+        minted: "false",
+        take: 100,
+      }, { signal });
+
+      if (result.ok) {
+        setUnminted(
+          result.value.attestations.map((a) => ({
+            id: a.id,
+            type: a.type as AttestationType,
+            createdAt: a.createdAt,
+            toUser: {
+              id: a.toUser.id,
+              handle: a.toUser.handle,
+              name: a.toUser.name,
+              avatarUrl: a.toUser.avatarUrl,
+            },
+          })),
+        );
+      }
+    } finally {
+      setIsFetching(false);
     }
-  }, [queue, isHydrated]);
-
-  const addToQueue = React.useCallback((attestation: Omit<QueuedAttestation, "id">) => {
-    setQueue((prev) => {
-      // Check if already in queue (same user + type)
-      const exists = prev.some(
-        (item) =>
-          item.toUserId === attestation.toUserId &&
-          item.type === attestation.type
-      );
-      if (exists) return prev;
-
-      const newItem: QueuedAttestation = {
-        ...attestation,
-        id: `${attestation.toUserId}-${attestation.type}-${Date.now()}`,
-      };
-      return [...prev, newItem];
-    });
   }, []);
 
-  const removeFromQueue = React.useCallback((id: string) => {
-    setQueue((prev) => prev.filter((item) => item.id !== id));
+  /* ── Initial fetch on auth ── */
+
+  React.useEffect(() => {
+    if (!viewerId) {
+      setUnminted([]);
+      return;
+    }
+
+    const controller = new AbortController();
+    fetchUnminted(viewerId, controller.signal);
+    return () => controller.abort();
+  }, [viewerId, fetchUnminted]);
+
+  /* ── Refetch when panel opens ── */
+
+  React.useEffect(() => {
+    if (isOpen && !prevIsOpenRef.current && viewerId) {
+      fetchUnminted(viewerId);
+    }
+    prevIsOpenRef.current = isOpen;
+  }, [isOpen, viewerId, fetchUnminted]);
+
+  /* ── Refetch on tab visibility ── */
+
+  React.useEffect(() => {
+    if (!viewerId) return;
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        fetchUnminted(viewerId);
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, [viewerId, fetchUnminted]);
+
+  /* ── One-time localStorage cleanup ── */
+
+  React.useEffect(() => {
+    try {
+      localStorage.removeItem("attestation-queue");
+    } catch {
+      // Ignore
+    }
   }, []);
 
-  const removeMultiple = React.useCallback((ids: string[]) => {
-    const idSet = new Set(ids);
-    setQueue((prev) => prev.filter((item) => !idSet.has(item.id)));
-  }, []);
+  /* ── Actions ── */
 
-  const clearQueue = React.useCallback(() => {
-    setQueue([]);
-  }, []);
+  const createAttestation = React.useCallback(
+    async (params: CreateAttestationParams): Promise<{ ok: boolean; id?: string }> => {
+      const result = await apiPost<CreateResponse>("/api/attestation/create", {
+        toUserId: params.toUserId,
+        type: params.type,
+      });
 
-  const isInQueue = React.useCallback(
-    (toUserId: string, type: AttestationType) => {
-      return queue.some(
-        (item) =>
-          item.toUserId === toUserId &&
-          item.type === type
-      );
+      if (!result.ok) {
+        return { ok: false };
+      }
+
+      const { id } = result.value.attestation;
+
+      // Optimistically add to unminted list (skip if already exists — idempotent create)
+      if (!result.value.alreadyExists) {
+        setUnminted((prev) => [
+          {
+            id,
+            type: params.type,
+            createdAt: new Date().toISOString(),
+            toUser: {
+              id: params.toUserId,
+              handle: params.toHandle ?? null,
+              name: params.toName,
+              avatarUrl: params.toAvatarUrl ?? null,
+            },
+          },
+          ...prev,
+        ]);
+      }
+
+      setLastChangedAt(Date.now());
+      return { ok: true, id };
     },
-    [queue]
+    [],
   );
+
+  const retractAttestation = React.useCallback(
+    async (id: string) => {
+      // Optimistic removal
+      const snapshot = unminted;
+      setUnminted((prev) => prev.filter((a) => a.id !== id));
+
+      const result = await apiPost("/api/attestation/retract", {
+        attestationId: id,
+      });
+
+      if (!result.ok) {
+        // Rollback
+        setUnminted(snapshot);
+        sounds.error();
+        return;
+      }
+
+      setLastChangedAt(Date.now());
+    },
+    [unminted],
+  );
+
+  const retractAll = React.useCallback(async () => {
+    if (unminted.length === 0) return;
+
+    const snapshot = [...unminted];
+    setUnminted([]);
+
+    const results = await Promise.allSettled(
+      snapshot.map((a) =>
+        apiPost("/api/attestation/retract", { attestationId: a.id }),
+      ),
+    );
+
+    // Re-add any that failed
+    const failures: UnmintedAttestation[] = [];
+    results.forEach((r, i) => {
+      if (r.status === "rejected" || (r.status === "fulfilled" && !r.value.ok)) {
+        failures.push(snapshot[i]!);
+      }
+    });
+
+    if (failures.length > 0) {
+      setUnminted(failures);
+      sounds.error();
+    }
+
+    setLastChangedAt(Date.now());
+  }, [unminted]);
+
+  const onItemMinted = React.useCallback((id: string) => {
+    setUnminted((prev) => prev.filter((a) => a.id !== id));
+    setLastChangedAt(Date.now());
+  }, []);
 
   const toggleOpen = React.useCallback(() => {
     setIsOpen((prev) => !prev);
   }, []);
 
-  const markSaved = React.useCallback(() => {
-    setLastSavedAt(Date.now());
-  }, []);
+  /* ── Context value ── */
 
   const value = React.useMemo(
     () => ({
-      queue,
-      addToQueue,
-      removeFromQueue,
-      removeMultiple,
-      clearQueue,
-      isInQueue,
+      unminted,
       isOpen,
+      isFetching,
+      lastChangedAt,
+      buttonRef,
+      createAttestation,
+      retractAttestation,
+      retractAll,
+      onItemMinted,
       setIsOpen,
       toggleOpen,
-      buttonRef,
-      lastSavedAt,
-      markSaved,
     }),
-    [queue, addToQueue, removeFromQueue, removeMultiple, clearQueue, isInQueue, isOpen, toggleOpen, lastSavedAt, markSaved]
+    [unminted, isOpen, isFetching, lastChangedAt, createAttestation, retractAttestation, retractAll, onItemMinted, toggleOpen],
   );
 
   return (
-    <AttestationQueueContext.Provider value={value}>
+    <AttestationCartContext.Provider value={value}>
       {children}
-    </AttestationQueueContext.Provider>
+    </AttestationCartContext.Provider>
   );
 }
 
@@ -177,7 +320,7 @@ export function AttestationQueueProvider({ children }: { children: React.ReactNo
 ──────────────────────────── */
 
 export function useAttestationQueue() {
-  const context = React.useContext(AttestationQueueContext);
+  const context = React.useContext(AttestationCartContext);
   if (!context) {
     throw new Error("useAttestationQueue must be used within AttestationQueueProvider");
   }

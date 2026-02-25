@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { Check, Loader2, X } from "lucide-react";
+import { CheckCircle, Loader2, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { apiPost } from "@/lib/api/client";
@@ -18,38 +18,34 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { useAttestationQueue, type QueuedAttestation } from "./queue-provider";
+import { useAttestationQueue, type UnmintedAttestation } from "./queue-provider";
 import { AttestationBadge } from "@/components/attestation/badge";
 import { ProfileAvatar } from "@/components/common/profile-avatar";
 
 /* ────────────────────────────
-   Helpers
+   Cart Item Component
 ──────────────────────────── */
 
-/* ────────────────────────────
-   Queue Item Component
-──────────────────────────── */
-
-function QueueItem({
+function CartItem({
   item,
-  onRemove,
-  onSave,
-  isSaving,
+  onDelete,
+  isMinting,
+  isActing,
 }: {
-  item: QueuedAttestation;
-  onRemove: (id: string) => void;
-  onSave: (id: string) => void;
-  isSaving: boolean;
+  item: UnmintedAttestation;
+  onDelete: (id: string) => void;
+  isMinting: boolean;
+  isActing: boolean;
 }) {
   return (
     <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/30 border border-border/30">
-      <ProfileAvatar type="user" src={item.toAvatarUrl} name={item.toName} className="size-9 shrink-0" />
+      <ProfileAvatar type="user" src={item.toUser.avatarUrl} name={item.toUser.name ?? ""} className="size-9 shrink-0" />
 
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <span className="font-medium text-sm truncate">{item.toName}</span>
-          {item.toHandle && (
-            <span className="text-xs text-muted-foreground">@{item.toHandle}</span>
+          <span className="font-medium text-sm truncate">{item.toUser.name}</span>
+          {item.toUser.handle && (
+            <span className="text-xs text-muted-foreground">@{item.toUser.handle}</span>
           )}
         </div>
         <span className="text-xs text-muted-foreground">
@@ -58,28 +54,19 @@ function QueueItem({
       </div>
 
       <div className="flex items-center gap-2 shrink-0">
-        <Button
-          variant="secondary"
-          size="icon-xs"
-          onClick={() => onRemove(item.id)}
-          disabled={isSaving}
-          aria-label="Remove attestation"
-        >
-          <X className="size-3.5" />
-        </Button>
-        <Button
-          variant="secondary"
-          size="icon-xs"
-          onClick={() => onSave(item.id)}
-          disabled={isSaving}
-          aria-label="Save attestation"
-        >
-          {isSaving ? (
-            <Loader2 className="size-3.5 animate-spin" />
-          ) : (
-            <Check className="size-3.5" />
-          )}
-        </Button>
+        {isMinting ? (
+          <Loader2 className="size-4 animate-spin text-muted-foreground" />
+        ) : (
+          <Button
+            variant="secondary"
+            size="icon-xs"
+            onClick={() => onDelete(item.id)}
+            disabled={isActing}
+            aria-label="Delete attestation"
+          >
+            <X className="size-3.5" />
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -91,9 +78,19 @@ function QueueItem({
 
 export function AttestationQueuePanel() {
   const { data: session } = useSession();
-  const { queue, removeFromQueue, removeMultiple, clearQueue, isOpen, setIsOpen, markSaved } = useAttestationQueue();
-  const [isSaving, setIsSaving] = React.useState(false);
-  const [savingIds, setSavingIds] = React.useState<Set<string>>(new Set());
+  const {
+    unminted,
+    isFetching,
+    isOpen,
+    setIsOpen,
+    retractAttestation,
+    retractAll,
+    onItemMinted,
+  } = useAttestationQueue();
+
+  const [isMinting, setIsMinting] = React.useState(false);
+  const [mintingIds, setMintingIds] = React.useState<Set<string>>(new Set());
+  const [mintComplete, setMintComplete] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const pathname = usePathname();
 
@@ -101,95 +98,82 @@ export function AttestationQueuePanel() {
   const attestationsPath = userHandle ? userAttestationsPath(userHandle) : null;
   const isOnAttestationsPage = attestationsPath && pathname === attestationsPath;
 
-  const handleSaveOne = async (id: string) => {
-    const item = queue.find((q) => q.id === id);
-    if (!item) return;
-
-    setSavingIds((prev) => new Set(prev).add(id));
-    setError(null);
-
-    try {
-      const result = await apiPost<{ attestation: { id: string } }>(
-        "/api/attestation/create",
-        { toUserId: item.toUserId, type: item.type },
-      );
-
-      if (!result.ok) {
-        setError("Failed to save attestation");
-        sounds.error();
-        return;
-      }
-
-      removeFromQueue(id);
-      markSaved();
-      sounds.success();
-    } catch {
-      setError("Something went wrong");
-      sounds.error();
-    } finally {
-      setSavingIds((prev) => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
+  // Reset mint complete state when panel opens with new items
+  React.useEffect(() => {
+    if (isOpen && unminted.length > 0) {
+      setMintComplete(false);
     }
+  }, [isOpen, unminted.length]);
+
+  const handleDelete = async (id: string) => {
+    setError(null);
+    await retractAttestation(id);
   };
 
-  const handleSaveAll = async () => {
-    if (queue.length === 0) return;
+  const handleDeleteAll = async () => {
+    setError(null);
+    await retractAll();
+  };
 
-    setIsSaving(true);
+  const handleMintAll = async () => {
+    if (unminted.length === 0) return;
+
+    setIsMinting(true);
     setError(null);
 
-    try {
-      // Save all attestations in parallel
-      const results = await Promise.allSettled(
-        queue.map(async (item) => {
-          const result = await apiPost<{ attestation: { id: string } }>(
-            "/api/attestation/create",
-            {
-              toUserId: item.toUserId,
-              type: item.type,
-            }
-          );
+    // Snapshot items to mint
+    const toMint = [...unminted];
 
-          if (!result.ok) {
-            throw new Error(result.error.message || "Failed to save attestation");
+    // Start looping mint sound
+    const loopControl = await sounds.loopMintAll();
+
+    try {
+      let failures = 0;
+
+      for (const item of toMint) {
+        setMintingIds((prev) => new Set(prev).add(item.id));
+
+        try {
+          // Simulate blockchain call (will be replaced with Intuition SDK)
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+
+          // Persist mint state to database
+          const result = await apiPost<{
+            attestation: { id: string; mintedAt: string };
+            alreadyMinted: boolean;
+          }>("/api/attestation/mint", {
+            attestationId: item.id,
+          });
+
+          if (result.ok) {
+            onItemMinted(item.id);
+          } else {
+            failures++;
           }
-
-          return item.id;
-        })
-      );
-
-      // Remove successfully saved attestations
-      const successfulIds = results
-        .filter((r): r is PromiseFulfilledResult<string> => r.status === "fulfilled")
-        .map((r) => r.value);
-
-      // Check for failures
-      const failures = results.filter((r) => r.status === "rejected");
-      if (failures.length > 0) {
-        setError(`${failures.length} attestation(s) failed to save`);
+        } catch {
+          failures++;
+        } finally {
+          setMintingIds((prev) => {
+            const next = new Set(prev);
+            next.delete(item.id);
+            return next;
+          });
+        }
       }
 
-      // If any succeeded, remove from queue and trigger refetch
-      if (successfulIds.length > 0) {
-        removeMultiple(successfulIds);
-        markSaved();
-        sounds.success();
+      if (failures > 0) {
+        setError(`${failures} attestation(s) failed to mint`);
       }
 
-      // Play error sound if any failed
-      if (failures.length > 0) {
-        sounds.error();
-      }
-    } catch {
-      setError("Something went wrong");
-      sounds.error();
+      setMintComplete(true);
     } finally {
-      setIsSaving(false);
+      loopControl.stop();
+      sounds.mint();
+      setIsMinting(false);
     }
   };
+
+  const isActing = isMinting;
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
@@ -197,9 +181,9 @@ export function AttestationQueuePanel() {
         <DialogHeader className="relative">
           <div className="flex items-start justify-between gap-4">
             <div className="flex flex-col gap-1">
-              <DialogTitle>Attestation Queue</DialogTitle>
+              <DialogTitle>Attestation Cart</DialogTitle>
               <DialogDescription>
-                Review before saving your attestations.
+                Manage your unminted attestations.
               </DialogDescription>
             </div>
 
@@ -216,14 +200,30 @@ export function AttestationQueuePanel() {
 
         <div
           className={cn(
-            "max-h-[28rem] overflow-y-auto pr-2 [scrollbar-width:thin] [scrollbar-color:oklch(1_0_0/20%)_transparent]",
-            queue.length > 0 && "[mask-image:linear-gradient(transparent,black_1.5rem,black_calc(100%-1.5rem),transparent)]"
+            "max-h-[28rem] overflow-y-auto pr-4 [scrollbar-width:thin] [scrollbar-color:oklch(1_0_0/20%)_transparent]",
+            unminted.length > 0 && "[mask-image:linear-gradient(transparent,black_1.5rem,black_calc(100%-1.5rem),transparent)]"
           )}
         >
-          {queue.length === 0 ? (
+          {isFetching && unminted.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-40">
+              <Loader2 className="size-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : mintComplete && unminted.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-40 text-center gap-3">
+              <CheckCircle className="size-8 text-positive" />
+              <div>
+                <p className="text-sm font-medium">
+                  All attestations minted onchain!
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Your attestations are now permanently recorded.
+                </p>
+              </div>
+            </div>
+          ) : unminted.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 text-center">
               <p className="text-muted-foreground text-sm">
-                No attestations queued.
+                No unminted attestations.
               </p>
               <p className="mt-1">
                 Attestations strengthen relationships between users. When you and
@@ -232,13 +232,13 @@ export function AttestationQueuePanel() {
             </div>
           ) : (
             <div className="flex flex-col gap-3 py-2">
-              {queue.map((item) => (
-                <QueueItem
+              {unminted.map((item) => (
+                <CartItem
                   key={item.id}
                   item={item}
-                  onRemove={removeFromQueue}
-                  onSave={handleSaveOne}
-                  isSaving={savingIds.has(item.id)}
+                  onDelete={handleDelete}
+                  isMinting={mintingIds.has(item.id)}
+                  isActing={isActing}
                 />
               ))}
             </div>
@@ -251,21 +251,21 @@ export function AttestationQueuePanel() {
           )}
         </div>
 
-        {queue.length > 0 && (
+        {unminted.length > 0 && (
           <div className="grid grid-cols-2 gap-2">
             <Button
               variant="destructive"
-              onClick={clearQueue}
-              disabled={isSaving}
+              onClick={handleDeleteAll}
+              disabled={isActing}
             >
               Delete all
             </Button>
             <Button
               variant="positive"
-              onClick={handleSaveAll}
-              disabled={isSaving}
+              onClick={handleMintAll}
+              disabled={isActing}
             >
-              {isSaving ? "Saving\u2026" : "Save all"}
+              {isMinting ? "Minting\u2026" : "Mint all"}
             </Button>
           </div>
         )}

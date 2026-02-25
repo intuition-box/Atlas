@@ -1,6 +1,6 @@
 "use client";
 
-import { FileCheck } from "lucide-react";
+import { ShoppingCart } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import {
@@ -17,8 +17,8 @@ import { Button } from "@/components/ui/button";
 ──────────────────────────── */
 
 export function AttestationQueueButton({ className }: { className?: string }) {
-  const { queue, toggleOpen, isOpen, buttonRef } = useAttestationQueue();
-  const count = queue.length;
+  const { unminted, toggleOpen, isOpen, buttonRef } = useAttestationQueue();
+  const count = unminted.length;
 
   return (
     <Tooltip>
@@ -32,14 +32,11 @@ export function AttestationQueueButton({ className }: { className?: string }) {
           type="button"
           className={cn(
             "relative size-10 rounded-full",
-            "bg-background/50 hover:bg-background/80",
-            "backdrop-blur-sm",
-            "border border-border/30 hover:border-border/50",
-            isOpen && "bg-background/80 border-border/50",
+            isOpen && "text-foreground",
             className
           )}
         >
-          <FileCheck className="size-5" />
+          <ShoppingCart className="size-5" />
           {count > 0 && (
             <Badge
               variant="solid"
@@ -53,8 +50,8 @@ export function AttestationQueueButton({ className }: { className?: string }) {
       <TooltipContent side="bottom" sideOffset={8}>
         <p className="text-xs">
           {count > 0
-            ? `${count} attestation${count !== 1 ? "s" : ""} queued`
-            : "No attestations queued"}
+            ? `${count} unminted attestation${count !== 1 ? "s" : ""}`
+            : "No unminted attestations"}
         </p>
       </TooltipContent>
     </Tooltip>

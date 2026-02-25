@@ -64,10 +64,11 @@ export function AttestationButtons({
 }: AttestationButtonsProps) {
   const { data: session, status: sessionStatus } = useSession();
   const [animatingTypes, setAnimatingTypes] = useState<Set<AttestationType>>(new Set());
+  const [savingTypes, setSavingTypes] = useState<Set<AttestationType>>(new Set());
   const [flyingDots, setFlyingDots] = useState<FlyingDot[]>([]);
   const [activeTypes, setActiveTypes] = useState<Set<AttestationType>>(new Set());
   const [isFetching, setIsFetching] = useState(true);
-  const { addToQueue, isInQueue, buttonRef, lastSavedAt } = useAttestationQueue();
+  const { createAttestation, buttonRef, lastChangedAt } = useAttestationQueue();
 
   const timeoutsRef = React.useRef<number[]>([]);
 
@@ -82,7 +83,7 @@ export function AttestationButtons({
   const currentUserId = session?.user?.id;
   const isSessionLoading = sessionStatus === "loading";
 
-  // Fetch existing attestations on mount and when attestations are saved
+  // Fetch existing attestations on mount and when attestations change
   useEffect(() => {
     // Wait for session to load before deciding
     if (isSessionLoading) {
@@ -117,7 +118,7 @@ export function AttestationButtons({
       });
 
     return () => controller.abort();
-  }, [currentUserId, toUserId, lastSavedAt, isSessionLoading]);
+  }, [currentUserId, toUserId, lastChangedAt, isSessionLoading]);
 
   // Don't show attestation buttons if not logged in or viewing own profile
   if (!currentUserId || currentUserId === toUserId) {
@@ -128,28 +129,55 @@ export function AttestationButtons({
     e: React.MouseEvent,
     type: AttestationType
   ) => {
-    if (animatingTypes.has(type)) return;
+    if (animatingTypes.has(type) || savingTypes.has(type)) return;
 
     const rect = e.currentTarget.getBoundingClientRect();
-    const id = `${type}-${Date.now()}`;
+    const dotId = `${type}-${Date.now()}`;
 
-    // Start button animation
+    // Optimistically disable button
+    setSavingTypes((prev) => {
+      const next = new Set(prev);
+      next.add(type);
+      return next;
+    });
+
+    // Start button animation (shine)
     setAnimatingTypes((prev) => {
       const next = new Set(prev);
       next.add(type);
       return next;
     });
 
-    // After button "shine", spawn flying dot and add to queue
+    // After shine delay, call API and spawn flying dot on success
     timeoutsRef.current.push(
-      window.setTimeout(() => {
-        setFlyingDots((prev) => [...prev, { id, type, rect }]);
-        addToQueue({ toUserId, toName, toHandle, toAvatarUrl, type });
-        sounds.select({ spatial: rect.left + rect.width / 2 });
+      window.setTimeout(async () => {
+        const result = await createAttestation({ toUserId, toName, toHandle, toAvatarUrl, type });
+
+        if (result.ok) {
+          // Spawn flying dot and play sound on success
+          setFlyingDots((prev) => [...prev, { id: dotId, type, rect }]);
+          sounds.select({ spatial: rect.left + rect.width / 2 });
+
+          // Remove flying dot after flight
+          timeoutsRef.current.push(
+            window.setTimeout(() => {
+              setFlyingDots((prev) => prev.filter((d) => d.id !== dotId));
+            }, ANIMATION.dotLifetime - ANIMATION.shineDelay)
+          );
+        } else {
+          sounds.error();
+        }
+
+        // Clear saving state
+        setSavingTypes((prev) => {
+          const next = new Set(prev);
+          next.delete(type);
+          return next;
+        });
       }, ANIMATION.shineDelay)
     );
 
-    // Clean up animation state
+    // Clean up shine animation state
     timeoutsRef.current.push(
       window.setTimeout(() => {
         setAnimatingTypes((prev) => {
@@ -158,13 +186,6 @@ export function AttestationButtons({
           return next;
         });
       }, ANIMATION.shineCleanup)
-    );
-
-    // Remove flying dot after flight
-    timeoutsRef.current.push(
-      window.setTimeout(() => {
-        setFlyingDots((prev) => prev.filter((d) => d.id !== id));
-      }, ANIMATION.dotLifetime)
     );
   };
 
@@ -175,8 +196,8 @@ export function AttestationButtons({
       <div className={cn("flex flex-wrap gap-1.5", className)}>
         {Object.values(ATTESTATION_TYPES).map((attestType) => {
           const type = attestType.id as AttestationType;
-          const inQueue = isInQueue(toUserId, type);
           const isAnimating = animatingTypes.has(type);
+          const isSaving = savingTypes.has(type);
           const isActive = activeTypes.has(type);
 
           // 1. Loading — all buttons disabled with skeleton
@@ -200,8 +221,8 @@ export function AttestationButtons({
             );
           }
 
-          // 2. Already attested or in queue — disabled secondary
-          if (isActive || inQueue) {
+          // 2. Already attested or currently saving — disabled secondary
+          if (isActive || isSaving) {
             return (
               <Button
                 key={attestType.id}

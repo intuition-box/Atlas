@@ -171,7 +171,7 @@ function useAttestationsData(
   filters: FilterState,
   cursor: string | null,
   /** Timestamp of last cart save - triggers refetch when changed */
-  lastSavedAt: number = 0,
+  lastChangedAt: number = 0,
   /** Increment to force a refetch without a full page reload */
   refreshKey: number = 0,
 ) {
@@ -300,7 +300,7 @@ function useAttestationsData(
     return () => {
       ac.abort()
     }
-  }, [router, queryParams, cursor, handle, filters.direction, filters.type, lastSavedAt, refreshKey])
+  }, [router, queryParams, cursor, handle, filters.direction, filters.type, lastChangedAt, refreshKey])
 
   // Filter by search query client-side
   const filteredItems = React.useMemo(() => {
@@ -855,8 +855,8 @@ export default function AttestationsPage() {
   const displayName = profile?.name?.trim() || `@${handle}`
   const avatarSrc = profile?.avatarUrl || profile?.image || ""
 
-  // Get lastSavedAt from queue context to trigger refetch when cart saves
-  const { lastSavedAt } = useAttestationQueue()
+  // Get lastChangedAt from queue context to trigger refetch when cart saves
+  const { lastChangedAt } = useAttestationQueue()
 
   const [view, setView] = React.useState<"cards" | "list">("cards")
   const [cursor, setCursor] = React.useState<string | null>(null)
@@ -873,16 +873,16 @@ export default function AttestationsPage() {
 
   // Reset cursor when cart saves to force fresh fetch from page 1
   React.useEffect(() => {
-    if (lastSavedAt > 0) {
+    if (lastChangedAt > 0) {
       setCursor(null)
     }
-  }, [lastSavedAt])
+  }, [lastChangedAt])
 
   const { items: fetchedItems, nextCursor, loading, filtering, loadingMore, error } = useAttestationsData(
     handle,
     filters,
     cursor,
-    lastSavedAt,
+    lastChangedAt,
   )
 
   // Sync fetched items to local state (allows optimistic removal on retract)

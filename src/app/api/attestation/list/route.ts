@@ -22,6 +22,7 @@ const QuerySchema = z.object({
   fromHandle: z.string().trim().min(1).optional(),
 
   type: z.enum(attestationTypeValues).optional(),
+  minted: z.enum(["true", "false"]).optional(),
 
   take: z.coerce.number().int().min(1).max(100).default(50),
   cursor: z.string().trim().min(1).optional(),
@@ -87,6 +88,8 @@ export const GET = api(QuerySchema, async (ctx) => {
       ...(toUserId ? { toUserId } : {}),
       ...(fromUserId ? { fromUserId } : {}),
       ...(type ? { type } : {}),
+      ...(json.minted === "true" ? { mintedAt: { not: null } } : {}),
+      ...(json.minted === "false" ? { mintedAt: null } : {}),
       revokedAt: null, // Only active attestations
       supersededById: null, // Only current versions
     },
