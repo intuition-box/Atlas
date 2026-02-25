@@ -37,6 +37,9 @@ import {
   createWalletClient,
   http,
   custom,
+  getAddress,
+  toHex,
+  formatEther,
   type PublicClient,
   type WalletClient,
   type Address,
@@ -44,9 +47,15 @@ import {
 import {
   createAtomFromString,
   createAtomFromEthereumAccount,
+  batchCreateAtomsFromEthereumAccounts,
   createTripleStatement,
+  findAtomIds,
   getAtomDetails,
   getTripleDetails,
+  multiVaultCreateTriples,
+  multiVaultGetTripleCost,
+  multiVaultGetGeneralConfig,
+  eventParseTripleCreated,
 } from "@0xintuition/sdk";
 
 import {
@@ -62,7 +71,7 @@ import {
   MULTIVAULT_ADDRESS,
   INTUITION_ENABLED,
   HYBRID_PREDICATES,
-  DEFAULT_DEPOSIT_AMOUNT,
+  NATIVE_CURRENCY_SYMBOL,
   getCommunityAtomId,
   type HybridPredicateType,
 } from "./config";
@@ -74,6 +83,8 @@ import type {
   CreateSkillAttestationInput,
   CreateCommunityAttestationInput,
   CreateCommunityAttestationResult,
+  BatchMintItem,
+  BatchMintResult,
   IntuitionErrorCode,
 } from "./types";
 import { IntuitionError } from "./types";
@@ -91,21 +102,61 @@ export const publicClient: PublicClient = createPublicClient({
   transport: http(),
 });
 
+/* ────────────────────────────
+   Contract Config Cache
+──────────────────────────── */
+
+/** Cached minDeposit from the MultiVault contract's generalConfig. */
+let cachedMinDeposit: bigint | null = null;
+
+/**
+ * Fetch the minimum deposit amount from the MultiVault contract.
+ * Result is cached for the lifetime of the page — the contract value
+ * doesn't change between transactions.
+ */
+export async function getMinDeposit(): Promise<bigint> {
+  if (cachedMinDeposit !== null) return cachedMinDeposit;
+
+  console.log("[getMinDeposit] fetching generalConfig from", MULTIVAULT_ADDRESS);
+  const generalConfig = await multiVaultGetGeneralConfig({
+    publicClient,
+    address: MULTIVAULT_ADDRESS,
+  });
+  console.log("[getMinDeposit] generalConfig:", {
+    minDeposit: generalConfig.minDeposit.toString(),
+    minDepositEth: formatEther(generalConfig.minDeposit),
+    minShare: generalConfig.minShare.toString(),
+    admin: generalConfig.admin,
+    feeThreshold: generalConfig.feeThreshold.toString(),
+  });
+
+  cachedMinDeposit = generalConfig.minDeposit;
+  return cachedMinDeposit;
+}
+
 /**
  * Create a wallet client from the browser's injected provider (MetaMask, etc.)
- * Returns null if no wallet is available (server-side or no extension)
+ * Fetches the active account from the provider so viem can sign transactions.
+ * Returns null if no wallet is available (server-side or no extension).
  */
-export function createBrowserWalletClient(): WalletClient | null {
+export async function createBrowserWalletClient(): Promise<WalletClient | null> {
   if (typeof window === "undefined") {
     return null;
   }
 
-  const ethereum = (window as Window & { ethereum?: unknown }).ethereum;
+  const ethereum = (window as Window & { ethereum?: { request: (args: { method: string }) => Promise<unknown> } }).ethereum;
   if (!ethereum) {
     return null;
   }
 
+  // Get the active account from the provider
+  const accounts = (await ethereum.request({ method: "eth_accounts" })) as Address[];
+  if (accounts.length === 0) {
+    return null;
+  }
+
   return createWalletClient({
+    account: accounts[0],
     chain: INTUITION_CHAIN,
     transport: custom(ethereum as Parameters<typeof custom>[0]),
   });
@@ -250,6 +301,51 @@ export async function switchToIntuitionNetwork(): Promise<void> {
   }
 }
 
+/**
+ * Ensure the injected provider is on the Intuition chain.
+ * Attempts wallet_switchEthereumChain (and wallet_addEthereumChain if unknown).
+ * Throws WRONG_CHAIN only if the user rejects the prompt.
+ */
+async function ensureCorrectChain(): Promise<void> {
+  const wallet = await getWalletState();
+  if (wallet.chainId === INTUITION_CHAIN.id) return;
+
+  // Try switching via the same provider the wallet client uses
+  const ethereum = (window as Window & { ethereum?: { request: (args: { method: string; params?: unknown[] }) => Promise<unknown> } }).ethereum;
+  if (!ethereum) {
+    throw new IntuitionError("WALLET_NOT_CONNECTED", "No wallet extension found");
+  }
+
+  const hexChainId = `0x${INTUITION_CHAIN.id.toString(16)}`;
+
+  try {
+    await ethereum.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: hexChainId }],
+    });
+  } catch (switchError) {
+    // Chain not added to wallet — add it
+    if ((switchError as { code?: number }).code === 4902) {
+      await ethereum.request({
+        method: "wallet_addEthereumChain",
+        params: [
+          {
+            chainId: hexChainId,
+            chainName: INTUITION_CHAIN.name,
+            nativeCurrency: INTUITION_CHAIN.nativeCurrency,
+            rpcUrls: [INTUITION_CHAIN.rpcUrls.default.http[0]],
+            blockExplorerUrls: INTUITION_CHAIN.blockExplorers
+              ? [INTUITION_CHAIN.blockExplorers.default.url]
+              : undefined,
+          },
+        ],
+      });
+    } else {
+      throw new IntuitionError("WRONG_CHAIN", `Please switch to ${INTUITION_CHAIN.name}`);
+    }
+  }
+}
+
 /* ────────────────────────────
    Atom Operations
 ──────────────────────────── */
@@ -263,7 +359,7 @@ export async function createStringAtom(content: string) {
     throw new IntuitionError("NETWORK_ERROR", "Intuition integration is not enabled");
   }
 
-  const walletClient = createBrowserWalletClient();
+  const walletClient = await createBrowserWalletClient();
   if (!walletClient) {
     throw new IntuitionError("WALLET_NOT_CONNECTED", "Please connect your wallet");
   }
@@ -287,7 +383,7 @@ export async function createUserAtom(address: Address) {
     throw new IntuitionError("NETWORK_ERROR", "Intuition integration is not enabled");
   }
 
-  const walletClient = createBrowserWalletClient();
+  const walletClient = await createBrowserWalletClient();
   if (!walletClient) {
     throw new IntuitionError("WALLET_NOT_CONNECTED", "Please connect your wallet");
   }
@@ -318,27 +414,37 @@ export async function getAtom(atomHash: string) {
  *
  * SDK API expects arrays for batch support:
  * - args: [[subjects], [predicates], [objects], [deposits]]
- * - value: total transaction value
+ * - value: tripleBaseCost + deposit
  *
  * @param subjectTermId - Term ID of the subject atom
  * @param predicateTermId - Term ID of the predicate atom
  * @param objectTermId - Term ID of the object atom
- * @param depositAmount - Deposit amount per triple (defaults to DEFAULT_DEPOSIT_AMOUNT)
+ * @param depositAmount - Deposit amount per triple (fetched from contract minDeposit if omitted)
  */
 export async function createTriple(
   subjectTermId: `0x${string}`,
   predicateTermId: `0x${string}`,
   objectTermId: `0x${string}`,
-  depositAmount: bigint = DEFAULT_DEPOSIT_AMOUNT
+  depositAmount?: bigint,
 ) {
   if (!INTUITION_ENABLED) {
     throw new IntuitionError("NETWORK_ERROR", "Intuition integration is not enabled");
   }
 
-  const walletClient = createBrowserWalletClient();
+  const walletClient = await createBrowserWalletClient();
   if (!walletClient) {
     throw new IntuitionError("WALLET_NOT_CONNECTED", "Please connect your wallet");
   }
+
+  const deposit = depositAmount ?? await getMinDeposit();
+  const tripleBaseCost = await multiVaultGetTripleCost({
+    publicClient,
+    address: MULTIVAULT_ADDRESS,
+  });
+
+  // Per the protocol docs, assets[i] must include the base cost.
+  // Contract checks assets[i] >= tripleBaseCost, then deposits the remainder.
+  const assetPerTriple = tripleBaseCost + deposit;
 
   return createTripleStatement(
     {
@@ -351,9 +457,9 @@ export async function createTriple(
         [subjectTermId],
         [predicateTermId],
         [objectTermId],
-        [depositAmount],
+        [assetPerTriple],
       ],
-      value: depositAmount,
+      value: assetPerTriple,
     }
   );
 }
@@ -481,21 +587,20 @@ export async function createSkillAttestation(
     throw new IntuitionError("NETWORK_ERROR", "Intuition integration is not enabled");
   }
 
-  const walletClient = createBrowserWalletClient();
+  const walletClient = await createBrowserWalletClient();
   if (!walletClient) {
     throw new IntuitionError("WALLET_NOT_CONNECTED", "Please connect your wallet");
   }
 
-  // Ensure we're on the correct chain
-  const wallet = await getWalletState();
-  if (wallet.chainId !== INTUITION_CHAIN.id) {
-    throw new IntuitionError(
-      "WRONG_CHAIN",
-      `Please switch to ${INTUITION_CHAIN.name}`
-    );
-  }
+  // Ensure we're on the correct chain (auto-switches if needed)
+  await ensureCorrectChain();
 
-  const depositAmount = input.depositAmount ?? DEFAULT_DEPOSIT_AMOUNT;
+  const deposit = input.depositAmount ?? await getMinDeposit();
+  const tripleBaseCost = await multiVaultGetTripleCost({
+    publicClient,
+    address: MULTIVAULT_ADDRESS,
+  });
+  const assetPerTriple = tripleBaseCost + deposit;
 
   try {
     // 1. Create or get user atom (subject)
@@ -518,9 +623,9 @@ export async function createSkillAttestation(
           [userAtom.state.termId],
           [predicateTermId],
           [attributeTermId],
-          [depositAmount],
+          [assetPerTriple],
         ],
-        value: depositAmount,
+        value: assetPerTriple,
       }
     );
 
@@ -594,21 +699,20 @@ export async function createCommunityAttestation(
     throw new IntuitionError("NETWORK_ERROR", "Intuition integration is not enabled");
   }
 
-  const walletClient = createBrowserWalletClient();
+  const walletClient = await createBrowserWalletClient();
   if (!walletClient) {
     throw new IntuitionError("WALLET_NOT_CONNECTED", "Please connect your wallet");
   }
 
-  // Ensure we're on the correct chain
-  const wallet = await getWalletState();
-  if (wallet.chainId !== INTUITION_CHAIN.id) {
-    throw new IntuitionError(
-      "WRONG_CHAIN",
-      `Please switch to ${INTUITION_CHAIN.name}`
-    );
-  }
+  // Ensure we're on the correct chain (auto-switches if needed)
+  await ensureCorrectChain();
 
-  const depositAmount = input.depositAmount ?? DEFAULT_DEPOSIT_AMOUNT;
+  const deposit = input.depositAmount ?? await getMinDeposit();
+  const tripleBaseCost = await multiVaultGetTripleCost({
+    publicClient,
+    address: MULTIVAULT_ADDRESS,
+  });
+  const assetPerTriple = tripleBaseCost + deposit;
 
   try {
     // 1. Create or get subject atom (from user)
@@ -634,9 +738,9 @@ export async function createCommunityAttestation(
           [subjectAtom.state.termId],
           [predicateTermId],
           [objectAtom.state.termId],
-          [depositAmount],
+          [assetPerTriple],
         ],
-        value: depositAmount,
+        value: assetPerTriple,
       }
     );
 
@@ -657,9 +761,9 @@ export async function createCommunityAttestation(
           [attestationTermId as `0x${string}`],
           [inCommunityPredicateTermId],
           [communityTermId],
-          [depositAmount],
+          [assetPerTriple],
         ],
-        value: depositAmount,
+        value: assetPerTriple,
       }
     );
 
@@ -692,21 +796,20 @@ export async function createAttestation(
     throw new IntuitionError("NETWORK_ERROR", "Intuition integration is not enabled");
   }
 
-  const walletClient = createBrowserWalletClient();
+  const walletClient = await createBrowserWalletClient();
   if (!walletClient) {
     throw new IntuitionError("WALLET_NOT_CONNECTED", "Please connect your wallet");
   }
 
-  // Ensure we're on the correct chain
-  const wallet = await getWalletState();
-  if (wallet.chainId !== INTUITION_CHAIN.id) {
-    throw new IntuitionError(
-      "WRONG_CHAIN",
-      `Please switch to ${INTUITION_CHAIN.name}`
-    );
-  }
+  // Ensure we're on the correct chain (auto-switches if needed)
+  await ensureCorrectChain();
 
-  const depositAmount = input.depositAmount ?? DEFAULT_DEPOSIT_AMOUNT;
+  const deposit = input.depositAmount ?? await getMinDeposit();
+  const tripleBaseCost = await multiVaultGetTripleCost({
+    publicClient,
+    address: MULTIVAULT_ADDRESS,
+  });
+  const assetPerTriple = tripleBaseCost + deposit;
 
   try {
     // 1. Create or get subject atom (from user)
@@ -732,9 +835,9 @@ export async function createAttestation(
           [subjectAtom.state.termId],
           [predicateTermId],
           [objectAtom.state.termId],
-          [depositAmount],
+          [assetPerTriple],
         ],
-        value: depositAmount,
+        value: assetPerTriple,
       }
     );
 
@@ -743,6 +846,268 @@ export async function createAttestation(
       termId: extractTermIdFromTripleResult(triple),
     };
   } catch (error) {
+    throw mapError(error);
+  }
+}
+
+/* ────────────────────────────
+   Batch Mint Operations
+──────────────────────────── */
+
+/**
+ * Resolve existing atom termIds from the indexer.
+ *
+ * Queries findAtomIds with multiple data format variants (raw string,
+ * checksummed address, hex-encoded) to handle indexer format differences.
+ * Returns a lowercase-keyed map of data → termId.
+ */
+async function resolveExistingAtoms(
+  dataItems: string[],
+): Promise<Map<string, `0x${string}`>> {
+  const result = new Map<string, `0x${string}`>();
+  if (dataItems.length === 0) return result;
+
+  // Query with all format variants the indexer might use
+  const variants = new Set<string>();
+  for (const item of dataItems) {
+    variants.add(item);                      // raw: "TRUST" or "0xAbCd..."
+    variants.add(item.toLowerCase());        // lowercase
+    variants.add(toHex(item));               // hex-encoded: "0x5452555354"
+  }
+
+  try {
+    const atoms = await findAtomIds(Array.from(variants));
+    for (const atom of atoms) {
+      // Map back to the original data key (lowercase for consistent lookup)
+      // The indexer returns the data in its stored format — we normalize
+      const key = atom.data.toLowerCase();
+      result.set(key, atom.term_id as `0x${string}`);
+
+      // Also try decoding hex data back to the original string for matching
+      if (atom.data.startsWith("0x")) {
+        try {
+          const decoded = Buffer.from(atom.data.slice(2), "hex").toString("utf8");
+          result.set(decoded.toLowerCase(), atom.term_id as `0x${string}`);
+        } catch {
+          // Not valid utf8, skip
+        }
+      }
+    }
+  } catch {
+    // Indexer unavailable — will fall back to on-chain creation
+  }
+
+  return result;
+}
+
+/**
+ * Batch-create attestation triples on Intuition.
+ *
+ * Minimizes wallet signatures by looking up existing atoms first:
+ * 1. Query indexer for all needed atoms (0 signatures)
+ * 2. Batch-create only missing address atoms (0-1 signature)
+ * 3. Create only missing predicate atoms (0-1 signature each, rare)
+ * 4. Batch-create all triples (1 signature)
+ *
+ * Best case (all atoms exist): 1 wallet signature.
+ * Typical case: 1-2 wallet signatures.
+ *
+ * @param fromAddress - Wallet address of the attestation giver
+ * @param items - Array of attestations to mint (attestationId, type, toAddress)
+ * @returns Transaction hashes and per-item onchain IDs
+ */
+export async function batchCreateAttestations(
+  fromAddress: Address,
+  items: BatchMintItem[],
+): Promise<BatchMintResult> {
+  console.log("[batchCreateAttestations] START — fromAddress:", fromAddress, "items:", items.length, "chain:", INTUITION_CHAIN.name, "chainId:", INTUITION_CHAIN.id, "multivault:", MULTIVAULT_ADDRESS);
+
+  if (!INTUITION_ENABLED) {
+    throw new IntuitionError("NETWORK_ERROR", "Intuition integration is not enabled");
+  }
+
+  if (items.length === 0) {
+    throw new IntuitionError("TRANSACTION_FAILED", "No items to mint");
+  }
+
+  const walletClient = await createBrowserWalletClient();
+  if (!walletClient) {
+    throw new IntuitionError("WALLET_NOT_CONNECTED", "Please connect your wallet");
+  }
+  console.log("[batchCreateAttestations] walletClient account:", walletClient.account?.address);
+
+  // Ensure we're on the correct chain (auto-switches if needed)
+  await ensureCorrectChain();
+  console.log("[batchCreateAttestations] chain check passed");
+
+  const config = { walletClient, publicClient, address: MULTIVAULT_ADDRESS };
+
+  const LOG = "[batchCreateAttestations]";
+
+  try {
+    // ── Step 1: Collect all needed atom data ──
+    const uniqueAddresses = Array.from(
+      new Set([fromAddress, ...items.map((i) => i.toAddress)]),
+    ).map((a) => getAddress(a)); // checksummed
+
+    const uniqueTypes = Array.from(new Set(items.map((i) => i.type)));
+    const predicateStrings = uniqueTypes.map((t) => getPredicateForType(t));
+
+    console.log(LOG, "Step 1 — items:", items.length, "uniqueAddresses:", uniqueAddresses, "predicates:", predicateStrings);
+
+    // ── Step 2: Query indexer for existing atoms (no wallet signature) ──
+    const known = await resolveExistingAtoms([
+      ...uniqueAddresses,
+      ...predicateStrings,
+    ]);
+
+    console.log(LOG, "Step 2 — known atoms from indexer:", Object.fromEntries(known));
+
+    // ── Step 3: Create missing address atoms (0-1 wallet signature) ──
+    const missingAddresses = uniqueAddresses.filter(
+      (addr) => !known.has(addr.toLowerCase()),
+    );
+
+    console.log(LOG, "Step 3 — missingAddresses:", missingAddresses);
+
+    let atomsTxHash: string | null = null;
+    if (missingAddresses.length > 0) {
+      console.log(LOG, "Step 3 — creating", missingAddresses.length, "address atoms…");
+      const atomsResult = await batchCreateAtomsFromEthereumAccounts(
+        config,
+        missingAddresses,
+      );
+      atomsTxHash = atomsResult.transactionHash;
+      console.log(LOG, "Step 3 — atoms tx:", atomsTxHash);
+
+      // Add newly created atoms to lookup
+      missingAddresses.forEach((addr, i) => {
+        known.set(addr.toLowerCase(), atomsResult.state[i].termId);
+      });
+    } else {
+      console.log(LOG, "Step 3 — all address atoms already exist, skipping");
+    }
+
+    // ── Step 4: Resolve predicate atoms ──
+    const predicateTermIds = new Map<AttestationType, `0x${string}`>();
+    for (let i = 0; i < uniqueTypes.length; i++) {
+      const type = uniqueTypes[i];
+      const predStr = predicateStrings[i];
+      const existing = known.get(predStr.toLowerCase());
+
+      if (existing) {
+        predicateTermIds.set(type, existing);
+        attestationPredicateCache.set(type, existing);
+        console.log(LOG, `Step 4 — predicate "${type}" found:`, existing);
+      } else {
+        // Not in indexer — create it (1 wallet signature, only on first-ever use)
+        console.log(LOG, `Step 4 — predicate "${type}" not found, creating…`);
+        const termId = await getOrCreateAttestationPredicate(type);
+        predicateTermIds.set(type, termId);
+        console.log(LOG, `Step 4 — predicate "${type}" created:`, termId);
+      }
+    }
+
+    // ── Step 5: Fetch dynamic costs and build parallel arrays ──
+    const fromTermId = known.get(fromAddress.toLowerCase())!;
+    const minDeposit = await getMinDeposit();
+    const tripleBaseCost = await multiVaultGetTripleCost({
+      publicClient,
+      address: MULTIVAULT_ADDRESS,
+    });
+
+    // Per the protocol docs, assets[i] must include the base cost.
+    // Contract checks assets[i] >= tripleBaseCost, then deposits the remainder.
+    const assetPerTriple = tripleBaseCost + minDeposit;
+    const totalValue = assetPerTriple * BigInt(items.length);
+
+    console.log(LOG, "Step 5 — fromTermId:", fromTermId, "costs:", {
+      tripleBaseCost: formatEther(tripleBaseCost),
+      minDeposit: formatEther(minDeposit),
+      assetPerTriple: formatEther(assetPerTriple),
+    });
+
+    const subjectIds: `0x${string}`[] = [];
+    const predicateIds: `0x${string}`[] = [];
+    const objectIds: `0x${string}`[] = [];
+    const deposits: bigint[] = [];
+
+    for (const item of items) {
+      const objectTermId = known.get(item.toAddress.toLowerCase())!;
+      const predicateTermId = predicateTermIds.get(item.type)!;
+      subjectIds.push(fromTermId);
+      predicateIds.push(predicateTermId);
+      objectIds.push(objectTermId);
+      deposits.push(assetPerTriple);
+      console.log(LOG, `Step 5 — triple: [${fromTermId}] [${predicateTermId}] [${objectTermId}]`);
+    }
+
+    // ── Step 6: Batch-create triples (1 wallet signature) ──
+    // We use multiVaultCreateTriples directly (not batchCreateTripleStatements)
+    // because the SDK helper doesn't multiply the value by the triple count.
+
+    // Pre-flight balance check — fail fast with a clear message
+    const balance = await publicClient.getBalance({ address: fromAddress });
+
+    console.log(LOG, "Step 6 — cost breakdown:", {
+      tripleBaseCost: tripleBaseCost.toString(),
+      tripleBaseCostEth: formatEther(tripleBaseCost),
+      minDeposit: minDeposit.toString(),
+      minDepositEth: formatEther(minDeposit),
+      assetPerTriple: assetPerTriple.toString(),
+      assetPerTripleEth: formatEther(assetPerTriple),
+      tripleCount: items.length,
+      totalValue: totalValue.toString(),
+      totalValueEth: formatEther(totalValue),
+      walletBalance: balance.toString(),
+      walletBalanceEth: formatEther(balance),
+      sufficient: balance >= totalValue,
+    });
+
+    if (balance < totalValue) {
+      throw new IntuitionError(
+        "INSUFFICIENT_FUNDS",
+        `Need ${formatEther(totalValue)} ${NATIVE_CURRENCY_SYMBOL} to publish ${items.length} attestation${items.length !== 1 ? "s" : ""} but wallet only has ${formatEther(balance)} ${NATIVE_CURRENCY_SYMBOL}. (${formatEther(assetPerTriple)} per triple)`,
+      );
+    }
+
+    console.log(LOG, "Step 6 — multiVaultCreateTriples:", {
+      address: MULTIVAULT_ADDRESS,
+      value: totalValue.toString(),
+      valueEth: formatEther(totalValue),
+      account: walletClient.account?.address,
+      deposits: deposits.map((d) => d.toString()),
+    });
+
+    const triplesTxHash = await multiVaultCreateTriples(config, {
+      args: [subjectIds, predicateIds, objectIds, deposits],
+      value: totalValue,
+    });
+    console.log(LOG, "Step 6 — triples tx:", triplesTxHash);
+
+    if (!triplesTxHash) {
+      throw new IntuitionError("TRANSACTION_FAILED", "Failed to create triples on-chain");
+    }
+
+    console.log(LOG, "Step 7 — parsing TripleCreated events…");
+    const tripleEvents = await eventParseTripleCreated(publicClient, triplesTxHash);
+    console.log(LOG, "Step 7 — events:", tripleEvents.length, tripleEvents.map((e) => e.args));
+
+    // ── Step 7: Map results back to attestation IDs ──
+    const resultItems = items.map((item, i) => ({
+      attestationId: item.attestationId,
+      onchainId: tripleEvents[i]?.args?.termId ?? triplesTxHash,
+    }));
+
+    console.log(LOG, "DONE ✓ — atomsTxHash:", atomsTxHash, "triplesTxHash:", triplesTxHash, "results:", resultItems);
+
+    return {
+      atomsTxHash: atomsTxHash ?? triplesTxHash,
+      triplesTxHash,
+      items: resultItems,
+    };
+  } catch (error) {
+    console.error(LOG, "ERROR ✗ —", error);
     throw mapError(error);
   }
 }
@@ -773,8 +1138,11 @@ function mapError(error: unknown): IntuitionError {
   if (message.includes("user rejected") || message.includes("User denied")) {
     return new IntuitionError("USER_REJECTED", "Transaction was cancelled");
   }
-  if (message.includes("insufficient funds")) {
-    return new IntuitionError("INSUFFICIENT_FUNDS", "Insufficient funds for transaction");
+  if (message.includes("insufficient funds") || message.includes("InsufficientBalance")) {
+    return new IntuitionError(
+      "INSUFFICIENT_FUNDS",
+      `Insufficient ${NATIVE_CURRENCY_SYMBOL} balance — top up your wallet on ${INTUITION_CHAIN.name} and try again.`,
+    );
   }
 
   return new IntuitionError("TRANSACTION_FAILED", message);
@@ -807,7 +1175,7 @@ export function getErrorMessage(code: IntuitionErrorCode): string {
     case "USER_REJECTED":
       return "Transaction was cancelled";
     case "INSUFFICIENT_FUNDS":
-      return "Insufficient funds for transaction";
+      return `Insufficient ${NATIVE_CURRENCY_SYMBOL} for transaction`;
     case "TRANSACTION_FAILED":
       return "Transaction failed - please try again";
     case "NETWORK_ERROR":

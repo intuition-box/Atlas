@@ -120,3 +120,8 @@ export function communitySettingsPath(handle: string): string {
 export function communityOrbitPath(handle: string): string {
   return `/c/${encodeURIComponent(handle)}/orbit`;
 }
+
+/** `/c/:handle/permissions` */
+export function communityPermissionsPath(handle: string): string {
+  return `/c/${encodeURIComponent(handle)}/permissions`;
+}

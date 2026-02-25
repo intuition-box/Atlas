@@ -106,4 +106,4 @@ export const POST = api(BodySchema, async (ctx) => {
     },
     alreadyMinted: false,
   });
-}, { auth: "auth" });
+}, { auth: "onboarded" });

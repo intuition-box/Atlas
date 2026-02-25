@@ -4,12 +4,18 @@ import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { CheckCircle, Loader2, X } from "lucide-react";
+import { useAccount, useSwitchChain, useChainId } from "wagmi";
+import { useConnectModal } from "@rainbow-me/rainbowkit";
+import { CheckCircle, Loader2, X, Wallet } from "lucide-react";
+import type { Address } from "viem";
 
 import { cn } from "@/lib/utils";
 import { apiPost } from "@/lib/api/client";
 import { sounds } from "@/lib/sounds";
 import { userAttestationsPath } from "@/lib/routes";
+import { batchCreateAttestations } from "@/lib/intuition/client";
+import { INTUITION_CHAIN } from "@/lib/intuition/config";
+import type { BatchMintItem } from "@/lib/intuition/types";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -29,16 +35,19 @@ import { ProfileAvatar } from "@/components/common/profile-avatar";
 function CartItem({
   item,
   onDelete,
-  isMinting,
   isActing,
 }: {
   item: UnmintedAttestation;
   onDelete: (id: string) => void;
-  isMinting: boolean;
   isActing: boolean;
 }) {
+  const hasWallet = Boolean(item.toUser.walletAddress);
+
   return (
-    <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/30 border border-border/30">
+    <div className={cn(
+      "flex items-center gap-3 p-3 rounded-lg bg-muted/30 border border-border/30",
+      !hasWallet && "opacity-50",
+    )}>
       <ProfileAvatar type="user" src={item.toUser.avatarUrl} name={item.toUser.name ?? ""} className="size-9 shrink-0" />
 
       <div className="flex-1 min-w-0">
@@ -47,6 +56,12 @@ function CartItem({
           {item.toUser.handle && (
             <span className="text-xs text-muted-foreground">@{item.toUser.handle}</span>
           )}
+          {!hasWallet && (
+            <span className="inline-flex items-center gap-1 text-[10px] text-warning-foreground/70">
+              <Wallet className="size-2.5" />
+              No wallet
+            </span>
+          )}
         </div>
         <span className="text-xs text-muted-foreground">
           <AttestationBadge type={item.type} bare />
@@ -54,19 +69,15 @@ function CartItem({
       </div>
 
       <div className="flex items-center gap-2 shrink-0">
-        {isMinting ? (
-          <Loader2 className="size-4 animate-spin text-muted-foreground" />
-        ) : (
-          <Button
-            variant="secondary"
-            size="icon-xs"
-            onClick={() => onDelete(item.id)}
-            disabled={isActing}
-            aria-label="Delete attestation"
-          >
-            <X className="size-3.5" />
-          </Button>
-        )}
+        <Button
+          variant="secondary"
+          size="icon-xs"
+          onClick={() => onDelete(item.id)}
+          disabled={isActing}
+          aria-label="Delete attestation"
+        >
+          <X className="size-3.5" />
+        </Button>
       </div>
     </div>
   );
@@ -89,10 +100,24 @@ export function AttestationQueuePanel() {
   } = useAttestationQueue();
 
   const [isMinting, setIsMinting] = React.useState(false);
-  const [mintingIds, setMintingIds] = React.useState<Set<string>>(new Set());
   const [mintComplete, setMintComplete] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const pathname = usePathname();
+
+  // Wallet state
+  const viewerWallet = session?.user?.walletAddress ?? null;
+  const hasWallet = Boolean(viewerWallet);
+  const { address: connectedAddress } = useAccount();
+  const chainId = useChainId();
+  const { switchChainAsync } = useSwitchChain();
+  const { openConnectModal } = useConnectModal();
+
+  // Partition items: mintable (toUser has wallet) vs unmintable
+  const mintable = React.useMemo(
+    () => unminted.filter((i) => Boolean(i.toUser.walletAddress)),
+    [unminted],
+  );
+  const unmintableCount = unminted.length - mintable.length;
 
   const userHandle = session?.user?.handle;
   const attestationsPath = userHandle ? userAttestationsPath(userHandle) : null;
@@ -116,59 +141,100 @@ export function AttestationQueuePanel() {
   };
 
   const handleMintAll = async () => {
-    if (unminted.length === 0) return;
+    if (isMinting || mintable.length === 0) return;
+
+    // Guard: viewer must have a linked wallet
+    if (!viewerWallet) {
+      setError("Link a wallet in Settings to publish attestations.");
+      return;
+    }
+
+    // Guard: wallet must be connected and match the linked wallet
+    if (!connectedAddress || connectedAddress.toLowerCase() !== viewerWallet.toLowerCase()) {
+      setError(
+        `Connect wallet ${viewerWallet.slice(0, 6)}…${viewerWallet.slice(-4)} to publish.`,
+      );
+      if (openConnectModal) openConnectModal();
+      return;
+    }
+
+    // Ensure wallet is on the Intuition chain
+    if (chainId !== INTUITION_CHAIN.id) {
+      try {
+        await switchChainAsync({ chainId: INTUITION_CHAIN.id });
+      } catch (switchErr) {
+        // eslint-disable-next-line no-console
+        console.error("[queue-panel] Chain switch failed", {
+          currentChainId: chainId,
+          targetChainId: INTUITION_CHAIN.id,
+          error: switchErr,
+        });
+        setError(
+          `Switch your wallet to ${INTUITION_CHAIN.name} and try again.`,
+        );
+        return;
+      }
+    }
 
     setIsMinting(true);
     setError(null);
 
-    // Snapshot items to mint
-    const toMint = [...unminted];
-
     // Start looping mint sound
     const loopControl = await sounds.loopMintAll();
+    let success = false;
 
     try {
-      let failures = 0;
+      // Build batch items (only mintable ones with toUser wallet)
+      const batchItems: BatchMintItem[] = mintable.map((item) => ({
+        attestationId: item.id,
+        type: item.type,
+        toAddress: item.toUser.walletAddress as Address,
+      }));
 
-      for (const item of toMint) {
-        setMintingIds((prev) => new Set(prev).add(item.id));
+      // Execute on-chain batch (wallet signatures happen here)
+      const result = await batchCreateAttestations(
+        viewerWallet as Address,
+        batchItems,
+      );
 
-        try {
-          // Simulate blockchain call (will be replaced with Intuition SDK)
-          await new Promise((resolve) => setTimeout(resolve, 1000));
+      // Persist mint results to DB
+      const persistResult = await apiPost<{
+        minted: Array<{ id: string; mintedAt: string }>;
+        skipped: string[];
+      }>("/api/attestation/batch-mint", {
+        items: result.items.map((item) => ({
+          attestationId: item.attestationId,
+          txHash: result.triplesTxHash,
+          onchainId: item.onchainId,
+        })),
+      });
 
-          // Persist mint state to database
-          const result = await apiPost<{
-            attestation: { id: string; mintedAt: string };
-            alreadyMinted: boolean;
-          }>("/api/attestation/mint", {
-            attestationId: item.id,
-          });
-
-          if (result.ok) {
-            onItemMinted(item.id);
-          } else {
-            failures++;
-          }
-        } catch {
-          failures++;
-        } finally {
-          setMintingIds((prev) => {
-            const next = new Set(prev);
-            next.delete(item.id);
-            return next;
-          });
-        }
+      if (!persistResult.ok) {
+        setError("Published on-chain but failed to save. Refresh the page to sync.");
+        setMintComplete(true);
+        return;
       }
 
-      if (failures > 0) {
-        setError(`${failures} attestation(s) failed to mint`);
+      // Remove minted items from the panel
+      for (const m of persistResult.value.minted) {
+        onItemMinted(m.id);
+      }
+
+      // Show info about skipped items (recipients without wallets)
+      if (unmintableCount > 0) {
+        setError(
+          `${unmintableCount} attestation${unmintableCount !== 1 ? "s" : ""} skipped — recipient${unmintableCount !== 1 ? "s have" : " has"} no linked wallet.`,
+        );
       }
 
       setMintComplete(true);
+      success = true;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Publishing failed";
+      setError(message);
     } finally {
       loopControl.stop();
-      sounds.mint();
+      if (success) sounds.mint();
       setIsMinting(false);
     }
   };
@@ -199,11 +265,11 @@ export function AttestationQueuePanel() {
         </DialogHeader>
 
         <div
-          className={cn(
-            "max-h-[28rem] overflow-y-auto pr-4 [scrollbar-width:thin] [scrollbar-color:oklch(1_0_0/20%)_transparent]",
-            unminted.length > 0 && "[mask-image:linear-gradient(transparent,black_1.5rem,black_calc(100%-1.5rem),transparent)]"
-          )}
-        >
+            className={cn(
+              "max-h-[28rem] overflow-y-auto pr-4 [scrollbar-width:thin] [scrollbar-color:oklch(1_0_0/20%)_transparent]",
+              unminted.length > 0 && "[mask-image:linear-gradient(transparent,black_1.5rem,black_calc(100%-1.5rem),transparent)]"
+            )}
+          >
           {isFetching && unminted.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40">
               <Loader2 className="size-5 animate-spin text-muted-foreground" />
@@ -213,7 +279,7 @@ export function AttestationQueuePanel() {
               <CheckCircle className="size-8 text-positive" />
               <div>
                 <p className="text-sm font-medium">
-                  All attestations minted onchain!
+                  All attestations published onchain!
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">
                   Your attestations are now permanently recorded.
@@ -237,36 +303,54 @@ export function AttestationQueuePanel() {
                   key={item.id}
                   item={item}
                   onDelete={handleDelete}
-                  isMinting={mintingIds.has(item.id)}
                   isActing={isActing}
                 />
               ))}
             </div>
           )}
 
-          {error && (
-            <div className="mt-4 p-3 rounded-lg bg-destructive/10 border border-destructive/20">
-              <p className="text-sm text-destructive">{error}</p>
-            </div>
-          )}
-        </div>
+          </div>
 
         {unminted.length > 0 && (
-          <div className="grid grid-cols-2 gap-2">
-            <Button
-              variant="destructive"
-              onClick={handleDeleteAll}
-              disabled={isActing}
-            >
-              Delete all
-            </Button>
-            <Button
-              variant="positive"
-              onClick={handleMintAll}
-              disabled={isActing}
-            >
-              {isMinting ? "Minting\u2026" : "Mint all"}
-            </Button>
+          <div className="flex flex-col gap-2">
+            {error && (
+              <div role="alert" aria-live="polite" className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 overflow-hidden">
+                <p className="text-sm text-destructive text-center break-words line-clamp-3">{error}</p>
+              </div>
+            )}
+            {!hasWallet && (
+              <p className="text-sm text-warning-foreground/70 text-center">
+                Link a wallet in Settings to publish attestations onchain.
+              </p>
+            )}
+            {unmintableCount > 0 && hasWallet && (
+              <p className="text-xs text-muted-foreground text-center">
+                {unmintableCount} item{unmintableCount !== 1 ? "s" : ""} will be skipped (recipient has no wallet)
+              </p>
+            )}
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                variant="destructive"
+                onClick={handleDeleteAll}
+                disabled={isActing}
+              >
+                Delete all
+              </Button>
+              <Button
+                variant="positive"
+                onClick={handleMintAll}
+                disabled={isActing || !hasWallet || mintable.length === 0}
+              >
+                {isMinting ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" />
+                    Publishing…
+                  </>
+                ) : (
+                  `Publish ${mintable.length}`
+                )}
+              </Button>
+            </div>
           </div>
         )}
 

@@ -73,7 +73,7 @@ function ActionsBar({
         <div className="flex items-center gap-4 text-sm">
           <div className="flex items-center gap-1.5">
             <span className="font-semibold text-foreground">{unmintedCount}</span>
-            <span className="text-muted-foreground">ready to mint</span>
+            <span className="text-muted-foreground">ready to publish</span>
           </div>
           {mintedCount > 0 && (
             <>
@@ -97,11 +97,11 @@ function ActionsBar({
           {isMinting ? (
             <>
               <Loader2 className="size-4 animate-spin" />
-              Minting...
+              Publishing...
             </>
           ) : (
             <>
-              Mint all
+              Publish all
             </>
           )}
         </Button>
@@ -177,7 +177,7 @@ export function OnchainBanner({
           <div className="flex flex-col items-center gap-4 text-center">
             <div>
               <h3 className="text-lg font-semibold tracking-tight">
-                Make Your Attestations Permanent
+                Publish Your Attestations
               </h3>
               <p className="text-sm text-muted-foreground">
                 Powered by{" "}
@@ -227,7 +227,7 @@ export function OnchainBanner({
           ) : (
             <div className="flex items-center justify-center gap-2 border-t border-border/40 pt-4 text-sm text-primary">
               <Check className="size-4" />
-              <span className="font-medium">All {totalCount} attestations minted onchain</span>
+              <span className="font-medium">All {totalCount} attestations published onchain</span>
             </div>
           )}
         </div>

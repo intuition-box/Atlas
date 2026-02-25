@@ -12,6 +12,7 @@ import {
   communityOrbitPath,
   communityApplicationsPath,
   communityBansPath,
+  communityPermissionsPath,
   communitySettingsPath,
   userPath,
 } from "@/lib/routes"
@@ -262,6 +263,7 @@ export default function CommunityOrbitPage() {
                   overflow={isAdmin ? [
                     { label: "Applications", href: communityApplicationsPath(handleLabel) },
                     { label: "Bans", href: communityBansPath(handleLabel) },
+                    { label: "Permissions", href: communityPermissionsPath(handleLabel) },
                     { label: "Settings", href: communitySettingsPath(handleLabel) },
                   ] : undefined}
                 />

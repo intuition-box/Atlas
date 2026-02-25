@@ -30,7 +30,7 @@ export type CreateAttestationInput = {
   toAddress: Address;
   /** Type of attestation - maps to a predicate via getPredicateForType() */
   type: AttestationType;
-  /** Optional deposit amount for the triple (defaults to DEFAULT_DEPOSIT_AMOUNT) */
+  /** Optional deposit amount for the triple (defaults to contract minDeposit) */
   depositAmount?: bigint;
 };
 
@@ -63,7 +63,7 @@ export type CreateAttributeAttestationInput = {
   userAddress: Address;
   /** The attribute being claimed (skill or tool) */
   attributeId: AttributeId;
-  /** Optional deposit amount for the triple (defaults to DEFAULT_DEPOSIT_AMOUNT) */
+  /** Optional deposit amount for the triple (defaults to contract minDeposit) */
   depositAmount?: bigint;
 };
 
@@ -94,7 +94,7 @@ export type CreateCommunityAttestationInput = {
   type: AttestationType;
   /** Community ID to scope this attestation to */
   communityId: string;
-  /** Optional deposit amount per triple (defaults to DEFAULT_DEPOSIT_AMOUNT) */
+  /** Optional deposit amount per triple (defaults to contract minDeposit) */
   depositAmount?: bigint;
 };
 
@@ -109,6 +109,33 @@ export type CreateCommunityAttestationResult = {
   attestationTermId: string;
   /** Term ID of the community context triple */
   contextTermId: string;
+};
+
+/* ────────────────────────────
+   Batch Mint Types
+──────────────────────────── */
+
+/** Input for a single item in a batch mint */
+export type BatchMintItem = {
+  /** Our internal attestation ID (from DB) */
+  attestationId: string;
+  /** Type of attestation (FOLLOW, TRUST, etc.) */
+  type: AttestationType;
+  /** Recipient wallet address */
+  toAddress: Address;
+};
+
+/** Result from batch minting on-chain */
+export type BatchMintResult = {
+  /** Transaction hash for the atoms creation tx */
+  atomsTxHash: string;
+  /** Transaction hash for the triples creation tx */
+  triplesTxHash: string;
+  /** Per-item results mapping attestationId to on-chain termId */
+  items: Array<{
+    attestationId: string;
+    onchainId: string;
+  }>;
 };
 
 /* ────────────────────────────

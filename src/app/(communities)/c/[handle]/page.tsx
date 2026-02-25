@@ -16,6 +16,7 @@ import {
   communityOrbitPath,
   communityApplicationsPath,
   communityBansPath,
+  communityPermissionsPath,
   communitySettingsPath,
   communityPath,
   userPath,
@@ -1634,6 +1635,7 @@ export default function CommunityProfilePage() {
             overflow={isAdmin ? [
               { label: "Applications", href: communityApplicationsPath(handleLabel) },
               { label: "Bans", href: communityBansPath(handleLabel) },
+              { label: "Permissions", href: communityPermissionsPath(handleLabel) },
               { label: "Settings", href: communitySettingsPath(handleLabel) },
             ] : undefined}
           />

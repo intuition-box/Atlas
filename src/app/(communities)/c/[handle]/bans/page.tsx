@@ -13,6 +13,7 @@ import {
   communityOrbitPath,
   communityApplicationsPath,
   communityBansPath,
+  communityPermissionsPath,
   communitySettingsPath,
 } from "@/lib/routes"
 
@@ -204,6 +205,33 @@ export default function CommunityBansPage() {
     const ac = new AbortController()
 
     void (async () => {
+      // First: check admin access via community/get
+      const communityRes = await apiGet<{
+        community: CommunityInfo
+        isAdmin: boolean
+      }>("/api/community/get", { handle }, { signal: ac.signal })
+
+      if (ac.signal.aborted) return
+
+      if (!communityRes.ok) {
+        const parsed = parseApiError(communityRes.error)
+        if (parsed.status === 401) {
+          router.replace(ROUTES.signIn)
+          return
+        }
+        router.replace(communityPath(handle))
+        return
+      }
+
+      // Gate: redirect non-admins
+      if (!communityRes.value.isAdmin) {
+        router.replace(communityPath(handle))
+        return
+      }
+
+      setCommunity(communityRes.value.community)
+
+      // Then: fetch banned members
       const res = await apiGet<unknown>("/api/membership/list", {
         handle,
         status: "BANNED",
@@ -213,23 +241,10 @@ export default function CommunityBansPage() {
       if (ac.signal.aborted) return
 
       if (!res.ok) {
-        const parsed = parseApiError(res.error)
-        if (parsed.status === 401) {
-          router.replace(ROUTES.signIn)
-          return
-        }
-        if (parsed.status === 403) {
-          router.replace(communityPath(handle))
-          return
-        }
         setLoading(false)
         return
       }
 
-      const raw = res.value as { community?: CommunityInfo; items?: ApiMemberItem[] }
-      if (raw.community) {
-        setCommunity(raw.community)
-      }
       setMembers(normalizeBannedPayload(res.value))
       setLoading(false)
     })()
@@ -281,6 +296,7 @@ export default function CommunityBansPage() {
             overflow={[
               { label: "Applications", href: communityApplicationsPath(handle) },
               { label: "Bans", href: communityBansPath(handle) },
+              { label: "Permissions", href: communityPermissionsPath(handle) },
               { label: "Settings", href: communitySettingsPath(handle) },
             ]}
           />

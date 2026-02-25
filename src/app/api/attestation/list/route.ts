@@ -47,6 +47,7 @@ type AttestationListItem = {
     name: string | null;
     avatarUrl: string | null;
     headline: string | null;
+    walletAddress: string | null;
   };
 };
 
@@ -123,6 +124,7 @@ export const GET = api(QuerySchema, async (ctx) => {
           name: true,
           avatarUrl: true,
           headline: true,
+          walletAddress: true,
         },
       },
     },
@@ -168,6 +170,7 @@ export const GET = api(QuerySchema, async (ctx) => {
         name: a.toUser.name,
         avatarUrl: a.toUser.avatarUrl,
         headline: a.toUser.headline,
+        walletAddress: a.toUser.walletAddress,
       },
     };
   });

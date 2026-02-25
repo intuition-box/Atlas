@@ -113,16 +113,16 @@ export function NavigationController({
                   <Globe className="size-4" />
                   Communities
                 </MenuItem>
+                <MenuItem render={<Link href={activityPath()} />}>
+                  <Activity className="size-4" />
+                  Activity
+                </MenuItem>
                 {isAuthed && userHandle && (
                   <MenuItem render={<Link href={userPath(userHandle)} />}>
                     <User className="size-4" />
                     Profile
                   </MenuItem>
                 )}
-                <MenuItem render={<Link href={activityPath()} />}>
-                  <Activity className="size-4" />
-                  Activity
-                </MenuItem>
                 {isAuthed && (
                   <>
                     <MenuSeparator />

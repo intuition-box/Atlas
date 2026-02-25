@@ -5,7 +5,7 @@ import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 import { apiGet, apiPost } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
-import { ROUTES, userPath, communityPath, communityOrbitPath, communityApplicationsPath, communityBansPath, communitySettingsPath } from "@/lib/routes"
+import { ROUTES, userPath, communityPath, communityOrbitPath, communityApplicationsPath, communityBansPath, communityPermissionsPath, communitySettingsPath } from "@/lib/routes"
 
 import { PageHeader } from "@/components/common/page-header"
 import { PageToolbar } from "@/components/common/page-toolbar"
@@ -821,6 +821,7 @@ export default function CommunityApplicationsPage() {
             overflow={[
               { label: "Applications", href: communityApplicationsPath(handle) },
               { label: "Bans", href: communityBansPath(handle) },
+              { label: "Permissions", href: communityPermissionsPath(handle) },
               { label: "Settings", href: communitySettingsPath(handle) },
             ]}
           />

@@ -15,7 +15,6 @@ import {
   intuitionMainnet,
   getMultiVaultAddressFromChainId,
 } from "@0xintuition/sdk";
-import { parseEther } from "viem";
 
 /* ────────────────────────────
    Environment Detection
@@ -59,12 +58,11 @@ export const INTUITION_CHAIN = USE_TESTNET ? intuitionTestnet : intuitionMainnet
 export const MULTIVAULT_ADDRESS = getMultiVaultAddressFromChainId(
   INTUITION_CHAIN.id
 );
-
 /**
- * Default deposit amount for creating triples
- * This is the minimum amount required to stake on a triple
+ * Native currency symbol for the current chain (e.g., "tTRUST" on testnet, "TRUST" on mainnet).
+ * Derived from the SDK chain config.
  */
-export const DEFAULT_DEPOSIT_AMOUNT = parseEther("0.0001");
+export const NATIVE_CURRENCY_SYMBOL = INTUITION_CHAIN.nativeCurrency.symbol;
 
 /* ────────────────────────────
    Hybrid Predicates

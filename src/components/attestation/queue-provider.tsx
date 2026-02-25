@@ -20,6 +20,7 @@ export type UnmintedAttestation = {
     handle: string | null;
     name: string | null;
     avatarUrl: string | null;
+    walletAddress: string | null;
   };
 };
 
@@ -28,6 +29,7 @@ type CreateAttestationParams = {
   toName: string;
   toHandle?: string;
   toAvatarUrl?: string | null;
+  toWalletAddress?: string | null;
   type: AttestationType;
 };
 
@@ -80,6 +82,7 @@ type ListResponse = {
       name: string | null;
       avatarUrl: string | null;
       headline: string | null;
+      walletAddress: string | null;
     };
   }>;
   nextCursor: string | null;
@@ -135,6 +138,7 @@ export function AttestationQueueProvider({ children }: { children: React.ReactNo
               handle: a.toUser.handle,
               name: a.toUser.name,
               avatarUrl: a.toUser.avatarUrl,
+              walletAddress: a.toUser.walletAddress,
             },
           })),
         );
@@ -218,6 +222,7 @@ export function AttestationQueueProvider({ children }: { children: React.ReactNo
               handle: params.toHandle ?? null,
               name: params.toName,
               avatarUrl: params.toAvatarUrl ?? null,
+              walletAddress: params.toWalletAddress ?? null,
             },
           },
           ...prev,
