@@ -130,13 +130,15 @@ const CONTACT_LABELS: Record<string, string> = {
 function ProfileSkeleton() {
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-7 pb-40">
-      <div className="w-full flex flex-wrap gap-3 p-5">
-        <Skeleton className="size-12 rounded-full" />
-        <div className="flex flex-col gap-2">
-          <Skeleton className="h-7 w-48" />
-          <Skeleton className="h-3 w-24" />
+      <div className="w-full p-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <Skeleton className="size-12 rounded-full shrink-0" />
+          <div className="flex flex-col gap-1.5">
+            <Skeleton className="h-7 w-48" />
+            <Skeleton className="h-3 w-24" />
+          </div>
         </div>
-        <div className="flex gap-3 ml-auto sm:align-center sm:justify-end">
+        <div className="flex items-center gap-2">
           <Skeleton className="h-9 w-64 rounded-4xl" />
         </div>
       </div>
@@ -492,7 +494,7 @@ export default function UserProfilePage() {
                   <ArrowUpRight className="size-3" />
                 </Badge>
               ) : (
-                <Badge key={l} variant="secondary" className="text-muted-foreground">
+                <Badge key={l} variant="default">
                   {displayUrl(l)}
                 </Badge>
               )
@@ -591,13 +593,7 @@ export default function UserProfilePage() {
                       </div>
 
                       <div className="flex items-center gap-2 shrink-0">
-                        <Badge
-                          variant="secondary"
-                          className={isReceived
-                            ? "bg-emerald-500/10 text-emerald-500"
-                            : "bg-amber-500/10 text-amber-500"
-                          }
-                        >
+                        <Badge variant={isReceived ? "positive" : "info"}>
                           {isReceived ? "Received" : "Given"}
                         </Badge>
                         <span className="text-xs text-muted-foreground">{fmtDate(a.createdAt)}</span>

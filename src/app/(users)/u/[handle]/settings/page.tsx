@@ -20,6 +20,7 @@ import { HandleField } from "@/components/common/handle-field"
 import { PageHeader } from "@/components/common/page-header"
 import { PageToolbar } from "@/components/common/page-toolbar"
 import { ProfileAvatar } from "@/components/common/profile-avatar"
+import { UnsavedChangesBar } from "@/components/common/unsaved-changes-bar"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import {
   AlertDialog,
@@ -278,13 +279,15 @@ function useToolsState() {
 function SettingsSkeleton() {
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-7 pb-40">
-      <div className="w-full flex flex-wrap gap-3 p-5">
-        <Skeleton className="size-12 rounded-full" />
-        <div className="flex flex-col gap-2">
-          <Skeleton className="h-7 w-48" />
-          <Skeleton className="h-3 w-24" />
+      <div className="w-full p-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <Skeleton className="size-12 rounded-full shrink-0" />
+          <div className="flex flex-col gap-1.5">
+            <Skeleton className="h-7 w-48" />
+            <Skeleton className="h-3 w-24" />
+          </div>
         </div>
-        <div className="flex gap-3 ml-auto sm:align-center sm:justify-end">
+        <div className="flex items-center gap-2">
           <Skeleton className="h-9 w-64 rounded-4xl" />
         </div>
       </div>
@@ -640,7 +643,7 @@ function CountryLanguageSection({
                           render={<button type="button" onClick={() => field.onChange(selected.filter((x) => x !== l))} />}
                         >
                           {l}
-                          <X data-icon="inline-end" className="size-3" />
+                          <X data-icon="inline-end" className="size-3 text-destructive" />
                         </Badge>
                       ))}
                     </div>
@@ -831,7 +834,7 @@ function SkillsAndToolsSection({
                           render={<button type="button" onClick={() => field.onChange(selected.filter((x) => x !== s))} />}
                         >
                           {s}
-                          <X data-icon="inline-end" className="size-3" />
+                          <X data-icon="inline-end" className="size-3 text-destructive" />
                         </Badge>
                       ))}
                     </div>
@@ -920,7 +923,7 @@ function SkillsAndToolsSection({
                           render={<button type="button" onClick={() => field.onChange(selected.filter((x) => x !== t))} />}
                         >
                           {t}
-                          <X data-icon="inline-end" className="size-3" />
+                          <X data-icon="inline-end" className="size-3 text-destructive" />
                         </Badge>
                       ))}
                     </div>
@@ -1152,7 +1155,7 @@ function ConnectedAccountsSection({ linkedProviders }: { linkedProviders: string
                   {session?.user?.discordHandle ?? session?.user?.name ?? "Connected"}
                 </span>
               </div>
-              <Badge variant="secondary" className="bg-emerald-500/10 text-emerald-500">Primary</Badge>
+              <Badge variant="positive">Primary</Badge>
             </div>
           </div>
 
@@ -1407,24 +1410,13 @@ export default function UserSettingsPage() {
         description={`@${handle}`}
         actionsAsFormActions={false}
         actions={
-          <div className="flex items-center gap-3">
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={!form.formState.isDirty || form.formState.isSubmitting}
-              className={form.formState.isDirty ? "!bg-emerald-500/10 !text-emerald-500 hover:!bg-emerald-500/20" : ""}
-              onClick={() => form.handleSubmit(handleSubmit)()}
-            >
-              {form.formState.isSubmitting ? "Saving…" : "Save"}
-            </Button>
-            <PageToolbar
-              nav={[
-                { label: "Profile", href: userPath(handle) },
-                { label: "Attestations", href: userAttestationsPath(handle) },
-                { label: "Settings", href: userSettingsPath(handle) },
-              ]}
-            />
-          </div>
+          <PageToolbar
+            nav={[
+              { label: "Profile", href: userPath(handle) },
+              { label: "Attestations", href: userAttestationsPath(handle) },
+              { label: "Settings", href: userSettingsPath(handle) },
+            ]}
+          />
         }
       />
 
@@ -1476,6 +1468,13 @@ export default function UserSettingsPage() {
           onAddTool={addToolOption}
         />
       </Form>
+
+      <UnsavedChangesBar
+        show={form.formState.isDirty}
+        saving={form.formState.isSubmitting}
+        onSave={() => form.handleSubmit(handleSubmit)()}
+        onReset={() => form.reset()}
+      />
     </div>
   )
 }

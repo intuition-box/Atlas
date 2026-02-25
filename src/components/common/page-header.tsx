@@ -19,6 +19,12 @@ export type PageHeaderProps = {
   sticky?: boolean;
 
   /**
+   * When true, forces the pinned/stuck appearance (border, bg, blur, shadow)
+   * regardless of scroll position. Useful for overlay headers on immersive pages.
+   */
+  pinned?: boolean;
+
+  /**
    * When true (default), wraps `actions` in <FormActions> for consistent spacing.
    */
   actionsAsFormActions?: boolean;
@@ -41,6 +47,7 @@ function PageHeader({
   leadingClassName,
   actions,
   sticky = true,
+  pinned = false,
   actionsAsFormActions = true,
   className,
   contentClassName,
@@ -68,11 +75,11 @@ function PageHeader({
     <div
       ref={headerRef}
       data-slot="page-header"
-      data-stuck={isSticky || undefined}
+      data-stuck={isSticky || pinned || undefined}
       className={cn(
         "w-full transition-colors duration-200",
         sticky ? "sticky top-0 z-40 rounded-2xl border border-transparent" : null,
-        sticky && isSticky ? "border-border bg-card/80 backdrop-blur-md shadow-lg" : null,
+        sticky && (isSticky || pinned) ? "border-border bg-card/80 backdrop-blur-md shadow-lg" : null,
         className,
       )}
     >

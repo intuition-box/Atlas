@@ -168,13 +168,17 @@ function PageToolbar({
             )
           })}
 
-          {overflow && overflow.length > 0 && (
+          {overflow && overflow.length > 0 && (() => {
+            const overflowActive = overflow.some((item) => item.href && pathname === item.href)
+            return (
             <Menu>
               <MenuTrigger
                 className={cn(
-                  "inline-flex items-center justify-center rounded-4xl border border-border bg-input/30 hover:bg-input/50 text-sm font-medium transition-all cursor-pointer outline-none",
-                  // Match button height
+                  "inline-flex items-center justify-center rounded-4xl border border-border text-sm font-medium transition-all cursor-pointer outline-none",
                   "h-9 w-9",
+                  overflowActive
+                    ? "bg-primary/10 text-primary hover:bg-primary/15"
+                    : "bg-input/30 hover:bg-input/50",
                 )}
                 aria-label="More options"
               >
@@ -184,9 +188,17 @@ function PageToolbar({
                 <MenuGroup>
                   {overflow.map((item, i) => {
                     if (item.href) {
+                      const isLinkActive = pathname === item.href
                       return (
-                        <MenuItem key={item.href} render={<Link href={item.href} />}>
+                        <MenuItem
+                          key={item.href}
+                          render={<Link href={item.href} />}
+                          className={cn(isLinkActive ? "text-primary" : undefined)}
+                        >
                           {item.label}
+                          {isLinkActive && (
+                            <span className="ml-auto text-xs text-primary">●</span>
+                          )}
                         </MenuItem>
                       )
                     }
@@ -207,7 +219,8 @@ function PageToolbar({
                 </MenuGroup>
               </MenuContent>
             </Menu>
-          )}
+            )
+          })()}
         </ButtonGroup>
       )}
     </div>
