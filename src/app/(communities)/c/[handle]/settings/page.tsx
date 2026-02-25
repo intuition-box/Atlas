@@ -7,13 +7,14 @@ import { useParams, useRouter } from "next/navigation"
 import { getSession } from "next-auth/react"
 import { apiGet, apiPost } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
-import { communityPath, communitySettingsPath, communityOrbitPath, communityApplicationsPath } from "@/lib/routes"
+import { communityPath, communitySettingsPath, communityOrbitPath, communityApplicationsPath, communityBansPath } from "@/lib/routes"
 
 import { AvatarDropzone } from "@/components/common/avatar-dropzone"
 import { HandleField } from "@/components/common/handle-field"
 import { PageHeader } from "@/components/common/page-header"
 import { PageToolbar } from "@/components/common/page-toolbar"
 import { ProfileAvatar } from "@/components/common/profile-avatar"
+import { UnsavedChangesBar } from "@/components/common/unsaved-changes-bar"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -245,13 +246,15 @@ function SettingsSkeleton() {
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
       {/* PageHeader */}
-      <div className="w-full flex flex-wrap gap-3 p-5">
-        <Skeleton className="size-12 rounded-full" />
-        <div className="flex flex-col gap-2">
-          <Skeleton className="h-7 w-48" />
-          <Skeleton className="h-3 w-24" />
+      <div className="w-full p-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <Skeleton className="size-12 rounded-full shrink-0" />
+          <div className="flex flex-col gap-1.5">
+            <Skeleton className="h-7 w-48" />
+            <Skeleton className="h-3 w-24" />
+          </div>
         </div>
-        <div className="flex gap-2 ml-auto">
+        <div className="flex items-center gap-2">
           <Skeleton className="h-9 w-64 rounded-4xl" />
         </div>
       </div>
@@ -564,24 +567,17 @@ export default function CommunitySettingsPage() {
         description={`@${communityHandle}`}
         actionsAsFormActions={false}
         actions={
-          <div className="flex items-center gap-3">
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={!form.formState.isDirty || form.formState.isSubmitting}
-              className={form.formState.isDirty ? "!bg-emerald-500/10 !text-emerald-500 hover:!bg-emerald-500/20" : ""}
-              onClick={() => form.handleSubmit(handleSubmit)()}
-            >
-              {form.formState.isSubmitting ? "Saving…" : "Save"}
-            </Button>
-            <PageToolbar
-              nav={[
-                { label: "Orbit", href: communityOrbitPath(communityHandle) },
-                { label: "Applications", href: communityApplicationsPath(communityHandle) },
-                { label: "Profile", href: communityPath(communityHandle) },
-              ]}
-            />
-          </div>
+          <PageToolbar
+            nav={[
+              { label: "Orbit", href: communityOrbitPath(communityHandle) },
+              { label: "Profile", href: communityPath(communityHandle) },
+            ]}
+            overflow={[
+              { label: "Applications", href: communityApplicationsPath(communityHandle) },
+              { label: "Bans", href: communityBansPath(communityHandle) },
+              { label: "Settings", href: communitySettingsPath(communityHandle) },
+            ]}
+          />
         }
       />
 
@@ -617,6 +613,13 @@ export default function CommunitySettingsPage() {
         deleteConfirm={deleteConfirm}
         onDeleteConfirmChange={setDeleteConfirm}
         onDeleteClick={handleDeleteClick}
+      />
+
+      <UnsavedChangesBar
+        show={form.formState.isDirty}
+        saving={form.formState.isSubmitting}
+        onSave={() => form.handleSubmit(handleSubmit)()}
+        onReset={() => form.reset()}
       />
     </div>
   )
