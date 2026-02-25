@@ -5,7 +5,7 @@ import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 import { apiGet, apiPost } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
-import { ROUTES, userPath, communityPath, communityOrbitPath, communitySettingsPath } from "@/lib/routes"
+import { ROUTES, userPath, communityPath, communityOrbitPath, communityApplicationsPath, communityBansPath, communitySettingsPath } from "@/lib/routes"
 
 import { PageHeader } from "@/components/common/page-header"
 import { PageToolbar } from "@/components/common/page-toolbar"
@@ -63,11 +63,11 @@ type DecisionAction = "approve" | "reject" | "ban"
 
 // === STATUS CONFIG ===
 
-const STATUS_CONFIG: Record<string, { label: string; className: string; textColor: string }> = {
-  PENDING: { label: "Pending", className: "bg-amber-500/10 text-amber-500", textColor: "text-amber-500" },
-  APPROVED: { label: "Approved", className: "bg-emerald-500/10 text-emerald-500", textColor: "text-emerald-500" },
-  REJECTED: { label: "Rejected", className: "bg-destructive/10 text-destructive", textColor: "text-destructive" },
-  BANNED: { label: "Banned", className: "bg-destructive/10 text-destructive", textColor: "text-destructive" },
+const STATUS_CONFIG: Record<string, { label: string; variant: "default" | "positive" | "info" | "destructive" | "secondary" }> = {
+  PENDING: { label: "Pending", variant: "info" },
+  APPROVED: { label: "Approved", variant: "positive" },
+  REJECTED: { label: "Rejected", variant: "destructive" },
+  BANNED: { label: "Banned", variant: "destructive" },
 }
 
 // === UTILITY FUNCTIONS ===
@@ -307,13 +307,15 @@ function ApplicationsSkeleton() {
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
       {/* PageHeader skeleton */}
-      <div className="w-full flex flex-wrap gap-3 p-5">
-        <Skeleton className="size-12 rounded-full" />
-        <div className="flex flex-col gap-2">
-          <Skeleton className="h-7 w-48" />
-          <Skeleton className="h-3 w-24" />
+      <div className="w-full p-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <Skeleton className="size-12 rounded-full shrink-0" />
+          <div className="flex flex-col gap-1.5">
+            <Skeleton className="h-7 w-48" />
+            <Skeleton className="h-3 w-24" />
+          </div>
         </div>
-        <div className="flex gap-2 ml-auto sm:align-center sm:justify-end">
+        <div className="flex items-center gap-2">
           <Skeleton className="h-9 w-64 rounded-4xl" />
         </div>
       </div>
@@ -352,7 +354,7 @@ function StatusBadge({ status }: { status: string | null | undefined }) {
   const s = normalizeStatus(status)
   const config = STATUS_CONFIG[s] ?? STATUS_CONFIG.PENDING
   return (
-    <Badge variant="secondary" className={`shrink-0 ${config.className}`}>
+    <Badge variant={config.variant} className="shrink-0">
       {config.label}
     </Badge>
   )
@@ -815,6 +817,10 @@ export default function CommunityApplicationsPage() {
             nav={[
               { label: "Orbit", href: communityOrbitPath(handle) },
               { label: "Profile", href: communityPath(handle) },
+            ]}
+            overflow={[
+              { label: "Applications", href: communityApplicationsPath(handle) },
+              { label: "Bans", href: communityBansPath(handle) },
               { label: "Settings", href: communitySettingsPath(handle) },
             ]}
           />
