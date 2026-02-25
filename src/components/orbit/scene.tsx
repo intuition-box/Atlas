@@ -949,7 +949,7 @@ export function OrbitScene({
 
     s.mode = "zoom-in";
     setSceneMode("zoom-in");
-    sounds.play("whoosh", { volume: 0.3 });
+    sounds.play("whoosh", { volume: 0.15 });
 
     // Clear tooltips
     s.hoveredUniverseNode = null;

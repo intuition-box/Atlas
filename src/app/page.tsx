@@ -9,7 +9,7 @@ import type { OrbitCommunity, OrbitLink } from "@/components/orbit/types";
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from "@/components/ui/empty";
 import { apiGet } from "@/lib/api/client";
 import { ROUTES, communityOrbitPath } from "@/lib/routes";
-import { Spinner } from "@/components/ui/spinner";
+
 
 type OrbitUniverseResponse = {
   communities: OrbitCommunity[];
@@ -69,12 +69,6 @@ export default function Home() {
       {error ? (
         <div className="pointer-events-auto absolute left-6 top-24 z-10 max-w-md rounded-xl border border-border bg-background p-4 text-sm text-destructive">
           {error}
-        </div>
-      ) : null}
-
-      {loading ? (
-        <div className="pointer-events-none rounded-full w-4 h-4 border border-border bg-background/80 p-3 text-sm text-foreground/70 backdrop-blur">
-          <Spinner />
         </div>
       ) : null}
 

@@ -38,12 +38,9 @@ export function NavigationButton({
     "flex items-center justify-center",
     "size-10 rounded-full",
     "text-muted-foreground hover:text-foreground",
-    "bg-background/50 hover:bg-background/80",
-    "backdrop-blur-sm",
-    "border border-border/30 hover:border-border/50",
     "transition-all duration-200",
     "focus:outline-none focus-visible:ring-2 focus-visible:ring-primary",
-    isActive && "text-foreground bg-background/80 border-border/50",
+    isActive && "text-foreground",
     className
   );
 

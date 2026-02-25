@@ -14,7 +14,10 @@ import { ROUTES, communityPath } from "@/lib/routes"
 import { AvatarDropzone } from "@/components/common/avatar-dropzone"
 import { HandleField } from "@/components/common/handle-field"
 import { PageHeader } from "@/components/common/page-header"
+import { ProfileAvatar } from "@/components/common/profile-avatar"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Form, FormActions, FormField, FormMessage, fieldControlProps, useForm } from "@/components/ui/form"
 import { Users } from "lucide-react"
 import { Input } from "@/components/ui/input"
@@ -387,17 +390,22 @@ export default function NewCommunityPage() {
   const canSubmit = step === 3 && !form.formState.isSubmitting
 
   return (
-    <main className="mx-auto w-full max-w-2xl px-4 py-10">
+    <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
       <Form form={form} onSubmit={onSubmit} className="mt-0">
         <PageHeader
-          title="Create community"
-          description={stepDescription}
+          leading={
+            <ProfileAvatar
+              type="community"
+              src={watchedAvatarUrl || undefined}
+              name={watchedName || "New Community"}
+              className="h-12 w-12"
+            />
+          }
+          title="New Community"
+          description={`Step ${step} of 3 · ${stepTitle}`}
+          actionsAsFormActions={false}
           actions={
             <FormActions>
-              <Button type="button" variant="ghost" onClick={() => router.back()}>
-                Cancel
-              </Button>
-
               <Button
                 type="button"
                 variant="secondary"
@@ -412,17 +420,25 @@ export default function NewCommunityPage() {
                 onClick={step < 3 ? goNext : undefined}
                 disabled={step === 3 ? !canSubmit : false}
               >
-                {step < 3 ? "Next" : form.formState.isSubmitting ? "Creating…" : "Create community"}
+                {step < 3 ? "Next" : form.formState.isSubmitting ? "Creating..." : "Create community"}
               </Button>
             </FormActions>
           }
         />
 
-        <div className="mt-8 flex flex-col gap-6">
-          <div className="text-muted-foreground text-sm">Step {step} of 3 · {stepTitle}</div>
+        {form.formState.errors.root?.message ? (
+          <Alert variant="destructive">
+            <AlertDescription>{String(form.formState.errors.root.message)}</AlertDescription>
+          </Alert>
+        ) : null}
 
-          {step === 1 ? (
-            <>
+        {step === 1 ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Basics</CardTitle>
+              <CardDescription>Name, handle, and a short description.</CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-6">
               <FormField<FormValues, "name">
                 name="name"
                 label="Name"
@@ -468,133 +484,152 @@ export default function NewCommunityPage() {
                   />
                 )}
               />
-            </>
-          ) : null}
+            </CardContent>
+          </Card>
+        ) : null}
 
-          {step === 2 ? (
-            <>
-              <div className="flex items-start gap-4">
-                <AvatarDropzone
-                  value={watchedAvatarUrl || null}
-                  alt={watchedName || "Community"}
-                  fallbackIcon={Users}
-                  onChange={(url) => {
-                    form.clearErrors("root")
-                    form.setValue("avatarUrl", url ?? "", { shouldDirty: true, shouldTouch: true })
-                  }}
-                  sign={async (file) => {
-                    if (!created?.id) {
-                      throw new Error("Create the community first before uploading an avatar.")
-                    }
-                    const signed = await apiPost<UploadSignResponse>("/api/upload/sign", {
-                      type: "community.avatar",
-                      communityId: created?.id ?? null,
-                      contentType: file.type,
-                      size: file.size,
-                    })
+        {step === 2 ? (
+          <>
+            <Card>
+              <CardHeader>
+                <CardTitle>Avatar</CardTitle>
+                <CardDescription>Add an image that represents your community.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-start gap-4">
+                  <AvatarDropzone
+                    value={watchedAvatarUrl || null}
+                    alt={watchedName || "Community"}
+                    fallbackIcon={Users}
+                    onChange={(url) => {
+                      form.clearErrors("root")
+                      form.setValue("avatarUrl", url ?? "", { shouldDirty: true, shouldTouch: true })
+                    }}
+                    sign={async (file) => {
+                      if (!created?.id) {
+                        throw new Error("Create the community first before uploading an avatar.")
+                      }
+                      const signed = await apiPost<UploadSignResponse>("/api/upload/sign", {
+                        type: "community.avatar",
+                        communityId: created?.id ?? null,
+                        contentType: file.type,
+                        size: file.size,
+                      })
 
-                    if (!signed.ok) {
-                      const err = signed.error
-                      const parsed = parseApiError(err)
-                      throw new Error(parsed.formError || "Couldn’t upload avatar.")
-                    }
+                      if (!signed.ok) {
+                        const err = signed.error
+                        const parsed = parseApiError(err)
+                        throw new Error(parsed.formError || "Couldn’t upload avatar.")
+                      }
 
-                    const upload = signed.value.upload
-                    if (!upload?.uploadUrl || !upload?.publicUrl) {
-                      throw new Error("Upload response was invalid.")
-                    }
+                      const upload = signed.value.upload
+                      if (!upload?.uploadUrl || !upload?.publicUrl) {
+                        throw new Error("Upload response was invalid.")
+                      }
 
-                    return { uploadUrl: upload.uploadUrl, publicUrl: upload.publicUrl }
-                  }}
-                  onError={(message) => {
-                    form.setError("root", { type: "server", message })
-                  }}
-                />
+                      return { uploadUrl: upload.uploadUrl, publicUrl: upload.publicUrl }
+                    }}
+                    onError={(message) => {
+                      form.setError("root", { type: "server", message })
+                    }}
+                  />
 
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm font-medium">Preview</div>
-                  <div className="text-muted-foreground mt-1 text-sm">
-                    {watchedName?.trim() ? watchedName.trim() : "Community name"}
-                    {handlePreview ? <span className="text-muted-foreground"> · c/{handlePreview}</span> : null}
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium">Preview</div>
+                    <div className="text-muted-foreground mt-1 text-sm">
+                      {watchedName?.trim() ? watchedName.trim() : "Community name"}
+                      {handlePreview ? <span className="text-muted-foreground"> · c/{handlePreview}</span> : null}
+                    </div>
                   </div>
                 </div>
-              </div>
+              </CardContent>
+            </Card>
 
-              <div className="rounded-2xl border border-border p-4">
-                <div className="text-sm font-medium">Access</div>
-                <p className="text-muted-foreground mt-1 text-sm">
-                  These settings control whether people can find your directory and whether applications are open.
-                </p>
-
-                <div className="mt-4 flex flex-col gap-4">
-                  <FormField<FormValues, "isPublicDirectory">
-                    name="isPublicDirectory"
-                    label="Public directory"
-                    description="If enabled, anyone can view your member orbit."
-                    render={({ field }) => (
-                      <div className="flex items-center justify-between gap-4">
-                        <div className="text-sm">Visible to everyone</div>
-                        <Switch
-                          checked={!!field.value}
-                          onCheckedChange={(v) => field.onChange(Boolean(v))}
-                          data-slot="community-public-directory"
-                        />
+            <Card>
+              <CardHeader>
+                <CardTitle>Privacy & access</CardTitle>
+                <CardDescription>Control what non-members can see and whether applications are allowed.</CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-4">
+                <FormField<FormValues, "isPublicDirectory">
+                  name="isPublicDirectory"
+                  label="Public directory"
+                  description="If enabled, anyone can view your member orbit."
+                  render={({ field }) => (
+                    <div className="flex items-center justify-between gap-3 rounded-2xl border border-border/60 p-4">
+                      <div className="flex flex-col gap-1">
+                        <div className="text-sm font-medium">Public directory</div>
+                        <div className="text-xs text-muted-foreground">If off, only approved members can see the member directory.</div>
                       </div>
-                    )}
-                  />
+                      <Switch
+                        checked={!!field.value}
+                        onCheckedChange={(v) => field.onChange(Boolean(v))}
+                        data-slot="community-public-directory"
+                      />
+                    </div>
+                  )}
+                />
 
-                  <FormField<FormValues, "isMembershipOpen">
-                    name="isMembershipOpen"
-                    label="Accept applications"
-                    description="If disabled, new users can’t apply to join."
-                    render={({ field }) => (
-                      <div className="flex items-center justify-between gap-4">
-                        <div className="text-sm">Applications open</div>
-                        <Switch
-                          checked={!!field.value}
-                          onCheckedChange={(v) => field.onChange(Boolean(v))}
-                          data-slot="community-membership-open"
-                        />
+                <FormField<FormValues, "isMembershipOpen">
+                  name="isMembershipOpen"
+                  label="Accept applications"
+                  description="If disabled, new users can’t apply to join."
+                  render={({ field }) => (
+                    <div className="flex items-center justify-between gap-3 rounded-2xl border border-border/60 p-4">
+                      <div className="flex flex-col gap-1">
+                        <div className="text-sm font-medium">Accepting applications</div>
+                        <div className="text-xs text-muted-foreground">If off, hide apply and treat as closed.</div>
                       </div>
-                    )}
-                  />
-                </div>
-              </div>
-            </>
-          ) : null}
+                      <Switch
+                        checked={!!field.value}
+                        onCheckedChange={(v) => field.onChange(Boolean(v))}
+                        data-slot="community-membership-open"
+                      />
+                    </div>
+                  )}
+                />
+              </CardContent>
+            </Card>
+          </>
+        ) : null}
 
-          {step === 3 ? (
-            <>
-              <FormField<FormValues, "invitees">
-                name="invitees"
-                label="Invite members"
-                description="Optional. Paste emails (comma-separated) or leave empty for now."
-                render={({ id, field, fieldState }) => (
-                  <Textarea
-                    id={id}
-                    rows={4}
-                    value={String(field.value ?? "")}
-                    onChange={(e) => field.onChange(e.target.value)}
-                    aria-invalid={fieldState.invalid}
-                    placeholder="alex@example.com, sam@example.com"
-                  />
-                )}
-              />
+        {step === 3 ? (
+          <>
+            <Card>
+              <CardHeader>
+                <CardTitle>Invite members</CardTitle>
+                <CardDescription>Optional. Paste emails or leave empty for now.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <FormField<FormValues, "invitees">
+                  name="invitees"
+                  label="Emails"
+                  description="Comma-separated list of email addresses to invite."
+                  render={({ id, field, fieldState }) => (
+                    <Textarea
+                      id={id}
+                      rows={4}
+                      value={String(field.value ?? "")}
+                      onChange={(e) => field.onChange(e.target.value)}
+                      aria-invalid={fieldState.invalid}
+                      placeholder="alex@example.com, sam@example.com"
+                    />
+                  )}
+                />
+              </CardContent>
+            </Card>
 
-              <div className="rounded-2xl border border-border p-4">
-                <div className="text-sm font-medium">What happens next</div>
-                <p className="text-muted-foreground mt-1 text-sm">
-                  You can invite people later from your community settings. This step doesn’t send invites yet.
-                </p>
-              </div>
-            </>
-          ) : null}
-
-          {form.formState.errors.root?.message ? (
-            <FormMessage className="text-destructive">{String(form.formState.errors.root.message)}</FormMessage>
-          ) : null}
-        </div>
+            <Card>
+              <CardHeader>
+                <CardTitle>What happens next</CardTitle>
+                <CardDescription>
+                  You can invite people later from your community settings. This step doesn&apos;t send invites yet.
+                </CardDescription>
+              </CardHeader>
+            </Card>
+          </>
+        ) : null}
       </Form>
-    </main>
+    </div>
   )
 }

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
+import { motion, AnimatePresence } from "motion/react";
 import {
   Activity,
   ChevronDown,
@@ -84,58 +85,71 @@ export function NavigationController({
       )}
     >
       {/* Top Left - Logo + Global Menu */}
-      {showControls && (
-        <div className="absolute top-4 left-4 sm:top-6 sm:left-6 pointer-events-auto">
-          <Menu>
-            <MenuTrigger
-              className={cn(
-                "flex items-center gap-1",
-                "pl-1 pr-0.5 py-1 rounded-full",
-                "hover:bg-background/80 backdrop-blur-sm",
-                "transition-all duration-200",
-                "focus:outline-none focus-visible:ring-2 focus-visible:ring-primary",
-              )}
-            >
-              <Logo className="size-4.5" />
-              <span className="text-xl font-semibold text-foreground">Atlas</span>
-              <ChevronDown className="size-3 text-muted-foreground" />
-            </MenuTrigger>
-            <MenuContent side="bottom" align="start" sideOffset={8}>
-              <MenuItem render={<Link href={ROUTES.home} />}>
-                <Globe className="size-4" />
-                Communities
-              </MenuItem>
-              {isAuthed && userHandle && (
-                <MenuItem render={<Link href={userPath(userHandle)} />}>
-                  <User className="size-4" />
-                  Profile
+      <AnimatePresence>
+        {showControls && (
+          <motion.div
+            initial={{ opacity: 0, y: -12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
+            transition={{ duration: 0.3, ease: "easeOut" }}
+            className="absolute top-4 left-4 sm:top-6 sm:left-6 pointer-events-auto"
+          >
+            <Menu>
+              <MenuTrigger
+                className={cn(
+                  "flex items-center gap-1",
+                  "pl-1 pr-0.5 py-1 rounded-full",
+                  "hover:text-foreground/80",
+                  "transition-all duration-200",
+                  "focus:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+                )}
+              >
+                <Logo className="size-4.5" />
+                <span className="text-xl font-semibold text-foreground">Atlas</span>
+                <ChevronDown className="size-3 text-muted-foreground" />
+              </MenuTrigger>
+              <MenuContent side="bottom" align="start" sideOffset={8}>
+                <MenuItem render={<Link href={ROUTES.home} />}>
+                  <Globe className="size-4" />
+                  Communities
                 </MenuItem>
-              )}
-              <MenuItem render={<Link href={activityPath()} />}>
-                <Activity className="size-4" />
-                Activity
-              </MenuItem>
-              {isAuthed && (
-                <>
-                  <MenuSeparator />
-                  <MenuItem render={<Link href={ROUTES.newCommunity} />}>
-                    <Plus className="size-4" />
-                    New Community
+                {isAuthed && userHandle && (
+                  <MenuItem render={<Link href={userPath(userHandle)} />}>
+                    <User className="size-4" />
+                    Profile
                   </MenuItem>
-                  <MenuSeparator />
-                  <MenuItem variant="destructive" onClick={() => signOut({ callbackUrl: "/" })}>
-                    <LogOut className="size-4" />
-                    Logout
-                  </MenuItem>
-                </>
-              )}
-            </MenuContent>
-          </Menu>
-        </div>
-      )}
+                )}
+                <MenuItem render={<Link href={activityPath()} />}>
+                  <Activity className="size-4" />
+                  Activity
+                </MenuItem>
+                {isAuthed && (
+                  <>
+                    <MenuSeparator />
+                    <MenuItem render={<Link href={ROUTES.newCommunity} />}>
+                      <Plus className="size-4" />
+                      New Community
+                    </MenuItem>
+                    <MenuSeparator />
+                    <MenuItem variant="destructive" onClick={() => signOut({ callbackUrl: "/" })}>
+                      <LogOut className="size-4" />
+                      Logout
+                    </MenuItem>
+                  </>
+                )}
+              </MenuContent>
+            </Menu>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Top Right - Global Controls */}
-      <div className="absolute top-4 right-4 sm:top-6 sm:right-6 pointer-events-auto">
+      <motion.div
+        initial={{ opacity: 0, y: -12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3, ease: "easeOut", delay: 0.05 }}
+        className="absolute top-4 right-4 sm:top-6 sm:right-6 pointer-events-auto"
+      >
         <div className="flex items-center gap-1">
           {/* Attestation Queue (authed only) */}
           {showControls && isAuthed && <AttestationQueueButton />}
@@ -172,9 +186,6 @@ export function NavigationController({
                   "flex items-center justify-center",
                   "size-10 rounded-full",
                   "text-muted-foreground hover:text-foreground",
-                  "bg-background/50 hover:bg-background/80",
-                  "backdrop-blur-sm",
-                  "border border-border/30 hover:border-border/50",
                   "transition-all duration-200",
                   "focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 )}
@@ -191,21 +202,29 @@ export function NavigationController({
             </TooltipContent>
           </Tooltip>
         </div>
-      </div>
+      </motion.div>
 
       {/* Bottom Left - Community Controls (authed only) */}
-      {showControls && isAuthed && ((controls.bottomLeft?.length ?? 0) > 0 || (controls.bottomRight?.length ?? 0) > 0) && (
-        <div className="absolute bottom-4 left-4 sm:bottom-6 sm:left-6 pointer-events-auto">
-          <div className="flex items-center gap-1">
-            {controls.bottomLeft?.map((item, idx) => (
-              <NavigationButton key={`bottomLeft-${idx}`} {...item} />
-            ))}
-            {controls.bottomRight?.map((item, idx) => (
-              <NavigationButton key={`bottomRight-${idx}`} {...item} />
-            ))}
-          </div>
-        </div>
-      )}
+      <AnimatePresence>
+        {showControls && isAuthed && ((controls.bottomLeft?.length ?? 0) > 0 || (controls.bottomRight?.length ?? 0) > 0) && (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 12 }}
+            transition={{ duration: 0.3, ease: "easeOut" }}
+            className="absolute bottom-4 left-4 sm:bottom-6 sm:left-6 pointer-events-auto"
+          >
+            <div className="flex items-center gap-1">
+              {controls.bottomLeft?.map((item, idx) => (
+                <NavigationButton key={`bottomLeft-${idx}`} {...item} />
+              ))}
+              {controls.bottomRight?.map((item, idx) => (
+                <NavigationButton key={`bottomRight-${idx}`} {...item} />
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Attestation Queue Panel (authed only) */}
       {isAuthed && <AttestationQueuePanel />}

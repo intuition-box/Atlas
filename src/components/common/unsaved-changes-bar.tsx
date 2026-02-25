@@ -33,9 +33,9 @@ export function UnsavedChangesBar({
     <AnimatePresence>
       {show && (
         <motion.div
-          initial={{ opacity: 0, y: 20, filter: "blur(8px)" }}
-          animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-          exit={{ opacity: 0, y: 20, filter: "blur(8px)" }}
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 20 }}
           transition={{ duration: 0.25, ease: "easeOut" }}
           className={cn(
             "fixed bottom-6 left-1/2 z-50 -translate-x-1/2",
