@@ -1,6 +1,5 @@
 "use client"
 
-import * as React from "react"
 import { motion, AnimatePresence } from "motion/react"
 import { X, Link2, Loader2 } from "lucide-react"
 
