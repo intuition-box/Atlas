@@ -24,7 +24,7 @@ import {
   NodeTooltip,
   CommunityTooltipContent,
 } from "./node-popover";
-import { UNIVERSE, UNIVERSE_COLORS } from "./constants";
+import { UNIVERSE, ORBIT_LEVELS_COLORS, ENERGY_FLOW, CONNECTION_PHYSICS } from "./constants";
 import type { OrbitCommunity, OrbitLink } from "./types";
 
 /* ────────────────────────────
@@ -41,6 +41,12 @@ interface UniverseNode extends SimulationNodeDatum {
   isMembershipOpen: boolean;
   color: string;
   radius: number;
+  orbitStats: {
+    advocates: number;
+    contributors: number;
+    participants: number;
+    explorers: number;
+  };
 }
 
 interface UniverseLink extends SimulationLinkDatum<UniverseNode> {
@@ -61,6 +67,14 @@ type CommunityTooltipData = {
 
 type UniverseMode = "idle" | "zoom-in" | "waiting";
 
+/** Physics-simulated midpoint for connection line behavior */
+interface ConnectionMidpoint {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+}
+
 /* ────────────────────────────
    Helpers
 ──────────────────────────── */
@@ -75,6 +89,32 @@ function easeInOutCubic(t: number) {
 
 function easeOutCubic(t: number) {
   return 1 - Math.pow(1 - t, 3);
+}
+
+/** Parse "#rrggbb" hex color to [r, g, b] tuple */
+function hexToRgb(hex: string): [number, number, number] {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+const ORBIT_LEVELS = ["advocates", "contributors", "participants", "explorers"] as const;
+
+/** Determine the dominant orbit level from combined stats */
+function dominantOrbitLevel(stats: {
+  advocates: number;
+  contributors: number;
+  participants: number;
+  explorers: number;
+}): string {
+  let best = "explorers";
+  let max = -1;
+  for (const level of ORBIT_LEVELS) {
+    if (stats[level] > max) {
+      max = stats[level];
+      best = level;
+    }
+  }
+  return best;
 }
 
 function computeUniverseRadius(memberCount: number, maxMembers: number): number {
@@ -159,6 +199,8 @@ export function UniverseView({
     nodes: [] as UniverseNode[],
     links: [] as UniverseLink[],
     linkDirections: [] as boolean[],
+    connectionMidpoints: [] as ConnectionMidpoint[],
+    lastPhysicsTime: 0,
     initialized: false,
     startTime: 0,
     fadeIn: 0,
@@ -237,7 +279,7 @@ export function UniverseView({
 
     const newNodes: UniverseNode[] = communities.map((c, i) => {
       const dominantLevel = c.orbitStats?.dominantLevel ?? "explorers";
-      const color = UNIVERSE_COLORS[dominantLevel] ?? UNIVERSE_COLORS.explorers;
+      const color = ORBIT_LEVELS_COLORS[dominantLevel] ?? ORBIT_LEVELS_COLORS.explorers;
       const radius = computeUniverseRadius(c.memberCount, maxMembers);
       const angle = (i / communities.length) * Math.PI * 2;
       const spread = Math.min(width, height) * 0.15;
@@ -251,6 +293,12 @@ export function UniverseView({
         isMembershipOpen: c.isMembershipOpen,
         color,
         radius,
+        orbitStats: {
+          advocates: c.orbitStats?.advocates ?? 0,
+          contributors: c.orbitStats?.contributors ?? 0,
+          participants: c.orbitStats?.participants ?? 0,
+          explorers: c.orbitStats?.explorers ?? 0,
+        },
         x: centerX + Math.cos(angle) * spread,
         y: centerY + Math.sin(angle) * spread,
       };
@@ -274,6 +322,17 @@ export function UniverseView({
       }));
     s.links = newLinks;
     s.linkDirections = newLinks.map(() => Math.random() > 0.5);
+    // Initialize connection midpoints at geometric midpoint with zero velocity
+    s.connectionMidpoints = newLinks.map((l) => {
+      const src = newNodes.find((n) => n.id === (l.source as unknown as string));
+      const tgt = newNodes.find((n) => n.id === (l.target as unknown as string));
+      const sx = src?.x ?? centerX;
+      const sy = src?.y ?? centerY;
+      const tx = tgt?.x ?? centerX;
+      const ty = tgt?.y ?? centerY;
+      return { x: (sx + tx) / 2, y: (sy + ty) / 2, vx: 0, vy: 0 };
+    });
+    s.lastPhysicsTime = performance.now();
 
     s.simulation?.stop();
 
@@ -282,9 +341,10 @@ export function UniverseView({
         "link",
         forceLink<UniverseNode, UniverseLink>(newLinks)
           .id((d) => d.id)
-          .distance(120),
+          .distance(200)
+          .strength(0.08),
       )
-      .force("charge", forceManyBody().strength(-350))
+      .force("charge", forceManyBody().strength(-500))
       .force("x", forceX(width / 2).strength(0.04))
       .force("y", forceY(height / 2).strength(0.04))
       .force(
@@ -293,6 +353,7 @@ export function UniverseView({
           .radius((d) => d.radius + 12)
           .strength(1),
       )
+      .velocityDecay(0.3)
       .on("tick", () => {
         scheduleFrame();
       });
@@ -496,8 +557,8 @@ export function UniverseView({
       const elapsed = now - s.startTime;
 
       const bubbleFadeDuration = 600;
-      const bridgeGrowDelay = bubbleFadeDuration;
-      const bridgeGrowDuration = 800;
+      const bridgeGrowDelay = bubbleFadeDuration + 400;
+      const bridgeGrowDuration = 1800;
 
       if (s.initialized && s.fadeIn < 1) {
         s.fadeIn = Math.min(1, elapsed / bubbleFadeDuration);
@@ -515,9 +576,70 @@ export function UniverseView({
       ctx.translate(t.x, t.y);
       ctx.scale(t.k, t.k);
 
-      // ── Links (hidden during zoom-in / waiting) ──
+      // ── Connection midpoint physics ──
+      {
+        const dt = Math.min(
+          CONNECTION_PHYSICS.MAX_DT,
+          s.lastPhysicsTime > 0 ? (now - s.lastPhysicsTime) / 1000 : 0.016,
+        );
+        s.lastPhysicsTime = now;
+
+        for (let i = 0; i < s.links.length; i++) {
+          const link = s.links[i];
+          const mid = s.connectionMidpoints[i];
+          if (!mid) continue;
+
+          const src = link.source as UniverseNode;
+          const tgt = link.target as UniverseNode;
+          if (
+            src.x === undefined || src.y === undefined ||
+            tgt.x === undefined || tgt.y === undefined
+          ) continue;
+
+          // Spring pulls midpoint toward the geometric center of both endpoints
+          const centerX = (src.x + tgt.x) / 2;
+          const centerY = (src.y + tgt.y) / 2;
+          const dxC = centerX - mid.x;
+          const dyC = centerY - mid.y;
+
+          let fx = dxC * CONNECTION_PHYSICS.SPRING_K;
+          let fy = dyC * CONNECTION_PHYSICS.SPRING_K;
+
+          // Gravity (always pulls downward)
+          fy += CONNECTION_PHYSICS.GRAVITY;
+
+          // Perpendicular side bias so alternating links curve to different sides
+          const abDx = tgt.x - src.x;
+          const abDy = tgt.y - src.y;
+          const abLen = Math.sqrt(abDx * abDx + abDy * abDy);
+          if (abLen > 0) {
+            const perpX = -abDy / abLen;
+            const perpY = abDx / abLen;
+            const sign = i % 2 === 0 ? 1 : -1;
+            fx += perpX * CONNECTION_PHYSICS.SIDE_BIAS * sign;
+            fy += perpY * CONNECTION_PHYSICS.SIDE_BIAS * sign;
+          }
+
+          // Euler integration
+          mid.vx += fx * dt;
+          mid.vy += fy * dt;
+
+          // Damping
+          const damp = Math.exp(-CONNECTION_PHYSICS.DAMPING * dt);
+          mid.vx *= damp;
+          mid.vy *= damp;
+
+          mid.x += mid.vx * dt;
+          mid.y += mid.vy * dt;
+        }
+      }
+
+      // ── Links with flowing energy (hidden during zoom-in / waiting) ──
       if (bridgeProgress > 0 && mode !== "zoom-in" && mode !== "waiting") {
-        ctx.globalAlpha = 1;
+        ctx.globalAlpha = easedBridge;
+        const baseWidth = ENERGY_FLOW.BASE_WIDTH / t.k;
+        const fallbackRgb = ENERGY_FLOW.GLOW_RGB;
+
         for (let i = 0; i < s.links.length; i++) {
           const link = s.links[i];
           const src = link.source as UniverseNode;
@@ -530,21 +652,131 @@ export function UniverseView({
           )
             continue;
 
+          // Per-link color: average orbit stats of both communities → dominant level → color
+          const avgStats = {
+            advocates: src.orbitStats.advocates + tgt.orbitStats.advocates,
+            contributors: src.orbitStats.contributors + tgt.orbitStats.contributors,
+            participants: src.orbitStats.participants + tgt.orbitStats.participants,
+            explorers: src.orbitStats.explorers + tgt.orbitStats.explorers,
+          };
+          const linkLevel = dominantOrbitLevel(avgStats);
+          const linkHex = ORBIT_LEVELS_COLORS[linkLevel];
+          const [gr, gg, gb] = linkHex ? hexToRgb(linkHex) : fallbackRgb;
+
           const reversed = s.linkDirections[i] ?? false;
-          const startX = reversed ? tgt.x : src.x;
-          const startY = reversed ? tgt.y : src.y;
-          const endX = reversed ? src.x : tgt.x;
-          const endY = reversed ? src.y : tgt.y;
+          const sx = reversed ? tgt.x : src.x;
+          const sy = reversed ? tgt.y : src.y;
+          const ex = reversed ? src.x : tgt.x;
+          const ey = reversed ? src.y : tgt.y;
 
-          const dx = endX - startX;
-          const dy = endY - startY;
+          // Use physics-simulated midpoint as Bezier control point
+          const mid = s.connectionMidpoints[i];
+          const cpx = mid ? mid.x : (sx + ex) / 2;
+          const cpy = mid ? mid.y : (sy + ey) / 2;
 
+          // Slack for wave amplitude modulation
+          const fullDx = ex - sx;
+          const fullDy = ey - sy;
+          const fullLen = Math.sqrt(fullDx * fullDx + fullDy * fullDy);
+          const slack = Math.max(0, 200 - fullLen);
+
+          // Bezier helpers
+          // Position: B(t) = (1-t)²P0 + 2(1-t)tP1 + t²P2
+          const bezX = (bt: number) =>
+            (1 - bt) * (1 - bt) * sx + 2 * (1 - bt) * bt * cpx + bt * bt * ex;
+          const bezY = (bt: number) =>
+            (1 - bt) * (1 - bt) * sy + 2 * (1 - bt) * bt * cpy + bt * bt * ey;
+          // Tangent: B'(t) = 2(1-t)(P1-P0) + 2t(P2-P1)
+          const bezTx = (bt: number) =>
+            2 * (1 - bt) * (cpx - sx) + 2 * bt * (ex - cpx);
+          const bezTy = (bt: number) =>
+            2 * (1 - bt) * (cpy - sy) + 2 * bt * (ey - cpy);
+
+          // Pre-sample the curve with sine-wave displacement
+          const samples = Math.max(4, Math.ceil(fullLen / ENERGY_FLOW.PX_PER_SAMPLE));
+          const wavePhase = now * ENERGY_FLOW.WAVE_SPEED;
+          const slackRatio = Math.min(2, slack / 50);
+          const waveAmp = ENERGY_FLOW.WAVE_AMPLITUDE * (0.5 + slackRatio);
+          const pts: { x: number; y: number }[] = [];
+
+          for (let si = 0; si <= samples; si++) {
+            const bt = (si / samples) * easedBridge;
+            const bx = bezX(bt);
+            const by = bezY(bt);
+
+            // Perpendicular to tangent at this point
+            const tx = bezTx(bt);
+            const ty = bezTy(bt);
+            const tLen = Math.sqrt(tx * tx + ty * ty);
+
+            if (tLen > 0 && si > 0 && si < samples) {
+              const nx = -ty / tLen;
+              const ny = tx / tLen;
+              const arcFrac = (si / samples) * fullLen;
+              const taper = Math.sin((si / samples) * Math.PI);
+              const wave =
+                Math.sin(arcFrac * ENERGY_FLOW.WAVE_FREQUENCY * (Math.PI * 2 / 100) + wavePhase) *
+                waveAmp *
+                taper;
+              pts.push({ x: bx + nx * wave, y: by + ny * wave });
+            } else {
+              pts.push({ x: bx, y: by });
+            }
+          }
+
+          // Base wavy line
           ctx.beginPath();
-          ctx.moveTo(startX, startY);
-          ctx.lineTo(startX + dx * easedBridge, startY + dy * easedBridge);
-          ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
-          ctx.lineWidth = 1.5 / t.k;
+          ctx.moveTo(pts[0].x, pts[0].y);
+          for (let si = 1; si < pts.length; si++) {
+            ctx.lineTo(pts[si].x, pts[si].y);
+          }
+          ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
+          ctx.lineWidth = baseWidth;
+          ctx.lineCap = "round";
+          ctx.lineJoin = "round";
           ctx.stroke();
+
+          // Cumulative arc-length distances
+          const cumDist: number[] = [0];
+          for (let si = 1; si < pts.length; si++) {
+            const dx2 = pts[si].x - pts[si - 1].x;
+            const dy2 = pts[si].y - pts[si - 1].y;
+            cumDist.push(cumDist[si - 1] + Math.sqrt(dx2 * dx2 + dy2 * dy2));
+          }
+          const totalLen = cumDist[cumDist.length - 1];
+
+          // Energy flow overlay along the curve
+          if (totalLen > 10) {
+            const flowPos = (now * ENERGY_FLOW.SPEED) % ENERGY_FLOW.PULSE_SPACING;
+
+            for (let si = 0; si < pts.length - 1; si++) {
+              const segMid = (cumDist[si] + cumDist[si + 1]) / 2;
+
+              let brightness = 0;
+              for (
+                let offset = -ENERGY_FLOW.PULSE_SPACING;
+                offset <= totalLen + ENERGY_FLOW.PULSE_SPACING;
+                offset += ENERGY_FLOW.PULSE_SPACING
+              ) {
+                const dist = Math.abs(segMid - (flowPos + offset));
+                if (dist < ENERGY_FLOW.PULSE_WIDTH) {
+                  const intensity =
+                    (Math.cos((dist / ENERGY_FLOW.PULSE_WIDTH) * Math.PI) + 1) / 2;
+                  brightness = Math.max(brightness, intensity);
+                }
+              }
+
+              const b = Math.max(0.08, brightness);
+
+              ctx.beginPath();
+              ctx.moveTo(pts[si].x, pts[si].y);
+              ctx.lineTo(pts[si + 1].x, pts[si + 1].y);
+              ctx.strokeStyle = `rgba(${gr}, ${gg}, ${gb}, ${b * ENERGY_FLOW.GLOW_OPACITY})`;
+              ctx.lineWidth = baseWidth + b * (ENERGY_FLOW.GLOW_WIDTH_BOOST / t.k);
+              ctx.lineCap = "round";
+              ctx.stroke();
+            }
+          }
         }
       }
 
@@ -610,8 +842,12 @@ export function UniverseView({
 
       ctx.restore();
 
-      // Keep scheduling during fade-in or bridge-grow animation
+      // Keep scheduling: during intro animations, and continuously
+      // once links are visible (energy flow needs ongoing frames)
       if (s.fadeIn < 1 || bridgeProgress < 1) {
+        scheduleFrame();
+      } else if (mode === "idle" && s.links.length > 0) {
+        // Continuous rAF for energy flow animation
         scheduleFrame();
       }
     };

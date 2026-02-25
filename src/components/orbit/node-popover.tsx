@@ -134,9 +134,15 @@ export function NodePopover({
   const anchor = useCircleAnchor(x, y, screenRadius);
 
   return (
-    <Popover open>
+    <Popover open modal={false}>
       <div className="fixed inset-0 z-40" onClick={onClose} />
-      <PopoverContent anchor={anchor} side="top" sideOffset={16} align="center">
+      <PopoverContent
+        anchor={anchor}
+        side="top"
+        sideOffset={16}
+        align="center"
+        initialFocus={false}
+      >
         {children}
       </PopoverContent>
     </Popover>
@@ -264,7 +270,7 @@ export function MemberPopoverContent({
       {/* View Profile */}
       <Button
         size="sm"
-        variant="outline"
+        variant="secondary"
         className="w-full"
         onClick={() => onViewProfile(node.handle ?? node.id)}
       >
@@ -376,14 +382,14 @@ export function CommunityPopoverContent({
 
       {/* Actions */}
       <div className="flex flex-col gap-2">
-        <Button size="sm" variant="outline" className="w-full">
+        <Button size="sm" variant="secondary" className="w-full">
           <Link href={communityPath(community.handle)}>View profile</Link>
         </Button>
-        {community.isMembershipOpen && community.viewerMembership?.status !== "APPROVED" ? (
+        {community.isMembershipOpen && community.viewerMembership?.status !== "APPROVED" && (
           <Button size="sm" className="w-full" render={<Link href={communityJoinPath(community.handle)} />}>
             Apply to join
           </Button>
-        ) : null}
+        )}
       </div>
     </>
   );

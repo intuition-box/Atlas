@@ -89,9 +89,53 @@ export const UNIVERSE = {
 } as const;
 
 /** Maps dominant orbit level to community bubble color */
-export const UNIVERSE_COLORS: Record<string, string> = {
+export const ORBIT_LEVELS_COLORS: Record<string, string> = {
   advocates: "#3b82f6",
   contributors: "#60a5fa",
   participants: "#ffffff",
   explorers: "#9ca3af",
 };
+
+/* ────────────────────────────
+   Energy Flow (link animation)
+──────────────────────────── */
+
+export const CONNECTION_PHYSICS = {
+  /** Spring stiffness pulling midpoint toward center of endpoints */
+  SPRING_K: 1.2,
+  /** Gravity pulling midpoint downward (world px/s²) */
+  GRAVITY: 8,
+  /** Velocity damping per second (0 = no damping, 1 = full damping) */
+  DAMPING: 8,
+  /** Max physics timestep to prevent explosion on tab-switch */
+  MAX_DT: 0.05,
+  /** Perpendicular bias so alternating links curve different sides */
+  SIDE_BIAS: 5,
+} as const;
+
+export const ENERGY_FLOW = {
+  /** Pulse travel speed (world px per ms) */
+  SPEED: 0.05,
+  /** Distance between pulse centers (world px) */
+  PULSE_SPACING: 100,
+  /** Width of each pulse's cosine falloff (world px) */
+  PULSE_WIDTH: 60,
+  /** World px per sample segment — lower = smoother */
+  PX_PER_SAMPLE: 5,
+  /** Base link width (before zoom scaling) */
+  BASE_WIDTH: 1.5,
+  /** Energy glow color — brand primary oklch(0.71 0.13 215) as RGB */
+  GLOW_RGB: [0, 181, 212] as readonly [number, number, number],
+  /** Peak energy opacity */
+  GLOW_OPACITY: 0.9,
+  /** Extra width added at peak brightness */
+  GLOW_WIDTH_BOOST: 1.5,
+  /** Bezier curve offset in world px at rest distance */
+  CURVE_AMOUNT: 40,
+  /** Sine wave amplitude at rest distance (world px) */
+  WAVE_AMPLITUDE: 0.6,
+  /** Sine wave frequency — cycles per 100 world px of arc-length */
+  WAVE_FREQUENCY: 0.6,
+  /** Sine wave phase animation speed (radians per ms) */
+  WAVE_SPEED: 0.0008,
+} as const;
