@@ -16,17 +16,17 @@ import {
 } from "@/components/ui/card";
 
 /**
- * Comma-separated list of handles allowed to create communities.
- * e.g. ALLOWED_COMMUNITY_CREATORS="saulo,alice,bob"
+ * Comma-separated list of user IDs allowed to create communities.
+ * e.g. ALLOWED_COMMUNITY_CREATORS="cuid1,cuid2"
  * When unset or empty, the page is blocked for everyone.
  */
-function getAllowedHandles(): Set<string> {
+function getAllowedUserIds(): Set<string> {
   const raw = process.env.ALLOWED_COMMUNITY_CREATORS ?? "";
-  const handles = raw
+  const ids = raw
     .split(",")
-    .map((h) => h.trim().toLowerCase())
+    .map((id) => id.trim())
     .filter(Boolean);
-  return new Set(handles);
+  return new Set(ids);
 }
 
 export default async function NewCommunityLayout({
@@ -34,10 +34,10 @@ export default async function NewCommunityLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { handle } = await requireOnboardedRedirect("/new");
-  const allowed = getAllowedHandles();
+  const { userId } = await requireOnboardedRedirect("/new");
+  const allowed = getAllowedUserIds();
 
-  if (!allowed.has(handle.toLowerCase())) {
+  if (!allowed.has(userId)) {
     return (
       <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
         <PageHeader
