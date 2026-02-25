@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { X, Save, Loader2, Trash2, ExternalLink } from "lucide-react";
+import { Check, Loader2, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { apiPost } from "@/lib/api/client";
@@ -18,11 +18,6 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { useAttestationQueue, type QueuedAttestation } from "./queue-provider";
 import { AttestationBadge } from "@/components/attestation/badge";
 import { ProfileAvatar } from "@/components/common/profile-avatar";
@@ -38,9 +33,13 @@ import { ProfileAvatar } from "@/components/common/profile-avatar";
 function QueueItem({
   item,
   onRemove,
+  onSave,
+  isSaving,
 }: {
   item: QueuedAttestation;
   onRemove: (id: string) => void;
+  onSave: (id: string) => void;
+  isSaving: boolean;
 }) {
   return (
     <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/30 border border-border/30">
@@ -58,18 +57,30 @@ function QueueItem({
         </span>
       </div>
 
-      <button
-        onClick={() => onRemove(item.id)}
-        className={cn(
-          "p-1 rounded-md shrink-0",
-          "text-muted-foreground hover:text-foreground",
-          "hover:bg-muted/50",
-          "transition-colors"
-        )}
-        aria-label="Remove attestation"
-      >
-        <X className="size-4" />
-      </button>
+      <div className="flex items-center gap-2 shrink-0">
+        <Button
+          variant="secondary"
+          size="icon-xs"
+          onClick={() => onRemove(item.id)}
+          disabled={isSaving}
+          aria-label="Remove attestation"
+        >
+          <X className="size-3.5" />
+        </Button>
+        <Button
+          variant="secondary"
+          size="icon-xs"
+          onClick={() => onSave(item.id)}
+          disabled={isSaving}
+          aria-label="Save attestation"
+        >
+          {isSaving ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : (
+            <Check className="size-3.5" />
+          )}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -82,12 +93,47 @@ export function AttestationQueuePanel() {
   const { data: session } = useSession();
   const { queue, removeFromQueue, removeMultiple, clearQueue, isOpen, setIsOpen, markSaved } = useAttestationQueue();
   const [isSaving, setIsSaving] = React.useState(false);
+  const [savingIds, setSavingIds] = React.useState<Set<string>>(new Set());
   const [error, setError] = React.useState<string | null>(null);
   const pathname = usePathname();
 
   const userHandle = session?.user?.handle;
   const attestationsPath = userHandle ? userAttestationsPath(userHandle) : null;
   const isOnAttestationsPage = attestationsPath && pathname === attestationsPath;
+
+  const handleSaveOne = async (id: string) => {
+    const item = queue.find((q) => q.id === id);
+    if (!item) return;
+
+    setSavingIds((prev) => new Set(prev).add(id));
+    setError(null);
+
+    try {
+      const result = await apiPost<{ attestation: { id: string } }>(
+        "/api/attestation/create",
+        { toUserId: item.toUserId, type: item.type },
+      );
+
+      if (!result.ok) {
+        setError("Failed to save attestation");
+        sounds.error();
+        return;
+      }
+
+      removeFromQueue(id);
+      markSaved();
+      sounds.success();
+    } catch {
+      setError("Something went wrong");
+      sounds.error();
+    } finally {
+      setSavingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  };
 
   const handleSaveAll = async () => {
     if (queue.length === 0) return;
@@ -153,75 +199,27 @@ export function AttestationQueuePanel() {
             <div className="flex flex-col gap-1">
               <DialogTitle>Attestation Queue</DialogTitle>
               <DialogDescription>
-                Review and save your queued attestations.
+                Review before saving your attestations.
               </DialogDescription>
             </div>
 
-            {/* Action buttons */}
-            <div className="flex items-center gap-1 shrink-0">
-              {/* Clear all */}
-              {queue.length > 0 && (
-                <Tooltip>
-                  <TooltipTrigger>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={clearQueue}
-                      disabled={isSaving}
-                      className="text-red-500 hover:text-red-600"
-                    >
-                      <Trash2 className="size-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Clear all</TooltipContent>
-                </Tooltip>
-              )}
-
-              {/* Save */}
-              {queue.length > 0 && (
-                <Tooltip>
-                  <TooltipTrigger>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={handleSaveAll}
-                      disabled={isSaving}
-                      className="text-emerald-500 hover:text-emerald-600 hover:bg-emerald-500/10"
-                    >
-                      {isSaving ? (
-                        <Loader2 className="size-4 animate-spin" />
-                      ) : (
-                        <Save className="size-4" />
-                      )}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Save {queue.length}</TooltipContent>
-                </Tooltip>
-              )}
-
-              {/* Attestations page - hide if already on that page */}
-              {attestationsPath && !isOnAttestationsPage && (
-                <Tooltip>
-                  <TooltipTrigger>
-                    <Link
-                      href={attestationsPath}
-                      onClick={() => setIsOpen(false)}
-                      className={cn(
-                        "focus-visible:border-ring focus-visible:ring-ring/50 rounded-4xl border border-transparent text-sm font-medium focus-visible:ring-[3px] inline-flex items-center justify-center transition-all outline-none select-none",
-                        "size-8 text-primary hover:text-primary hover:bg-primary/10"
-                      )}
-                    >
-                      <ExternalLink className="size-4" />
-                    </Link>
-                  </TooltipTrigger>
-                  <TooltipContent>View attestations</TooltipContent>
-                </Tooltip>
-              )}
-            </div>
+            {attestationsPath && !isOnAttestationsPage && (
+              <Button
+                variant="default"
+                render={<Link href={attestationsPath} onClick={() => setIsOpen(false)} />}
+              >
+                Attestations
+              </Button>
+            )}
           </div>
         </DialogHeader>
 
-        <div className="max-h-[28rem] overflow-y-auto [scrollbar-width:thin] [scrollbar-color:oklch(1_0_0/20%)_transparent]">
+        <div
+          className={cn(
+            "max-h-[28rem] overflow-y-auto pr-2 [scrollbar-width:thin] [scrollbar-color:oklch(1_0_0/20%)_transparent]",
+            queue.length > 0 && "[mask-image:linear-gradient(transparent,black_1.5rem,black_calc(100%-1.5rem),transparent)]"
+          )}
+        >
           {queue.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 text-center">
               <p className="text-muted-foreground text-sm">
@@ -233,12 +231,14 @@ export function AttestationQueuePanel() {
               </p>
             </div>
           ) : (
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-3 py-2">
               {queue.map((item) => (
                 <QueueItem
                   key={item.id}
                   item={item}
                   onRemove={removeFromQueue}
+                  onSave={handleSaveOne}
+                  isSaving={savingIds.has(item.id)}
                 />
               ))}
             </div>
@@ -250,6 +250,25 @@ export function AttestationQueuePanel() {
             </div>
           )}
         </div>
+
+        {queue.length > 0 && (
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              variant="destructive"
+              onClick={clearQueue}
+              disabled={isSaving}
+            >
+              Delete all
+            </Button>
+            <Button
+              variant="positive"
+              onClick={handleSaveAll}
+              disabled={isSaving}
+            >
+              {isSaving ? "Saving\u2026" : "Save all"}
+            </Button>
+          </div>
+        )}
 
       </DialogContent>
     </Dialog>

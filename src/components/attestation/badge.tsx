@@ -20,7 +20,7 @@ export function AttestationBadge({
   type,
   showEmoji = true,
   bare = false,
-  variant = "outline",
+  variant = "secondary",
   className,
 }: AttestationBadgeProps) {
   const def = ATTESTATION_TYPES[type as AttestationType];

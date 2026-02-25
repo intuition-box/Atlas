@@ -200,33 +200,27 @@ export function AttestationButtons({
             );
           }
 
-          // 2. Already attested — stays disabled, green
-          if (isActive) {
+          // 2. Already attested or in queue — disabled secondary
+          if (isActive || inQueue) {
             return (
               <Button
                 key={attestType.id}
                 variant="secondary"
                 size={size}
                 disabled
-                className="bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
               >
                 <AttestationBadge type={attestType.id} bare />
               </Button>
             );
           }
 
-          // 3. Available — enabled
+          // 3. Available — enabled default
           return (
             <Button
               key={attestType.id}
-              variant="secondary"
+              variant="default"
               size={size}
               onClick={(e) => handleAttestClick(e, type)}
-              disabled={inQueue}
-              className={cn(
-                "bg-primary/10 text-primary border-primary/20 hover:bg-primary/20 hover:border-emerald-500/40 transition-colors duration-200",
-                inQueue && "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
-              )}
             >
               <AttestationBadge type={attestType.id} bare />
             </Button>
@@ -274,7 +268,7 @@ export function AttestationButtons({
                 top: { duration: ANIMATION.flightDuration, ease: [0.0, 0.55, 0.35, 1] },
               }}
             >
-              <div className="w-full h-full rounded-full bg-primary/10 text-primary flex items-center justify-center shadow-lg shadow-primary/50">
+              <div className="w-full h-full rounded-full bg-primary text-primary-foreground flex items-center justify-center shadow-lg shadow-primary/50">
                 <Check className="size-3" strokeWidth={3} />
               </div>
             </motion.div>

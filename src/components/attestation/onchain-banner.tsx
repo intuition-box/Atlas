@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Link2, Sparkles, Shield, Globe, Loader2, Check, X } from "lucide-react"
+import { Sparkles, Shield, Globe, Loader2, Check } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -15,16 +15,10 @@ type OnchainBannerProps = {
   totalCount: number
   /** Number of already minted attestations */
   mintedCount: number
-  /** IDs of selected attestations to mint */
-  selectedIds: Set<string>
   /** Whether any minting operation is in progress */
   isMinting: boolean
   /** Callback to mint all unminted attestations */
   onMintAll: () => void
-  /** Callback to mint only selected attestations */
-  onMintSelected: () => void
-  /** Callback to clear selection */
-  onClearSelection: () => void
   /** Optional className */
   className?: string
 }
@@ -58,11 +52,8 @@ function usePageHeaderHeight() {
 type ActionsBarProps = {
   unmintedCount: number
   mintedCount: number
-  selectedCount: number
   isMinting: boolean
   onMintAll: () => void
-  onMintSelected: () => void
-  onClearSelection: () => void
   /** When true, hides stats and uses xs buttons */
   compact?: boolean
 }
@@ -70,11 +61,8 @@ type ActionsBarProps = {
 function ActionsBar({
   unmintedCount,
   mintedCount,
-  selectedCount,
   isMinting,
   onMintAll,
-  onMintSelected,
-  onClearSelection,
   compact,
 }: ActionsBarProps) {
   const btnSize = compact ? "xs" as const : "default" as const
@@ -100,46 +88,13 @@ function ActionsBar({
       )}
 
       <div className="flex items-center justify-center gap-2">
-        {selectedCount > 0 && (
-          <Button
-            variant="destructive"
-            size={btnSize}
-            onClick={onClearSelection}
-            disabled={isMinting}
-            className="gap-2"
-          >
-            <X className="size-4" />
-            Cancel
-          </Button>
-        )}
-
-        {selectedCount > 0 && (
-          <Button
-            size={btnSize}
-            onClick={onMintSelected}
-            disabled={isMinting}
-            className="gap-2"
-          >
-            {isMinting ? (
-              <>
-                <Loader2 className="size-4 animate-spin" />
-                Minting...
-              </>
-            ) : (
-              <>
-                Mint {selectedCount} selected
-              </>
-            )}
-          </Button>
-        )}
-
         <Button
           size={btnSize}
           onClick={onMintAll}
           disabled={isMinting}
-          className="gap-2 bg-emerald-500 hover:bg-emerald-500/90"
+          className="gap-2"
         >
-          {isMinting && selectedCount === 0 ? (
+          {isMinting ? (
             <>
               <Loader2 className="size-4 animate-spin" />
               Minting...
@@ -162,15 +117,11 @@ function ActionsBar({
 export function OnchainBanner({
   totalCount,
   mintedCount,
-  selectedIds,
   isMinting,
   onMintAll,
-  onMintSelected,
-  onClearSelection,
   className,
 }: OnchainBannerProps) {
   const unmintedCount = totalCount - mintedCount
-  const selectedCount = selectedIds.size
   const allMinted = unmintedCount === 0
 
   const actionsRef = React.useRef<HTMLDivElement>(null)
@@ -196,11 +147,8 @@ export function OnchainBanner({
   const actionsProps: ActionsBarProps = {
     unmintedCount,
     mintedCount,
-    selectedCount,
     isMinting,
     onMintAll,
-    onMintSelected,
-    onClearSelection,
   }
 
   return (

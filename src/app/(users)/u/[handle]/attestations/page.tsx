@@ -10,9 +10,7 @@ import {
   LayoutGrid,
   Link2,
   List,
-  Loader2,
   Undo2,
-  X,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -75,27 +73,30 @@ type FilterState = {
 
 // === UTILITY FUNCTIONS ===
 
-function formatRelativeTime(iso: string): string {
+function formatAttestationDate(iso: string): string {
   const ts = Date.parse(iso)
   if (!Number.isFinite(ts)) return ""
 
   const diff = Date.now() - ts
-  const seconds = Math.floor(diff / 1000)
-  const minutes = Math.floor(seconds / 60)
-  const hours = Math.floor(minutes / 60)
-  const days = Math.floor(hours / 24)
+  const hours = Math.floor(diff / 1000 / 60 / 60)
 
-  if (days > 30) {
-    return new Date(iso).toLocaleDateString(undefined, {
-      month: "short",
-      day: "numeric",
-      year: days > 365 ? "numeric" : undefined,
-    })
+  if (hours < 1) {
+    const minutes = Math.floor(diff / 1000 / 60)
+    if (minutes < 1) return "just now"
+    return `${minutes}m ago`
   }
-  if (days > 0) return `${days}d ago`
-  if (hours > 0) return `${hours}h ago`
-  if (minutes > 0) return `${minutes}m ago`
-  return "just now"
+
+  if (hours < 24) {
+    return `${hours}h ago`
+  }
+
+  const d = new Date(ts)
+  const pad = (n: number) => String(n).padStart(2, "0")
+  return d.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }) + ` at ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 function mergeAttestationsUnique(prev: Attestation[], next: Attestation[]): Attestation[] {
@@ -332,20 +333,12 @@ function AttestationCard({
   attestation,
   currentHandle,
   viewerId,
-  isSelected,
-  isMinting,
   onRetract,
-  onSelect,
-  onMint,
 }: {
   attestation: Attestation
   currentHandle: string
   viewerId: string | null
-  isSelected: boolean
-  isMinting: boolean
   onRetract?: (id: string) => void
-  onSelect?: (id: string, selected: boolean) => void
-  onMint?: (id: string) => void
 }) {
   const [isRetracting, setIsRetracting] = React.useState(false)
   const isReceived = attestation.toUser.handle === currentHandle
@@ -355,7 +348,6 @@ function AttestationCard({
   const isMinted = !!attestation.mintedAt
 
   const canRetract = !isReceived && viewerId === attestation.fromUser.id
-  const canMint = !isReceived && viewerId === attestation.fromUser.id && !isMinted
 
   const handleRetract = async () => {
     if (isRetracting || !canRetract) return
@@ -371,28 +363,19 @@ function AttestationCard({
     }
   }
 
-  const handleCardClick = () => {
-    if (canMint) onSelect?.(attestation.id, !isSelected)
-  }
-
   return (
     <Card
       size="sm"
-      className={cn(
-        "transition-colors",
-        canMint && "cursor-pointer",
-        isSelected ? "ring-primary/50 bg-primary/5" : "ring-border/60",
-      )}
-      onClick={handleCardClick}
+      className="transition-colors"
     >
-      {/* Header: avatar + name + handle on left, onchain/offchain badge on right */}
+      {/* Header: avatar + name on left, retract + status badge on right */}
       <CardHeader className="flex-row items-center gap-3">
         <div className="flex items-center gap-3">
-          <Link href={href} onClick={(e) => e.stopPropagation()}>
+          <Link href={href}>
             <ProfileAvatar type="user" src={otherUser.avatarUrl} name={displayName} className="size-9" />
           </Link>
           <div className="min-w-0">
-            <Link href={href} className="hover:underline" onClick={(e) => e.stopPropagation()}>
+            <Link href={href} className="hover:underline">
               <span className="truncate text-sm font-medium">{displayName}</span>
             </Link>
             {otherUser.handle && (
@@ -402,16 +385,25 @@ function AttestationCard({
         </div>
         <CardAction>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">
-              {formatRelativeTime(attestation.createdAt)}
-            </span>
+            {canRetract && (
+              <Button
+                variant="destructive"
+                size="xs"
+                onClick={handleRetract}
+                disabled={isRetracting}
+                className="gap-1"
+              >
+                <Undo2 className="size-3" />
+                {isRetracting ? "Retracting…" : "Retract"}
+              </Button>
+            )}
             {isMinted ? (
-              <Badge variant="secondary" className="gap-1 bg-primary/10 text-primary border-primary/20">
+              <Badge variant="positive" className="gap-1">
                 <Link2 className="size-3" />
                 Onchain
               </Badge>
             ) : (
-              <Badge variant="secondary" className="gap-1 bg-violet-500/10 text-violet-500 border-violet-500/20">
+              <Badge variant="secondary" className="gap-1">
                 Offchain
               </Badge>
             )}
@@ -419,55 +411,22 @@ function AttestationCard({
         </CardAction>
       </CardHeader>
 
-      {/* Body: direction, type | buttons */}
-      <CardContent className="flex items-center gap-2">
+      {/* Body: Given/Received [type] on [date] */}
+      <CardContent className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
         {isReceived ? (
-          <Badge variant="secondary" className="gap-1 bg-emerald-500/10 text-emerald-500 border-emerald-500/20">
+          <Badge variant="default" className="gap-1">
             <ArrowDownLeft className="size-3" />
             Received
           </Badge>
         ) : (
-          <Badge variant="secondary" className="gap-1 bg-amber-500/10 text-amber-600 border-amber-500/20">
+          <Badge variant="info" className="gap-1">
             <ArrowUpRight className="size-3" />
             Given
           </Badge>
         )}
         <AttestationBadge type={attestation.type} />
-
-        {(canRetract || canMint) && (
-          <>
-            <span className="h-4 w-px bg-border" />
-            <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-              {canRetract && (
-                <Button
-                  variant="destructive"
-                  size="xs"
-                  onClick={handleRetract}
-                  disabled={isRetracting}
-                  className="gap-1"
-                >
-                  <Undo2 className="size-3" />
-                  {isRetracting ? "Retracting…" : "Retract"}
-                </Button>
-              )}
-              {canMint && (
-                <Button
-                  size="xs"
-                  onClick={() => onMint?.(attestation.id)}
-                  disabled={isMinting}
-                  className="gap-1"
-                >
-                  {isMinting ? (
-                    <Loader2 className="size-3 animate-spin" />
-                  ) : (
-                    <Link2 className="size-3" />
-                  )}
-                  Mint
-                </Button>
-              )}
-            </div>
-          </>
-        )}
+        <Separator orientation="vertical" className="!h-4 mx-1" />
+        <span>{formatAttestationDate(attestation.createdAt)}</span>
       </CardContent>
     </Card>
   )
@@ -558,27 +517,18 @@ function AttestationRow({
   attestation,
   currentHandle,
   viewerId,
-  isSelected,
-  isMinting,
   onRetract,
-  onSelect,
-  onMint,
 }: {
   attestation: Attestation
   currentHandle: string
   viewerId: string | null
-  isSelected: boolean
-  isMinting: boolean
   onRetract?: (id: string) => void
-  onSelect?: (id: string, selected: boolean) => void
-  onMint?: (id: string) => void
 }) {
   const [isRetracting, setIsRetracting] = React.useState(false)
   const isReceived = attestation.toUser.handle === currentHandle
   const otherUser = isReceived ? attestation.fromUser : attestation.toUser
   const canRetract = !isReceived && viewerId === attestation.fromUser.id
   const isMinted = !!attestation.mintedAt
-  const canMint = !isReceived && viewerId === attestation.fromUser.id && !isMinted
 
   const handleRetract = async (e: React.MouseEvent) => {
     e.preventDefault()
@@ -602,21 +552,12 @@ function AttestationRow({
   const displayName = otherUser.name?.trim() || `@${otherUser.handle}`
   const href = userPath(otherUser.handle ?? otherUser.id)
 
-  const handleRowClick = () => {
-    if (canMint) onSelect?.(attestation.id, !isSelected)
-  }
-
   return (
     <div
-      className={cn(
-        "grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.5fr)] gap-3 px-4 py-3 text-sm text-muted-foreground transition-colors hover:bg-muted",
-        canMint && "cursor-pointer",
-        isSelected && "bg-primary/5"
-      )}
-      onClick={handleRowClick}
+      className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,0.5fr)] gap-3 px-4 py-3 text-sm text-muted-foreground transition-colors hover:bg-muted"
     >
       <div className="flex items-center min-w-0">
-        <Link href={href} className="inline-flex min-w-0 items-center gap-3 rounded-md px-1.5 py-1 -mx-1.5 -my-1 transition-colors hover:text-primary" onClick={(e) => e.stopPropagation()}>
+        <Link href={href} className="inline-flex min-w-0 items-center gap-3 rounded-md px-1.5 py-1 -mx-1.5 -my-1 transition-colors hover:text-primary">
           <ProfileAvatar type="user" src={otherUser.avatarUrl} name={displayName} className="h-8 w-8 shrink-0" />
           <div className="min-w-0">
             <div className="truncate font-medium">{displayName}</div>
@@ -629,12 +570,12 @@ function AttestationRow({
 
       <div className="flex items-center">
         {isReceived ? (
-          <Badge variant="secondary" className="gap-1 bg-emerald-500/10 text-emerald-500 border-emerald-500/20">
+          <Badge variant="default" className="gap-1">
             <ArrowDownLeft className="size-3" />
             Received
           </Badge>
         ) : (
-          <Badge variant="secondary" className="gap-1 bg-amber-500/10 text-amber-600 border-amber-500/20">
+          <Badge variant="info" className="gap-1">
             <ArrowUpRight className="size-3" />
             Given
           </Badge>
@@ -646,22 +587,22 @@ function AttestationRow({
       </div>
 
       <div className="flex items-center text-xs text-muted-foreground">
-        {formatRelativeTime(attestation.createdAt)}
+        {formatAttestationDate(attestation.createdAt)}
       </div>
 
       <div className="flex items-center">
         {isMinted ? (
-          <Badge variant="secondary" className="gap-1 bg-primary/10 text-primary border-primary/20">
+          <Badge variant="positive" className="gap-1">
             Onchain
           </Badge>
         ) : (
-          <Badge variant="secondary" className="gap-1 bg-violet-500/10 text-violet-500 border-violet-500/20">
+          <Badge variant="secondary" className="gap-1">
             Offchain
           </Badge>
         )}
       </div>
 
-      <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+      <div className="flex items-center justify-end gap-1">
         {canRetract && (
           <Button
             variant="destructive"
@@ -671,21 +612,6 @@ function AttestationRow({
             className="gap-1"
           >
             <Undo2 className="size-3" />
-          </Button>
-        )}
-        {canMint && (
-          <Button
-            variant="default"
-            size="xs"
-            onClick={() => onMint?.(attestation.id)}
-            disabled={isMinting}
-            className="gap-1"
-          >
-            {isMinting ? (
-              <Loader2 className="size-3 animate-spin" />
-            ) : (
-              <Link2 className="size-3" />
-            )}
           </Button>
         )}
       </div>
@@ -848,21 +774,13 @@ function AttestationsGrid({
   view,
   currentHandle,
   viewerId,
-  selectedIds,
-  mintingIds,
   onRetract,
-  onSelect,
-  onMint,
 }: {
   items: Attestation[]
   view: "cards" | "list"
   currentHandle: string
   viewerId: string | null
-  selectedIds: Set<string>
-  mintingIds: Set<string>
   onRetract?: (id: string) => void
-  onSelect?: (id: string, selected: boolean) => void
-  onMint?: (id: string) => void
 }) {
   if (view === "cards") {
     return (
@@ -873,11 +791,7 @@ function AttestationsGrid({
             attestation={a}
             currentHandle={currentHandle}
             viewerId={viewerId}
-            isSelected={selectedIds.has(a.id)}
-            isMinting={mintingIds.has(a.id)}
             onRetract={onRetract}
-            onSelect={onSelect}
-            onMint={onMint}
           />
         ))}
       </div>
@@ -886,7 +800,7 @@ function AttestationsGrid({
 
   return (
     <div className="rounded-2xl border border-border/60 bg-card/30 overflow-hidden">
-      <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.5fr)] gap-3 border-b border-border/60 px-4 py-3 text-xs font-medium text-foreground/70">
+      <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,0.5fr)] gap-3 border-b border-border/60 px-4 py-3 text-xs font-medium text-foreground/70">
         <div>User</div>
         <div>Direction</div>
         <div>Type</div>
@@ -901,11 +815,7 @@ function AttestationsGrid({
           attestation={a}
           currentHandle={currentHandle}
           viewerId={viewerId}
-          isSelected={selectedIds.has(a.id)}
-          isMinting={mintingIds.has(a.id)}
           onRetract={onRetract}
-          onSelect={onSelect}
-          onMint={onMint}
         />
       ))}
     </div>
@@ -939,6 +849,7 @@ export default function AttestationsPage() {
   const handle = params.handle?.trim() || ""
 
   const viewerId = session?.user?.id ?? null
+  const isSelf = session?.user?.handle === handle
   const profile = useUserProfile(handle)
 
   const displayName = profile?.name?.trim() || `@${handle}`
@@ -952,8 +863,6 @@ export default function AttestationsPage() {
   const [isFiltersOpen, setIsFiltersOpen] = React.useState(false)
   const [localItems, setLocalItems] = React.useState<Attestation[]>([])
 
-  // Selection and minting state
-  const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set())
   const [mintingIds, setMintingIds] = React.useState<Set<string>>(new Set())
 
   const [filters, setFilters] = React.useState<FilterState>({
@@ -994,27 +903,6 @@ export default function AttestationsPage() {
 
   const handleRetract = React.useCallback((attestationId: string) => {
     setLocalItems((prev) => prev.filter((a) => a.id !== attestationId))
-    setSelectedIds((prev) => {
-      const next = new Set(prev)
-      next.delete(attestationId)
-      return next
-    })
-  }, [])
-
-  const handleSelect = React.useCallback((id: string, selected: boolean) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev)
-      if (selected) {
-        next.add(id)
-      } else {
-        next.delete(id)
-      }
-      return next
-    })
-  }, [])
-
-  const handleClearSelection = React.useCallback(() => {
-    setSelectedIds(new Set())
   }, [])
 
   // Mint function - calls API to persist state, will be extended with Intuition SDK later
@@ -1068,31 +956,8 @@ export default function AttestationsPage() {
         next.delete(id)
         return next
       })
-      setSelectedIds((prev) => {
-        const next = new Set(prev)
-        next.delete(id)
-        return next
-      })
     }
   }, [])
-
-  const handleMintSelected = React.useCallback(async () => {
-    const ids = Array.from(selectedIds)
-    if (ids.length === 0) return
-
-    // Start looping mintAll sound while minting batch
-    const loopControl = await sounds.loopMintAll()
-
-    try {
-      for (const id of ids) {
-        await handleMint(id, { silent: true })
-      }
-    } finally {
-      // Stop loop and play completion sound once
-      loopControl.stop()
-      sounds.mint()
-    }
-  }, [selectedIds, handleMint])
 
   const handleMintAll = React.useCallback(async () => {
     // Get all unminted attestations that the viewer gave
@@ -1197,7 +1062,7 @@ export default function AttestationsPage() {
             nav={[
               { label: "Profile", href: userPath(handle) },
               { label: "Attestations", href: userAttestationsPath(handle) },
-              ...(viewerId ? [{ label: "Settings", href: userSettingsPath(handle) }] : []),
+              ...(isSelf ? [{ label: "Settings", href: userSettingsPath(handle) }] : []),
             ]}
           />
         }
@@ -1208,11 +1073,8 @@ export default function AttestationsPage() {
         <OnchainBanner
           totalCount={totalCount}
           mintedCount={mintedCount}
-          selectedIds={selectedIds}
           isMinting={isMinting}
           onMintAll={handleMintAll}
-          onMintSelected={handleMintSelected}
-          onClearSelection={handleClearSelection}
         />
       )}
 
@@ -1252,11 +1114,7 @@ export default function AttestationsPage() {
               view={view}
               currentHandle={handle}
               viewerId={viewerId}
-              selectedIds={selectedIds}
-              mintingIds={mintingIds}
               onRetract={handleRetract}
-              onSelect={handleSelect}
-              onMint={handleMint}
             />
           </InfiniteScroll>
         )}
