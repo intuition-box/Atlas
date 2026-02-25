@@ -380,7 +380,7 @@ function CountryLanguageSection({
                           render={<button type="button" onClick={() => field.onChange(selected.filter((x) => x !== l))} />}
                         >
                           {l}
-                          <X data-icon="inline-end" className="size-3" />
+                          <X data-icon="inline-end" className="size-3 text-destructive" />
                         </Badge>
                       ))}
                     </div>
@@ -543,7 +543,7 @@ function SkillsAndToolsSection({
                           render={<button type="button" onClick={() => field.onChange(selected.filter((x) => x !== s))} />}
                         >
                           {s}
-                          <X data-icon="inline-end" className="size-3" />
+                          <X data-icon="inline-end" className="size-3 text-destructive" />
                         </Badge>
                       ))}
                     </div>
@@ -630,7 +630,7 @@ function SkillsAndToolsSection({
                           render={<button type="button" onClick={() => field.onChange(selected.filter((x) => x !== t))} />}
                         >
                           {t}
-                          <X data-icon="inline-end" className="size-3" />
+                          <X data-icon="inline-end" className="size-3 text-destructive" />
                         </Badge>
                       ))}
                     </div>
