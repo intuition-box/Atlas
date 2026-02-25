@@ -3,12 +3,31 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
-import { Eye, EyeOff, LogIn, LogOut, Settings, Volume2, VolumeX } from "lucide-react";
+import {
+  Activity,
+  ChevronDown,
+  Eye,
+  EyeOff,
+  Globe,
+  LogIn,
+  LogOut,
+  Plus,
+  User,
+  Volume2,
+  VolumeX,
+} from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { useSounds } from "@/lib/sounds";
-import { ROUTES, userSettingsPath } from "@/lib/routes";
+import { ROUTES, userPath, userSettingsPath, activityPath } from "@/lib/routes";
 import { Logo } from "@/components/brand/logo";
+import {
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuSeparator,
+  MenuTrigger,
+} from "@/components/ui/menu";
 import {
   Tooltip,
   TooltipContent,
@@ -64,27 +83,54 @@ export function NavigationController({
         className
       )}
     >
-      {/* Top Left - Logo/Home */}
+      {/* Top Left - Logo + Global Menu */}
       {showControls && (
         <div className="absolute top-4 left-4 sm:top-6 sm:left-6 pointer-events-auto">
-          <Tooltip>
-            <TooltipTrigger>
-              <Link
-                href={ROUTES.home}
-                className={cn(
-                  "flex items-center justify-center",
-                  "p-1 size-10 rounded-full",
-                  "hover:bg-background/80 backdrop-blur-sm",
-                  "transition-all duration-200",
-                )}
-              >
-                <Logo />
-              </Link>
-            </TooltipTrigger>
-            <TooltipContent side="right" sideOffset={8}>
-              <p className="text-xs">Atlas homepage</p>
-            </TooltipContent>
-          </Tooltip>
+          <Menu>
+            <MenuTrigger
+              className={cn(
+                "flex items-center gap-1",
+                "pl-1 pr-0.5 py-1 rounded-full",
+                "hover:bg-background/80 backdrop-blur-sm",
+                "transition-all duration-200",
+                "focus:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+              )}
+            >
+              <Logo className="size-4.5" />
+              <span className="text-xl font-semibold text-foreground">Atlas</span>
+              <ChevronDown className="size-3 text-muted-foreground" />
+            </MenuTrigger>
+            <MenuContent side="bottom" align="start" sideOffset={8}>
+              <MenuItem render={<Link href={ROUTES.home} />}>
+                <Globe className="size-4" />
+                Communities
+              </MenuItem>
+              {isAuthed && userHandle && (
+                <MenuItem render={<Link href={userPath(userHandle)} />}>
+                  <User className="size-4" />
+                  Profile
+                </MenuItem>
+              )}
+              <MenuItem render={<Link href={activityPath()} />}>
+                <Activity className="size-4" />
+                Activity
+              </MenuItem>
+              {isAuthed && (
+                <>
+                  <MenuSeparator />
+                  <MenuItem render={<Link href={ROUTES.newCommunity} />}>
+                    <Plus className="size-4" />
+                    New Community
+                  </MenuItem>
+                  <MenuSeparator />
+                  <MenuItem variant="destructive" onClick={() => signOut({ callbackUrl: "/" })}>
+                    <LogOut className="size-4" />
+                    Logout
+                  </MenuItem>
+                </>
+              )}
+            </MenuContent>
+          </Menu>
         </div>
       )}
 
@@ -93,15 +139,6 @@ export function NavigationController({
         <div className="flex items-center gap-1">
           {/* Attestation Queue (authed only) */}
           {showControls && isAuthed && <AttestationQueueButton />}
-
-          {/* User Settings (authed only) */}
-          {showControls && isAuthed && settingsHref && (
-            <NavigationButton
-              icon={Settings}
-              label="Settings"
-              href={settingsHref}
-            />
-          )}
 
           {/* Sound Toggle (authed only) */}
           {showControls && isAuthed && (
@@ -117,20 +154,14 @@ export function NavigationController({
             <NavigationButton key={`topRight-${idx}`} {...item} />
           ))}
 
-          {/* Auth - Login/Logout */}
-          {showControls && (isAuthed ? (
-            <NavigationButton
-              icon={LogOut}
-              label="Sign out"
-              onClick={() => signOut({ callbackUrl: "/" })}
-            />
-          ) : status !== "loading" ? (
+          {/* Sign in (unauthenticated only) */}
+          {showControls && !isAuthed && status !== "loading" && (
             <NavigationButton
               icon={LogIn}
               label="Sign in"
               href={ROUTES.signIn}
             />
-          ) : null)}
+          )}
 
           {/* Visibility Toggle - Always visible, rightmost */}
           <Tooltip>
