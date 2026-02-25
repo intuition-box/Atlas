@@ -7,8 +7,19 @@ import { useParams, useRouter } from "next/navigation"
 import { apiGet } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
 import { normalizeHandle, validateHandle } from "@/lib/handle"
-import { communityPath, userPath } from "@/lib/routes"
+import {
+  communityPath,
+  communityOrbitPath,
+  communityApplicationsPath,
+  communityBansPath,
+  communitySettingsPath,
+  userPath,
+} from "@/lib/routes"
 
+import { PageHeader } from "@/components/common/page-header"
+import { PageToolbar } from "@/components/common/page-toolbar"
+import { ProfileAvatar } from "@/components/common/profile-avatar"
+import { useNavigationVisibility } from "@/components/navigation/navigation-provider"
 import { OrbitView } from "@/components/orbit/view"
 import type { OrbitMember, OrbitCommunityData } from "@/components/orbit/types"
 
@@ -118,6 +129,7 @@ export default function CommunityOrbitPage() {
   const params = useParams<{ handle: string }>()
   const rawHandle = String(params?.handle ?? "")
   const handle = React.useMemo(() => normalizeHandle(rawHandle), [rawHandle])
+  const { isVisible: navVisible } = useNavigationVisibility()
 
   const [state, setState] = React.useState<LoadState>(() => {
     const prefetched = consumePrefetch(handle)
@@ -220,9 +232,46 @@ export default function CommunityOrbitPage() {
   const members = data ? toOrbitMembers(data.orbitMembers) : []
   const canViewDirectory = data?.canViewDirectory ?? false
   const communityData = data ? toCommunityData(data) : undefined
+  const isAdmin = data?.isAdmin ?? false
 
   return (
     <>
+      {/* Page header — pinned overlay, hidden when nav is toggled off */}
+      {isReady && navVisible && (
+        <div className="pointer-events-none fixed inset-x-0 top-0 z-30 flex justify-center px-4 pt-1">
+          <div className="pointer-events-auto w-full max-w-3xl">
+            <PageHeader
+              leading={
+                <ProfileAvatar
+                  type="community"
+                  src={avatarSrc}
+                  name={community?.name ?? ""}
+                  className="h-12 w-12"
+                />
+              }
+              title={community?.name ?? ""}
+              description={`@${handleLabel}`}
+              sticky
+              pinned
+              actions={
+                <PageToolbar
+                  nav={[
+                    { label: "Orbit", href: communityOrbitPath(handleLabel) },
+                    { label: "Profile", href: communityPath(handleLabel) },
+                  ]}
+                  overflow={isAdmin ? [
+                    { label: "Applications", href: communityApplicationsPath(handleLabel) },
+                    { label: "Bans", href: communityBansPath(handleLabel) },
+                    { label: "Settings", href: communitySettingsPath(handleLabel) },
+                  ] : undefined}
+                />
+              }
+              actionsAsFormActions={false}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Full-screen orbit canvas */}
       {isReady && canViewDirectory && members.length > 0 ? (
         <OrbitView
