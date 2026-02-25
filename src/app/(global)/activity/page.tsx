@@ -239,29 +239,29 @@ function hasActiveFilters(filters: FilterState): boolean {
 // === ACTIVITY TYPE CONFIG ===
 // Extensible map — add new activity types here as the platform grows.
 
-const ACTIVITY_KIND_CONFIG: Record<ActivityEvent["kind"], { label: string; className: string }> = {
+const ACTIVITY_KIND_CONFIG: Record<ActivityEvent["kind"], { label: string; variant: "default" | "positive" | "info" | "destructive" | "secondary" }> = {
   attestation: {
     label: "Attestation",
-    className: "bg-primary/10 text-primary",
+    variant: "default",
   },
   user_joined: {
     label: "New User",
-    className: "bg-emerald-500/10 text-emerald-500",
+    variant: "positive",
   },
   community_created: {
     label: "New Community",
-    className: "bg-accent/10 text-accent",
+    variant: "positive",
   },
 }
 
 const ACTIVITY_KIND_LIST = Object.entries(ACTIVITY_KIND_CONFIG) as Array<
-  [ActivityEvent["kind"], { label: string; className: string }]
+  [ActivityEvent["kind"], { label: string; variant: string }]
 >
 
 function ActivityTypeBadge({ kind }: { kind: ActivityEvent["kind"] }) {
   const config = ACTIVITY_KIND_CONFIG[kind]
   return (
-    <Badge variant="secondary" className={`shrink-0 ${config.className}`}>
+    <Badge variant={config.variant} className="shrink-0">
       {config.label}
     </Badge>
   )
@@ -572,13 +572,15 @@ function FiltersPanel({
 function ActivitySkeleton() {
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-7 pb-40">
-      <div className="w-full flex flex-wrap gap-3 p-5">
-        <Skeleton className="size-12 rounded-full" />
-        <div className="flex flex-col gap-2">
-          <Skeleton className="h-7 w-48" />
-          <Skeleton className="h-3 w-24" />
+      <div className="w-full p-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <Skeleton className="size-12 rounded-full shrink-0" />
+          <div className="flex flex-col gap-1.5">
+            <Skeleton className="h-7 w-48" />
+            <Skeleton className="h-3 w-24" />
+          </div>
         </div>
-        <div className="flex gap-3 ml-auto sm:align-center sm:justify-end">
+        <div className="flex items-center gap-2">
           <Skeleton className="h-9 w-64 rounded-4xl" />
         </div>
       </div>
@@ -778,7 +780,7 @@ export default function ActivityPage() {
     setFilters(EMPTY_FILTERS)
   }
 
-  if (status !== "authenticated" || (loading && !hasActiveFilters(apiFilters))) {
+  if (status !== "authenticated" || (tab === "events" && loading && !hasActiveFilters(apiFilters))) {
     return <ActivitySkeleton />
   }
 
