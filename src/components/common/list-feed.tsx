@@ -19,11 +19,11 @@ function DefaultSkeletonRow() {
   return (
     <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 p-3">
       <div className="flex items-center gap-2">
-        <Skeleton className="size-8 rounded-full shrink-0" />
-        <Skeleton className="h-4 w-20" />
-        <Skeleton className="h-4 w-32" />
+        <Skeleton className="size-6 rounded-full shrink-0" />
+        <Skeleton className="h-3.5 w-20" />
+        <Skeleton className="h-3.5 w-32" />
       </div>
-      <Skeleton className="h-4 w-16 shrink-0" />
+      <Skeleton className="h-3.5 w-16 shrink-0" />
     </div>
   );
 }

@@ -479,14 +479,12 @@ function ApplicationRow({
     >
       <Link
         href={userPath(user.handle)}
-        className="flex items-center gap-3 min-w-0 hover:opacity-80 transition-opacity"
+        className="flex items-center gap-2 min-w-0 hover:opacity-80 transition-opacity"
         onClick={(e) => e.stopPropagation()}
       >
-        <ProfileAvatar type="user" src={user.image ?? null} name={display} size="default" />
-        <div className="min-w-0">
-          <div className="truncate text-sm font-medium">{display}</div>
-          <div className="truncate text-xs text-muted-foreground">@{user.handle}</div>
-        </div>
+        <ProfileAvatar type="user" src={user.image ?? null} name={display} size="sm" />
+        <span className="truncate text-sm font-medium">{display}</span>
+        <span className="truncate text-xs text-muted-foreground">@{user.handle}</span>
       </Link>
 
       <div className="flex items-center gap-2 shrink-0">

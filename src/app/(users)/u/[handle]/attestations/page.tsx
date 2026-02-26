@@ -283,12 +283,10 @@ function AttestationRow({
       <div className="flex items-center gap-2 min-w-0 text-sm">
         <Link href={href} className="flex items-center gap-2 min-w-0 hover:opacity-80 transition-opacity">
           <ProfileAvatar type="user" src={otherUser.avatarUrl} name={displayName} size="sm" />
-          <div className="min-w-0">
-            <div className="truncate font-medium">{displayName}</div>
-            {otherUser.handle && (
-              <div className="truncate text-xs text-muted-foreground">@{otherUser.handle}</div>
-            )}
-          </div>
+          <span className="truncate text-sm font-medium">{displayName}</span>
+          {otherUser.handle && (
+            <span className="truncate text-xs text-muted-foreground">@{otherUser.handle}</span>
+          )}
         </Link>
         <ArrowUpRight className="size-3 shrink-0 text-amber-500" />
         <AttestationBadge type={attestation.type} />

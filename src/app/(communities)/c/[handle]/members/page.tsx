@@ -807,12 +807,10 @@ function MemberRow({ member, isAdmin, isOwner: viewerIsOwner, viewerUserId, comm
 
   return (
     <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 p-3 transition-colors hover:bg-card/50">
-      <Link href={href} className="flex min-w-0 items-center gap-3 hover:opacity-80 transition-opacity">
-        <ProfileAvatar type="user" src={u.image} name={displayName} className="h-8 w-8" />
-        <div className="min-w-0">
-          <div className="truncate text-sm font-medium">{displayName}</div>
-          <div className="truncate text-xs text-muted-foreground">@{u.handle}</div>
-        </div>
+      <Link href={href} className="flex min-w-0 items-center gap-2 hover:opacity-80 transition-opacity">
+        <ProfileAvatar type="user" src={u.image} name={displayName} size="sm" />
+        <span className="truncate text-sm font-medium">{displayName}</span>
+        <span className="truncate text-xs text-muted-foreground">@{u.handle}</span>
       </Link>
 
       <div className="flex items-center gap-2 shrink-0">

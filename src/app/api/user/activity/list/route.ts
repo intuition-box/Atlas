@@ -15,6 +15,8 @@ const EXCLUDED_TYPES: EventType[] = [
   EventType.PROFILE_UPDATED,
   EventType.COMMUNITY_CREATED,
   EventType.COMMUNITY_UPDATED,
+  EventType.ROLE_UPDATED,
+  EventType.ORBIT_OVERRIDE,
 ];
 
 const ALLOWED_TYPES = Object.values(EventType).filter(
