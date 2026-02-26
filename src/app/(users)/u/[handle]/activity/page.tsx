@@ -52,8 +52,6 @@ const EVENT_TYPE_CONFIG: Record<string, EventTypeConfig> = {
   ATTESTED: { label: "Attestation", variant: "default" },
   ATTESTATION_RETRACTED: { label: "Retracted", variant: "destructive" },
   ATTESTATION_SUPERSEDED: { label: "Attestation Updated", variant: "secondary" },
-  ROLE_UPDATED: { label: "Role Change", variant: "info" },
-  ORBIT_OVERRIDE: { label: "Orbit Override", variant: "info" },
 };
 
 const EVENT_TYPE_OPTIONS = Object.entries(EVENT_TYPE_CONFIG).map(
