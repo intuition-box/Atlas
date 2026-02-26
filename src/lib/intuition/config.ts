@@ -2,10 +2,9 @@
  * Intuition SDK Configuration
  *
  * Configuration for connecting to the Intuition chain using the official SDK.
- * Uses a Hybrid approach with first-class Atoms for Users, Skills, and Communities.
  *
  * Domain config (attestation types, attributes) lives in @/lib/attestations/definitions.ts
- * This file contains SDK-specific config: chain, contracts, hybrid predicates.
+ * This file contains SDK-specific config: chain, contracts, environment detection.
  *
  * @see https://docs.intuition.systems/docs/intuition-sdk/installation-and-setup
  */
@@ -22,6 +21,7 @@ import {
 
 /**
  * Check if we're in development mode
+ * Set NODE_ENV=development to enable
  */
 export const IS_DEV = process.env.NODE_ENV === "development";
 
@@ -58,54 +58,10 @@ export const INTUITION_CHAIN = USE_TESTNET ? intuitionTestnet : intuitionMainnet
 export const MULTIVAULT_ADDRESS = getMultiVaultAddressFromChainId(
   INTUITION_CHAIN.id
 );
+
 /**
  * Native currency symbol for the current chain (e.g., "tTRUST" on testnet, "TRUST" on mainnet).
  * Derived from the SDK chain config.
  */
 export const NATIVE_CURRENCY_SYMBOL = INTUITION_CHAIN.nativeCurrency.symbol;
 
-/* ────────────────────────────
-   Hybrid Predicates
-──────────────────────────── */
-
-/**
- * Hybrid-specific predicate atoms for the SDK
- *
- * User-to-user predicates (FOLLOW, TRUST, etc.) are in @/lib/attestations/definitions.ts
- * Attributes (skills, tools) are in @/lib/attestations/definitions.ts
- *
- * This file only defines predicates for Hybrid approach features:
- * - Attribute possession: [User] [has_attribute] [Attribute]
- * - Community scoping: [Triple] [in_community] [Community]
- */
-export const HYBRID_PREDICATES = {
-  /** Attribute possession: "User has attribute X" */
-  hasAttribute: "atlas:has_attribute",
-  /** Community context: "Attestation is within community X" */
-  inCommunity: "atlas:in_community",
-} as const;
-
-export type HybridPredicateType = keyof typeof HYBRID_PREDICATES;
-
-/* ────────────────────────────
-   Community Atoms
-──────────────────────────── */
-
-/**
- * Prefix for community atoms
- *
- * Communities are dynamically created atoms based on their ID:
- * - `atlas:community:abc123` for community with ID "abc123"
- *
- * Triple structure for community-scoped attestations:
- * 1. [User] [trusts] [User] → creates attestation triple
- * 2. [Attestation Triple] [in_community] [Community Atom] → adds context
- */
-export const COMMUNITY_ATOM_PREFIX = "atlas:community:";
-
-/**
- * Generate a community atom identifier from a community ID
- */
-export function getCommunityAtomId(communityId: string): string {
-  return `${COMMUNITY_ATOM_PREFIX}${communityId}`;
-}
