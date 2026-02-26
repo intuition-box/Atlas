@@ -2,7 +2,7 @@ import {
   MembershipRole,
   MembershipStatus,
   Prisma,
-  ScoringType,
+  EventType,
 } from "@prisma/client";
 import type { NextRequest } from "next/server";
 import { z } from "zod";
@@ -199,7 +199,7 @@ export async function POST(req: NextRequest) {
 
       // Audit / preferences feed (best-effort): record a membership status change.
       // We resolve enum members defensively so this route won’t break if naming differs.
-      const scoringTypes = ScoringType as unknown as Record<string, ScoringType>;
+      const scoringTypes = EventType as unknown as Record<string, EventType>;
 
       const type =
         updated.status === MembershipStatus.BANNED
@@ -209,7 +209,7 @@ export async function POST(req: NextRequest) {
             : (scoringTypes.MEMBERSHIP_STATUS_CHANGED ?? scoringTypes.STATUS_CHANGED);
 
       if (type) {
-        await tx.scoringEvent.create({
+        await tx.event.create({
           data: {
             communityId: updated.communityId,
             actorId,

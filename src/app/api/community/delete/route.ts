@@ -84,7 +84,7 @@ export async function POST(req: NextRequest) {
 
       await tx.application.deleteMany({ where: { communityId } });
       await tx.membership.deleteMany({ where: { communityId } });
-      await tx.scoringEvent.deleteMany({ where: { communityId } });
+      await tx.event.deleteMany({ where: { communityId } });
       
       await tx.community.delete({ where: { id: communityId } });
 

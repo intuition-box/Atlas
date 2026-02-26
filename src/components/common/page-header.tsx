@@ -4,6 +4,7 @@ import * as React from "react";
 
 import { FormActions } from "@/components/ui/form";
 import { cn } from "@/lib/utils";
+import { motion } from "motion/react";
 
 export type PageHeaderProps = {
   title: React.ReactNode;
@@ -72,21 +73,28 @@ function PageHeader({
   }, [sticky]);
 
   return (
-    <div
+    <motion.div
       ref={headerRef}
       data-slot="page-header"
       data-stuck={isSticky || pinned || undefined}
+      initial={{ opacity: 0, y: -12 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -12 }}
+      transition={{ duration: 0.3, ease: "easeOut" }}
       className={cn(
         "w-full transition-colors duration-200",
         sticky ? "sticky top-0 z-40 rounded-2xl border border-transparent" : null,
         sticky && (isSticky || pinned) ? "border-border bg-card/80 backdrop-blur-md shadow-lg" : null,
+        pinned ? "max-w-3xl p-1 absolute top-3 left-1/2 -translate-x-1/2 pointer-events-auto opacity-60 hover:opacity-100" : null,
         className,
       )}
     >
       <div
         data-slot="page-header-content"
+        data-stuck={pinned}
         className={cn(
-          "mx-auto w-full p-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between", 
+          "mx-auto w-full p-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between",
+          pinned ? "p-3" : null,
           contentClassName
         )}
       >
@@ -106,7 +114,7 @@ function PageHeader({
           <div data-slot="page-header-text" className="min-w-0 flex flex-col">
             <h1 className="text-2xl font-semibold leading-tight">{title}</h1>
             {description ? (
-              <p className="text-sm text-muted-foreground">{description}</p>
+              <p className="text-xs text-muted-foreground">{description}</p>
             ) : null}
           </div>
         </header>
@@ -124,7 +132,7 @@ function PageHeader({
           </ActionsWrap>
         ) : null}
       </div>
-    </div>
+    </motion.div>
   );
 }
 

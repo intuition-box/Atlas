@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 
-import { HandleStatus, MembershipRole, MembershipStatus } from "@prisma/client";
+import { HandleStatus, MembershipRole, MembershipStatus, EventType } from "@prisma/client";
 
 import { auth } from "@/lib/auth/session";
 import { errJson, okJson } from "@/lib/api/server";
@@ -464,6 +464,17 @@ export async function POST(req: NextRequest) {
           },
           data: {
             status: memberStatus,
+          },
+        });
+      }
+
+      // Emit JOINED event when a member is approved.
+      if (decision === "APPROVE") {
+        await tx.event.create({
+          data: {
+            communityId: app.communityId,
+            actorId: app.userId,
+            type: EventType.JOINED,
           },
         });
       }

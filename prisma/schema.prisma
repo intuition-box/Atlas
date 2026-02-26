@@ -44,7 +44,7 @@ enum OrbitLevel {
 // AttestationType is now defined in src/config/attestations.ts
 // Stored as String in the database for flexibility
 
-enum ScoringType {
+enum EventType {
   COMMUNITY_CREATED
   JOINED
 
@@ -136,8 +136,8 @@ model User {
   attestationsGiven     Attestation[] @relation("attestationsGiven")
   attestationsReceived  Attestation[] @relation("attestationsReceived")
   attestationsRevoked   Attestation[] @relation("attestationsRevokedBy")
-  scoringEvents         ScoringEvent[] @relation("scoringActor")
-  scoringSubjects       ScoringEvent[] @relation("ScoringSubject")
+  events                Event[] @relation("eventActor")
+  eventSubjects         Event[] @relation("eventSubject")
   bannedMemberships     Membership[]   @relation("BannedByUser")
 
   // Security
@@ -378,7 +378,7 @@ model Community {
   configRevisions CommunityConfigRevision[]
   memberships Membership[]
   applications Application[]
-  scoringEvents ScoringEvent[]
+  events Event[]
 
   @@index([ownerId])
   @@index([createdAt])
@@ -525,22 +525,22 @@ model Attestation {
 }
 
 /// -----------------------------
-/// Scoring events
+/// Events (activity feed + scoring)
 /// -----------------------------
 
-model ScoringEvent {
+model Event {
   id            String    @id @default(cuid())
   communityId   String
   actorId       String
   subjectUserId String?
 
-  type          ScoringType
+  type          EventType
   metadata      Json?
   createdAt     DateTime  @default(now())
 
   community     Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
-  actor         User      @relation("scoringActor", fields: [actorId], references: [id], onDelete: Cascade)
-  subjectUser   User?     @relation("ScoringSubject", fields: [subjectUserId], references: [id], onDelete: SetNull)
+  actor         User      @relation("eventActor", fields: [actorId], references: [id], onDelete: Cascade)
+  subjectUser   User?     @relation("eventSubject", fields: [subjectUserId], references: [id], onDelete: SetNull)
 
   @@index([communityId, createdAt])
   @@index([communityId, actorId, createdAt])

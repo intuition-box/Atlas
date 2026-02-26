@@ -3,14 +3,14 @@
 import * as React from "react"
 import Link from "next/link"
 import { useParams } from "next/navigation"
+import { useSession } from "next-auth/react"
 import { ArrowUpRight, Wallet } from "lucide-react"
 
 import { apiGet } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
 import { normalizeHandle, validateHandle } from "@/lib/handle"
-import { userPath, userSettingsPath, userAttestationsPath } from "@/lib/routes"
+import { userPath, userSettingsPath, userActivityPath, userAttestationsPath } from "@/lib/routes"
 
-import { AttestationBadge } from "@/components/attestation/badge"
 import { AttestationButtons } from "@/components/attestation/buttons"
 import { PageHeader } from "@/components/common/page-header"
 import { PageToolbar } from "@/components/common/page-toolbar"
@@ -287,6 +287,7 @@ export default function UserProfilePage() {
   const rawHandle = String(params?.handle ?? "")
   const handle = React.useMemo(() => normalizeHandle(rawHandle), [rawHandle])
 
+  const { data: session } = useSession()
   const [state, setState] = React.useState<LoadState>({ status: "idle" })
 
   React.useEffect(() => {
@@ -363,7 +364,10 @@ export default function UserProfilePage() {
     return null
   }
 
-  const { user, isSelf, attestations } = state.data
+  const { user, isSelf: apiIsSelf } = state.data
+
+  // Combine API + client-side check for robustness
+  const isSelf = apiIsSelf || session?.user?.id === user.id
 
   const handleLabel = user.handle ?? handle
   const displayName = user.name?.trim() || handleLabel
@@ -388,6 +392,7 @@ export default function UserProfilePage() {
             nav={[
               { label: "Profile", href: userPath(handleLabel) },
               { label: "Attestations", href: userAttestationsPath(handleLabel) },
+              { label: "Activity", href: userActivityPath(handleLabel) },
               ...(isSelf ? [{ label: "Settings", href: userSettingsPath(handleLabel) }] : []),
             ]}
           />
@@ -536,81 +541,26 @@ export default function UserProfilePage() {
         </Card>
       ) : null}
 
-      {/* Recent Attestations */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Attestations</CardTitle>
-          <CardDescription>
-            {attestations.length > 0
-              ? `${attestations.filter((a) => a.direction === "received").length} received · ${attestations.filter((a) => a.direction === "given").length} given`
-              : "Reputation and trust signals."}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          {/* Attest — only visible to other users */}
-          {!isSelf && (
-            <Card>
-              <CardContent className="flex flex-col items-center gap-3">
-                <p className="text-sm text-muted-foreground">
-                  Vouch for {user.name?.split(" ")[0] || `@${handleLabel}`}&apos;s skills and contributions
-                </p>
-                <AttestationButtons
-                  toUserId={user.id}
-                  toName={displayName}
-                  toHandle={handleLabel}
-                  toAvatarUrl={avatarSrc}
-                  size="sm"
-                />
-              </CardContent>
-            </Card>
-          )}
-
-          {attestations.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-6">No attestations yet.</p>
-          ) : (
-            <div className="flex flex-col gap-3">
-              {attestations.slice(0, 10).map((a) => {
-                const peerName = a.peer.name?.trim() || a.peer.handle || "Unknown"
-                const peerAvatar = a.peer.avatarUrl || a.peer.image || ""
-                const isReceived = a.direction === "received"
-
-                return (
-                  <div key={a.id} className="flex items-center justify-between gap-2 rounded-lg border border-border/60 p-3">
-                      <div className="flex items-center gap-3 min-w-0">
-                        {a.peer.handle ? (
-                          <Link href={userPath(a.peer.handle)} className="flex items-center gap-3 min-w-0 hover:opacity-80 transition-opacity">
-                            <ProfileAvatar type="user" src={peerAvatar} name={peerName} size="sm" />
-                            <span className="text-sm font-medium truncate">{peerName}</span>
-                            <AttestationBadge type={a.type} />
-                          </Link>
-                        ) : (
-                          <>
-                            <ProfileAvatar type="user" src={peerAvatar} name={peerName} size="sm" />
-                            <span className="text-sm font-medium truncate">{peerName}</span>
-                            <AttestationBadge type={a.type} />
-                          </>
-                        )}
-                      </div>
-
-                      <div className="flex items-center gap-2 shrink-0">
-                        <Badge variant={isReceived ? "positive" : "info"}>
-                          {isReceived ? "Received" : "Given"}
-                        </Badge>
-                        <span className="text-xs text-muted-foreground">{fmtDate(a.createdAt)}</span>
-                      </div>
-                  </div>
-                )
-              })}
-
-              <Button variant="default" className="self-center" render={<Link href={userAttestationsPath(handleLabel)} />}>
-                {attestations.length > 10
-                  ? `View all ${attestations.length} attestations`
-                  : "View all attestations"}
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      {/* Network — only visible to other users */}
+      {!isSelf && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Network</CardTitle>
+            <CardDescription>How do you know @{handleLabel}?</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <AttestationButtons
+              toUserId={user.id}
+              toName={displayName}
+              toHandle={handleLabel}
+              toAvatarUrl={avatarSrc}
+              showCounts
+              showTooltip
+              size="sm"
+            />
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }

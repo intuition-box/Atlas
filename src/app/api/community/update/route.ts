@@ -4,6 +4,7 @@ import {
   MembershipRole,
   MembershipStatus,
   Prisma,
+  EventType,
 } from "@prisma/client";
 import type { NextRequest } from "next/server";
 
@@ -181,6 +182,18 @@ export async function POST(req: NextRequest) {
           select: { id: true },
         });
       }
+
+      // Emit COMMUNITY_UPDATED event for activity feed
+      await tx.event.create({
+        data: {
+          communityId: input.communityId,
+          actorId: userId,
+          type: EventType.COMMUNITY_UPDATED,
+          metadata: {
+            fields: Object.keys(data),
+          },
+        },
+      });
 
       const handleName = await resolveHandleNameForOwner(
         { ownerType: HandleOwnerType.COMMUNITY, ownerId: community.id },

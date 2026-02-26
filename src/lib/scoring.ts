@@ -1,6 +1,6 @@
 import "server-only";
 
-import { MembershipRole, MembershipStatus, OrbitLevel, ScoringType } from "@prisma/client";
+import { MembershipRole, MembershipStatus, OrbitLevel, EventType, Prisma } from "@prisma/client";
 import { z } from "zod";
 
 import { db } from "@/lib/db/client";
@@ -510,7 +510,7 @@ export async function recomputeOrbitLevelsForCommunity(params: { communityId: st
 }
 
 // ---------------------------------------------------------------------------
-// ScoringEvent logging — fire-and-forget
+// Event emitting — fire-and-forget
 // ---------------------------------------------------------------------------
 
 /**
@@ -559,18 +559,19 @@ export function recomputeScoresForAttestationPair(params: {
 }
 
 /**
- * Fire-and-forget: log a ScoringEvent for every community where both users are
+ * Fire-and-forget: emit an Event for every community where both users are
  * approved members. Used by attestation create/retract routes.
  *
  * Never throws — failures are silently swallowed so they don't block the
  * calling route's response.
  */
-export function logScoringEvent(params: {
+export function emitEvent(params: {
   fromUserId: string;
   toUserId: string;
-  type: ScoringType;
+  type: EventType;
+  metadata?: Prisma.InputJsonValue;
 }) {
-  const { fromUserId, toUserId, type } = params;
+  const { fromUserId, toUserId, type, metadata } = params;
 
   db.membership
     .findMany({
@@ -601,12 +602,13 @@ export function logScoringEvent(params: {
 
       if (sharedCommunityIds.length === 0) return;
 
-      return db.scoringEvent.createMany({
+      return db.event.createMany({
         data: sharedCommunityIds.map((communityId) => ({
           communityId,
           actorId: fromUserId,
           subjectUserId: toUserId,
           type,
+          ...(metadata ? { metadata } : {}),
         })),
       });
     })

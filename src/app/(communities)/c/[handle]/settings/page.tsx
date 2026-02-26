@@ -7,7 +7,7 @@ import { useParams, useRouter } from "next/navigation"
 import { getSession } from "next-auth/react"
 import { apiGet, apiPost } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
-import { communityPath, communitySettingsPath, communityOrbitPath, communityApplicationsPath, communityBansPath, communityPermissionsPath } from "@/lib/routes"
+import { communityPath, communityActivityPath, communityMembersPath, communitySettingsPath, communityOrbitPath, communityApplicationsPath, communityBansPath, communityPermissionsPath } from "@/lib/routes"
 
 import { AvatarDropzone } from "@/components/common/avatar-dropzone"
 import { HandleField } from "@/components/common/handle-field"
@@ -569,8 +569,10 @@ export default function CommunitySettingsPage() {
         actions={
           <PageToolbar
             nav={[
-              { label: "Orbit", href: communityOrbitPath(communityHandle) },
               { label: "Profile", href: communityPath(communityHandle) },
+              { label: "Orbit", href: communityOrbitPath(communityHandle) },
+              { label: "Members", href: communityMembersPath(communityHandle) },
+              { label: "Activity", href: communityActivityPath(communityHandle) },
             ]}
             overflow={[
               { label: "Applications", href: communityApplicationsPath(communityHandle) },

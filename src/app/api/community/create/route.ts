@@ -5,6 +5,7 @@ import {
   MembershipStatus,
   OrbitLevel,
   Prisma,
+  EventType,
 } from "@prisma/client";
 import type { NextRequest } from "next/server";
 
@@ -203,6 +204,22 @@ export async function POST(req: NextRequest) {
             select: { id: true },
           });
         }
+
+        // Emit events for activity feed
+        await tx.event.createMany({
+          data: [
+            {
+              communityId: community.id,
+              actorId: userId,
+              type: EventType.COMMUNITY_CREATED,
+            },
+            {
+              communityId: community.id,
+              actorId: userId,
+              type: EventType.JOINED,
+            },
+          ],
+        });
 
         return {
           community: {

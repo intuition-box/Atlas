@@ -123,7 +123,7 @@ export function NavigationController({
                     Profile
                   </MenuItem>
                 )}
-                {isAuthed && (
+                {isAuthed ? (
                   <>
                     <MenuSeparator />
                     <MenuItem render={<Link href={ROUTES.newCommunity} />}>
@@ -136,7 +136,15 @@ export function NavigationController({
                       Logout
                     </MenuItem>
                   </>
-                )}
+                ) : status !== "loading" ? (
+                  <>
+                    <MenuSeparator />
+                    <MenuItem render={<Link href={ROUTES.signIn} />}>
+                      <LogIn className="size-4" />
+                      Sign in
+                    </MenuItem>
+                  </>
+                ) : null}
               </MenuContent>
             </Menu>
           </motion.div>
@@ -167,15 +175,6 @@ export function NavigationController({
           {showControls && isAuthed && controls.topRight?.map((item, idx) => (
             <NavigationButton key={`topRight-${idx}`} {...item} />
           ))}
-
-          {/* Sign in (unauthenticated only) */}
-          {showControls && !isAuthed && status !== "loading" && (
-            <NavigationButton
-              icon={LogIn}
-              label="Sign in"
-              href={ROUTES.signIn}
-            />
-          )}
 
           {/* Visibility Toggle - Always visible, rightmost */}
           <Tooltip>

@@ -9,6 +9,8 @@ import { parseApiError } from "@/lib/api/errors"
 import { normalizeHandle, validateHandle } from "@/lib/handle"
 import {
   communityPath,
+  communityActivityPath,
+  communityMembersPath,
   communityOrbitPath,
   communityApplicationsPath,
   communityBansPath,
@@ -257,8 +259,10 @@ export default function CommunityOrbitPage() {
               actions={
                 <PageToolbar
                   nav={[
-                    { label: "Orbit", href: communityOrbitPath(handleLabel) },
                     { label: "Profile", href: communityPath(handleLabel) },
+                    { label: "Orbit", href: communityOrbitPath(handleLabel) },
+                    { label: "Members", href: communityMembersPath(handleLabel) },
+                    { label: "Activity", href: communityActivityPath(handleLabel) },
                   ]}
                   overflow={isAdmin ? [
                     { label: "Applications", href: communityApplicationsPath(handleLabel) },

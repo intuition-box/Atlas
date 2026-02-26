@@ -66,6 +66,11 @@ export function userSettingsPath(handle: string): string {
   return `/u/${encodeURIComponent(handle)}/settings`;
 }
 
+/** `/u/:handle/activity` */
+export function userActivityPath(handle: string): string {
+  return `/u/${encodeURIComponent(handle)}/activity`;
+}
+
 /** `/u/:handle/attestations` */
 export function userAttestationsPath(handle: string): string {
   return `/u/${encodeURIComponent(handle)}/attestations`;
@@ -96,9 +101,9 @@ export function communityDashboardPath(handle: string): string {
   return `/c/${encodeURIComponent(handle)}/dashboard`;
 }
 
-/** @deprecated Members directory is now on the community profile page. */
+/** `/c/:handle/members` */
 export function communityMembersPath(handle: string): string {
-  return communityPath(handle);
+  return `/c/${encodeURIComponent(handle)}/members`;
 }
 
 /** `/c/:handle/applications` */
@@ -114,6 +119,11 @@ export function communityBansPath(handle: string): string {
 /** `/c/:handle/settings` */
 export function communitySettingsPath(handle: string): string {
   return `/c/${encodeURIComponent(handle)}/settings`;
+}
+
+/** `/c/:handle/activity` */
+export function communityActivityPath(handle: string): string {
+  return `/c/${encodeURIComponent(handle)}/activity`;
 }
 
 /** `/c/:handle/orbit` */

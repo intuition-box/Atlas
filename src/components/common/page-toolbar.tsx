@@ -8,6 +8,7 @@ import { MoreHorizontal } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
+import { Separator } from "@/components/ui/separator"
 import {
   Menu,
   MenuContent,
@@ -97,24 +98,6 @@ function PageToolbar({
 
   return (
     <div className={cn("flex flex-wrap items-center gap-2", className)}>
-      {/* Standalone action buttons */}
-      {hasActions &&
-        actions.map((action) => (
-          <Button
-            key={action.label}
-            type="button"
-            variant="outline"
-            className={cn(
-              action.active
-                ? "bg-primary/10 text-primary hover:bg-primary/15"
-                : undefined,
-            )}
-            onClick={action.onClick}
-          >
-            {action.label}
-          </Button>
-        ))}
-
       {/* View switch group */}
       {hasViewSwitch && (
         <ButtonGroup>
@@ -145,6 +128,29 @@ function PageToolbar({
             )
           })}
         </ButtonGroup>
+      )}
+
+      {/* Standalone action buttons */}
+      {hasActions &&
+        actions.map((action) => (
+          <Button
+            key={action.label}
+            type="button"
+            variant="outline"
+            className={cn(
+              action.active
+                ? "bg-primary/10 text-primary hover:bg-primary/15"
+                : undefined,
+            )}
+            onClick={action.onClick}
+          >
+            {action.label}
+          </Button>
+        ))}
+
+      {/* Separator between contextual controls and navigation */}
+      {(hasActions || hasViewSwitch) && hasNav && (
+        <Separator orientation="vertical" className="mx-1 self-stretch" />
       )}
 
       {/* Navigation group + overflow */}

@@ -5,19 +5,17 @@ import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 import { useSession } from "next-auth/react"
 import {
-  ArrowUpRight,
+  ArrowDownLeft,
   LayoutGrid,
   Link2,
   List,
-  Undo2,
 } from "lucide-react"
 
-import { apiGet, apiPost } from "@/lib/api/client"
-import { sounds } from "@/lib/sounds"
+import { cn } from "@/lib/utils"
+import { apiGet } from "@/lib/api/client"
 import { ROUTES, userPath, userActivityPath, userAttestationsPath, userSettingsPath } from "@/lib/routes"
 import { ATTESTATION_TYPES, ATTESTATION_TYPE_LIST, type AttestationType } from "@/lib/attestations/definitions"
 import { AttestationBadge } from "@/components/attestation/badge"
-import { OnchainBanner } from "@/components/attestation/onchain-banner"
 import { useAttestationQueue } from "@/components/attestation/queue-provider"
 
 import { PageHeader } from "@/components/common/page-header"
@@ -66,7 +64,6 @@ type AttestationsResponse = {
 type FilterState = {
   q: string
   type: AttestationType | ""
-  status: "published" | "pending" | ""
 }
 
 // === UTILITY FUNCTIONS ===
@@ -117,7 +114,7 @@ function mergeAttestationsUnique(prev: Attestation[], next: Attestation[]): Atte
 }
 
 function hasActiveFilters(filters: FilterState): boolean {
-  return Boolean(filters.q || filters.type || filters.status)
+  return Boolean(filters.q || filters.type)
 }
 
 // === CUSTOM HOOKS ===
@@ -164,14 +161,12 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
   return debounced
 }
 
-function useAttestationsData(
+function useActivityData(
   handle: string,
   filters: FilterState,
   cursor: string | null,
-  /** Timestamp of last cart save — triggers refetch when changed */
+  /** Timestamp of last cart save - triggers refetch when changed */
   lastChangedAt: number = 0,
-  /** Increment to force a refetch without a full page reload */
-  refreshKey: number = 0,
 ) {
   const router = useRouter()
   const [items, setItems] = React.useState<Attestation[]>([])
@@ -184,21 +179,15 @@ function useAttestationsData(
 
   const debouncedQ = useDebouncedValue(filters.q, 300)
 
-  // Always fetch attestations given by this user
+  // Always fetch received attestations (toHandle = handle)
   const queryParams = React.useMemo(() => {
     const params: Record<string, string> = {
-      fromHandle: handle,
       take: String(PAGE_SIZE),
+      toHandle: handle,
     }
 
     if (filters.type) {
       params.type = filters.type
-    }
-
-    if (filters.status === "published") {
-      params.minted = "true"
-    } else if (filters.status === "pending") {
-      params.minted = "false"
     }
 
     if (cursor) {
@@ -206,7 +195,7 @@ function useAttestationsData(
     }
 
     return params
-  }, [handle, filters.type, filters.status, cursor])
+  }, [handle, filters.type, cursor])
 
   React.useEffect(() => {
     const ac = new AbortController()
@@ -233,7 +222,7 @@ function useAttestationsData(
             router.replace(ROUTES.signIn)
             return
           }
-          setError("We couldn't load attestations. Try again.")
+          setError("We couldn't load activity. Try again.")
           setLoading(false)
           setFiltering(false)
           setLoadingMore(false)
@@ -262,7 +251,7 @@ function useAttestationsData(
     return () => {
       ac.abort()
     }
-  }, [router, queryParams, cursor, handle, filters.type, filters.status, lastChangedAt, refreshKey])
+  }, [router, queryParams, cursor, handle, filters.type, lastChangedAt])
 
   // Filter by search query client-side
   const filteredItems = React.useMemo(() => {
@@ -270,11 +259,15 @@ function useAttestationsData(
 
     const q = debouncedQ.toLowerCase()
     return items.filter((a) => {
-      const toName = a.toUser.name?.toLowerCase() ?? ""
-      const toHandle = a.toUser.handle?.toLowerCase() ?? ""
+      const fromName = a.fromUser.name?.toLowerCase() ?? ""
+      const fromHandle = a.fromUser.handle?.toLowerCase() ?? ""
       const typeLabel = ATTESTATION_TYPES[a.type].label.toLowerCase()
 
-      return toName.includes(q) || toHandle.includes(q) || typeLabel.includes(q)
+      return (
+        fromName.includes(q) ||
+        fromHandle.includes(q) ||
+        typeLabel.includes(q)
+      )
     })
   }, [items, debouncedQ])
 
@@ -283,41 +276,22 @@ function useAttestationsData(
 
 // === SUB-COMPONENTS ===
 
-function AttestationCard({
+function ActivityCard({
   attestation,
-  viewerId,
-  onRetract,
 }: {
   attestation: Attestation
-  viewerId: string | null
-  onRetract?: (id: string) => void
 }) {
-  const [isRetracting, setIsRetracting] = React.useState(false)
-  const otherUser = attestation.toUser
+  const otherUser = attestation.fromUser
   const displayName = otherUser.name?.trim() || `@${otherUser.handle}`
   const href = userPath(otherUser.handle ?? otherUser.id)
   const isMinted = !!attestation.mintedAt
-  const canRetract = viewerId === attestation.fromUser.id
-
-  const handleRetract = async () => {
-    if (isRetracting || !canRetract) return
-    setIsRetracting(true)
-    try {
-      const result = await apiPost<{ alreadyRevoked: boolean }>(
-        "/api/attestation/retract",
-        { attestationId: attestation.id }
-      )
-      if (result.ok) onRetract?.(attestation.id)
-    } finally {
-      setIsRetracting(false)
-    }
-  }
 
   return (
     <Card
       size="sm"
       className="transition-colors"
     >
+      {/* Header: avatar + name on left, status badge on right */}
       <CardHeader className="flex-row items-center gap-3">
         <div className="flex items-center gap-3">
           <Link href={href}>
@@ -334,18 +308,6 @@ function AttestationCard({
         </div>
         <CardAction>
           <div className="flex items-center gap-2">
-            {canRetract && (
-              <Button
-                variant="destructive"
-                size="xs"
-                onClick={handleRetract}
-                disabled={isRetracting}
-                className="gap-1"
-              >
-                <Undo2 className="size-3" />
-                {isRetracting ? "Retracting…" : "Retract"}
-              </Button>
-            )}
             {isMinted ? (
               <Badge variant="positive" className="gap-1">
                 <Link2 className="size-3" />
@@ -360,10 +322,11 @@ function AttestationCard({
         </CardAction>
       </CardHeader>
 
+      {/* Body: Received [type] on [date] */}
       <CardContent className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
-        <Badge variant="info" className="gap-1">
-          <ArrowUpRight className="size-3" />
-          Given
+        <Badge variant="default" className="gap-1">
+          <ArrowDownLeft className="size-3" />
+          Received
         </Badge>
         <AttestationBadge type={attestation.type} />
         <Separator orientation="vertical" className="!h-4 mx-1" />
@@ -373,7 +336,7 @@ function AttestationCard({
   )
 }
 
-function AttestationCardSkeleton() {
+function ActivityCardSkeleton() {
   return (
     <Card size="sm">
       <CardHeader className="flex-row items-center gap-3">
@@ -385,10 +348,7 @@ function AttestationCardSkeleton() {
           </div>
         </div>
         <CardAction>
-          <div className="flex items-center gap-2">
-            <Skeleton className="h-3 w-10" />
-            <Skeleton className="h-5 w-16 rounded-full" />
-          </div>
+          <Skeleton className="h-5 w-16 rounded-full" />
         </CardAction>
       </CardHeader>
       <CardContent className="flex items-center gap-2">
@@ -396,15 +356,14 @@ function AttestationCardSkeleton() {
         <Skeleton className="h-5 w-24 rounded-full" />
         <Skeleton className="h-4 w-px" />
         <Skeleton className="h-6 w-16 rounded-md" />
-        <Skeleton className="h-6 w-14 rounded-md" />
       </CardContent>
     </Card>
   )
 }
 
-function AttestationRowSkeleton() {
+function ActivityRowSkeleton() {
   return (
-    <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,0.5fr)] gap-3 px-4 py-3">
+    <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,0.8fr)] gap-3 px-4 py-3">
       <div className="flex items-center min-w-0">
         <div className="inline-flex items-center gap-3">
           <Skeleton className="size-8 rounded-full shrink-0" />
@@ -417,17 +376,16 @@ function AttestationRowSkeleton() {
       <div className="flex items-center"><Skeleton className="h-5 w-20 rounded-full" /></div>
       <div className="flex items-center"><Skeleton className="h-3 w-12" /></div>
       <div className="flex items-center"><Skeleton className="h-5 w-16 rounded-full" /></div>
-      <div className="flex items-center justify-end"><Skeleton className="size-6 rounded" /></div>
     </div>
   )
 }
 
-function AttestationsGridSkeleton({ view }: { view: "cards" | "list" }) {
+function ActivityGridSkeleton({ view }: { view: "cards" | "list" }) {
   if (view === "cards") {
     return (
       <div className="grid gap-4 sm:grid-cols-2">
         {Array.from({ length: 6 }, (_, i) => (
-          <AttestationCardSkeleton key={i} />
+          <ActivityCardSkeleton key={i} />
         ))}
       </div>
     )
@@ -435,59 +393,32 @@ function AttestationsGridSkeleton({ view }: { view: "cards" | "list" }) {
 
   return (
     <div className="rounded-2xl border border-border/60 bg-card/30 overflow-hidden">
-      <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,0.5fr)] gap-3 border-b border-border/60 px-4 py-3 text-xs font-medium text-foreground/70">
-        <div>User</div>
+      <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,0.8fr)] gap-3 border-b border-border/60 px-4 py-3 text-xs font-medium text-foreground/70">
+        <div>From</div>
         <div>Type</div>
         <div>Date</div>
         <div>Status</div>
-        <div />
       </div>
       {Array.from({ length: 6 }, (_, i) => (
-        <AttestationRowSkeleton key={i} />
+        <ActivityRowSkeleton key={i} />
       ))}
     </div>
   )
 }
 
-function AttestationRow({
+function ActivityRow({
   attestation,
-  viewerId,
-  onRetract,
 }: {
   attestation: Attestation
-  viewerId: string | null
-  onRetract?: (id: string) => void
 }) {
-  const [isRetracting, setIsRetracting] = React.useState(false)
-  const otherUser = attestation.toUser
-  const canRetract = viewerId === attestation.fromUser.id
+  const otherUser = attestation.fromUser
   const isMinted = !!attestation.mintedAt
-
-  const handleRetract = async (e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    if (isRetracting || !canRetract) return
-
-    setIsRetracting(true)
-    try {
-      const result = await apiPost<{ alreadyRevoked: boolean }>(
-        "/api/attestation/retract",
-        { attestationId: attestation.id }
-      )
-
-      if (result.ok) {
-        onRetract?.(attestation.id)
-      }
-    } finally {
-      setIsRetracting(false)
-    }
-  }
   const displayName = otherUser.name?.trim() || `@${otherUser.handle}`
   const href = userPath(otherUser.handle ?? otherUser.id)
 
   return (
     <div
-      className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,0.5fr)] gap-3 px-4 py-3 text-sm text-muted-foreground transition-colors hover:bg-muted"
+      className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,0.8fr)] gap-3 px-4 py-3 text-sm text-muted-foreground transition-colors hover:bg-muted"
     >
       <div className="flex items-center min-w-0">
         <Link href={href} className="inline-flex min-w-0 items-center gap-3 rounded-md px-1.5 py-1 -mx-1.5 -my-1 transition-colors hover:text-primary">
@@ -520,27 +451,13 @@ function AttestationRow({
           </Badge>
         )}
       </div>
-
-      <div className="flex items-center justify-end gap-1">
-        {canRetract && (
-          <Button
-            variant="destructive"
-            size="xs"
-            onClick={handleRetract}
-            disabled={isRetracting}
-            className="gap-1"
-          >
-            <Undo2 className="size-3" />
-          </Button>
-        )}
-      </div>
     </div>
   )
 }
 
-// === LOADING SKELETON ===
+// === LOADING SKELETON (matches settings page pattern) ===
 
-function AttestationsSkeleton({ isSelf }: { isSelf: boolean }) {
+function ActivitySkeleton() {
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
       {/* PageHeader skeleton */}
@@ -557,27 +474,10 @@ function AttestationsSkeleton({ isSelf }: { isSelf: boolean }) {
         </div>
       </div>
 
-      {/* OnchainBanner skeleton — only for profile owner */}
-      {isSelf && (
-        <div className="rounded-2xl border border-border/60 bg-gradient-to-b from-card/80 via-card/60 to-primary/5 p-6">
-          <div className="flex flex-col items-center gap-4 text-center">
-            <div className="flex flex-col items-center gap-1.5">
-              <Skeleton className="h-6 w-72" />
-              <Skeleton className="h-4 w-36" />
-            </div>
-            <Skeleton className="h-4 w-96 max-w-full" />
-            <Skeleton className="h-4 w-80 max-w-full" />
-          </div>
-          <div className="mt-6 flex flex-col items-center gap-4 border-t border-border/40 pt-4">
-            <Skeleton className="h-9 w-24 rounded-lg" />
-          </div>
-        </div>
-      )}
-
-      {/* Cards skeleton */}
+      {/* Attestation cards grid skeleton */}
       <div className="grid gap-4 sm:grid-cols-2">
         {Array.from({ length: 6 }, (_, i) => (
-          <AttestationCardSkeleton key={i} />
+          <ActivityCardSkeleton key={i} />
         ))}
       </div>
     </div>
@@ -602,20 +502,20 @@ function FiltersPanel({
   const active = hasActiveFilters(filters)
 
   return (
-    <Card aria-label="Attestation filters" className="bg-card/30 border-border/30">
-      <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    <Card aria-label="Activity filters" className="bg-card/30 border-border/30">
+      <CardContent className="grid gap-4 sm:grid-cols-2">
         <div className="flex flex-col gap-2">
           <div className="text-xs font-medium text-foreground/70">Search</div>
           <Input
             placeholder="Name, handle, type…"
             value={filters.q}
             onChange={(e) => onFiltersChange({ q: e.target.value })}
-            aria-label="Search attestations"
+            aria-label="Search activity"
           />
         </div>
 
         <div className="flex flex-col gap-2">
-          <div className="text-xs font-medium text-foreground/70">Type</div>
+          <div className="text-xs font-medium text-foreground/70">Attestation type</div>
           <Select
             value={filters.type || null}
             onValueChange={(v) => onFiltersChange({ type: (v ?? "") as AttestationType | "" })}
@@ -642,29 +542,10 @@ function FiltersPanel({
           </Select>
         </div>
 
-        <div className="flex flex-col gap-2">
-          <div className="text-xs font-medium text-foreground/70">Status</div>
-          <Select
-            value={filters.status || null}
-            onValueChange={(v) => onFiltersChange({ status: (v ?? "") as FilterState["status"] })}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue>{(v: string | null) => v === "published" ? "Published" : v === "pending" ? "Pending" : "All"}</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                <SelectItem value={null as unknown as string}>All</SelectItem>
-                <SelectItem value="published">Published</SelectItem>
-                <SelectItem value="pending">Pending</SelectItem>
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-        </div>
-
         {active && (
           <>
-            <Separator className="sm:col-span-2 lg:col-span-3" />
-            <div className="flex items-center justify-center gap-2 sm:col-span-2 lg:col-span-3">
+            <Separator className="sm:col-span-2" />
+            <div className="flex items-center justify-center gap-2 sm:col-span-2">
               <Badge variant="secondary">
                 {itemCount}{hasMore ? "+" : ""} attestations
               </Badge>
@@ -681,26 +562,20 @@ function FiltersPanel({
 
 // === CONTENT SECTIONS ===
 
-function AttestationsGrid({
+function ActivityGrid({
   items,
   view,
-  viewerId,
-  onRetract,
 }: {
   items: Attestation[]
   view: "cards" | "list"
-  viewerId: string | null
-  onRetract?: (id: string) => void
 }) {
   if (view === "cards") {
     return (
       <div className="grid gap-4 sm:grid-cols-2">
         {items.map((a) => (
-          <AttestationCard
+          <ActivityCard
             key={a.id}
             attestation={a}
-            viewerId={viewerId}
-            onRetract={onRetract}
           />
         ))}
       </div>
@@ -709,20 +584,17 @@ function AttestationsGrid({
 
   return (
     <div className="rounded-2xl border border-border/60 bg-card/30 overflow-hidden">
-      <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,0.5fr)] gap-3 border-b border-border/60 px-4 py-3 text-xs font-medium text-foreground/70">
-        <div>User</div>
+      <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,0.8fr)] gap-3 border-b border-border/60 px-4 py-3 text-xs font-medium text-foreground/70">
+        <div>From</div>
         <div>Type</div>
         <div>Date</div>
         <div>Status</div>
-        <div />
       </div>
 
       {items.map((a) => (
-        <AttestationRow
+        <ActivityRow
           key={a.id}
           attestation={a}
-          viewerId={viewerId}
-          onRetract={onRetract}
         />
       ))}
     </div>
@@ -732,7 +604,7 @@ function AttestationsGrid({
 function EmptyState({ hasFilters, onClearFilters }: { hasFilters: boolean; onClearFilters: () => void }) {
   return (
     <div className="rounded-lg border border-border/60 px-4 py-10 text-center text-sm text-muted-foreground">
-      <p>No attestations found.</p>
+      <p>No activity found.</p>
       {hasFilters && (
         <Button
           type="button"
@@ -749,13 +621,11 @@ function EmptyState({ hasFilters, onClearFilters }: { hasFilters: boolean; onCle
 
 // === MAIN COMPONENT ===
 
-export default function AttestationsPage() {
-  const router = useRouter()
+export default function ActivityPage() {
   const params = useParams<{ handle: string }>()
   const { data: session } = useSession()
   const handle = params.handle?.trim() || ""
 
-  const viewerId = session?.user?.id ?? null
   const isSelf = session?.user?.handle === handle
   const profile = useUserProfile(handle)
 
@@ -768,14 +638,10 @@ export default function AttestationsPage() {
   const [view, setView] = React.useState<"cards" | "list">("cards")
   const [cursor, setCursor] = React.useState<string | null>(null)
   const [isFiltersOpen, setIsFiltersOpen] = React.useState(false)
-  const [localItems, setLocalItems] = React.useState<Attestation[]>([])
-
-  const [mintingIds, setMintingIds] = React.useState<Set<string>>(new Set())
 
   const [filters, setFilters] = React.useState<FilterState>({
     q: "",
     type: "",
-    status: "",
   })
 
   // Reset cursor when cart saves to force fresh fetch from page 1
@@ -785,122 +651,19 @@ export default function AttestationsPage() {
     }
   }, [lastChangedAt])
 
-  const { items: fetchedItems, nextCursor, loading, filtering, loadingMore, error } = useAttestationsData(
+  const { items, nextCursor, loading, filtering, loadingMore, error } = useActivityData(
     handle,
     filters,
     cursor,
     lastChangedAt,
   )
 
-  // Sync fetched items to local state (allows optimistic removal on retract)
-  const fetchedIds = React.useMemo(
-    () => fetchedItems.map((a) => a.id).sort().join(","),
-    [fetchedItems]
-  )
-  const prevFetchedIds = React.useRef(fetchedIds)
-
-  React.useEffect(() => {
-    if (fetchedIds !== prevFetchedIds.current || localItems.length === 0) {
-      setLocalItems(fetchedItems)
-      prevFetchedIds.current = fetchedIds
-    }
-  }, [fetchedItems, fetchedIds, localItems.length])
-
-  const handleRetract = React.useCallback((attestationId: string) => {
-    setLocalItems((prev) => prev.filter((a) => a.id !== attestationId))
-  }, [])
-
-  // Mint function — calls API to persist state, will be extended with Intuition SDK later
-  const handleMint = React.useCallback(async (id: string, options?: { silent?: boolean }) => {
-    setMintingIds((prev) => new Set(prev).add(id))
-
-    try {
-      // TODO: When Intuition integration is ready:
-      // 1. Call Intuition SDK to mint onchain
-      // 2. Get txHash and onchainId from the response
-      // 3. Pass them to the API below
-
-      // For now, simulate the blockchain call delay
-      await new Promise((resolve) => setTimeout(resolve, 1000))
-
-      const result = await apiPost<{
-        attestation: { id: string; mintedAt: string };
-        alreadyMinted: boolean;
-      }>("/api/attestation/mint", {
-        attestationId: id,
-      })
-
-      if (result.ok) {
-        const mintedAt = result.value.attestation.mintedAt
-        setLocalItems((prev) =>
-          prev.map((a) =>
-            a.id === id ? { ...a, mintedAt } : a
-          )
-        )
-        if (!options?.silent) {
-          sounds.mint()
-        }
-      } else {
-        console.error("[Mint] Failed to mint attestation:", result.error)
-        if (!options?.silent) {
-          sounds.error()
-        }
-      }
-    } catch (err) {
-      console.error("[Mint] Error minting attestation:", err)
-      if (!options?.silent) {
-        sounds.error()
-      }
-    } finally {
-      setMintingIds((prev) => {
-        const next = new Set(prev)
-        next.delete(id)
-        return next
-      })
-    }
-  }, [])
-
-  const handleMintAll = React.useCallback(async () => {
-    const unmintedIds = localItems
-      .filter((a) => !a.mintedAt && a.fromUser.id === viewerId)
-      .map((a) => a.id)
-
-    if (unmintedIds.length === 0) return
-
-    const loopControl = await sounds.loopMintAll()
-
-    try {
-      for (const id of unmintedIds) {
-        await handleMint(id, { silent: true })
-      }
-    } finally {
-      loopControl.stop()
-      sounds.mint()
-    }
-  }, [localItems, viewerId, handleMint])
-
   const activeFilters = hasActiveFilters(filters)
-  const items = localItems
-
-  // Calculate minting stats
-  const [mintStats, setMintStats] = React.useState({ totalCount: 0, mintedCount: 0 })
-
-  React.useEffect(() => {
-    const total = localItems.filter((a) => a.fromUser.id === viewerId).length
-    const minted = localItems.filter((a) => a.fromUser.id === viewerId && a.mintedAt).length
-
-    if (total > 0 || mintStats.totalCount === 0) {
-      setMintStats({ totalCount: total, mintedCount: minted })
-    }
-  }, [localItems, viewerId, mintStats.totalCount])
-
-  const { totalCount, mintedCount } = mintStats
-  const isMinting = mintingIds.size > 0
 
   // Reset paging when filters change
   React.useEffect(() => {
     setCursor(null)
-  }, [filters.q, filters.type, filters.status])
+  }, [filters.q, filters.type])
 
   function handleFiltersChange(updates: Partial<FilterState>) {
     setFilters((prev) => ({ ...prev, ...updates }))
@@ -910,13 +673,13 @@ export default function AttestationsPage() {
     setFilters({
       q: "",
       type: "",
-      status: "",
     })
   }
 
   if (!handle) return null
 
-  if (loading) return <AttestationsSkeleton isSelf={isSelf} />
+  // Full-page skeleton only on the very first load
+  if (loading) return <ActivitySkeleton />
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
@@ -924,7 +687,7 @@ export default function AttestationsPage() {
         leading={
           <ProfileAvatar type="user" src={avatarSrc} name={displayName} className="h-12 w-12" />
         }
-        title="Attestations"
+        title="Activity"
         description={`@${handle}`}
         actionsAsFormActions={false}
         actions={
@@ -950,16 +713,6 @@ export default function AttestationsPage() {
         }
       />
 
-      {/* Onchain Banner — only show for profile owner */}
-      {isSelf && totalCount > 0 && (
-        <OnchainBanner
-          totalCount={totalCount}
-          mintedCount={mintedCount}
-          isMinting={isMinting}
-          onMintAll={handleMintAll}
-        />
-      )}
-
       {isFiltersOpen && (
         <FiltersPanel
           filters={filters}
@@ -977,12 +730,12 @@ export default function AttestationsPage() {
       )}
 
       <div aria-live="polite" aria-atomic="true" className="sr-only">
-        {loading || filtering ? "Loading attestations..." : `${items.length} attestations loaded`}
+        {loading || filtering ? "Loading activity..." : `${items.length} items loaded`}
       </div>
 
       <div className="flex flex-col gap-3">
         {filtering ? (
-          <AttestationsGridSkeleton view={view} />
+          <ActivityGridSkeleton view={view} />
         ) : items.length === 0 ? (
           <EmptyState hasFilters={activeFilters} onClearFilters={handleClearAll} />
         ) : (
@@ -991,11 +744,9 @@ export default function AttestationsPage() {
             hasMore={!!nextCursor}
             isLoading={loadingMore}
           >
-            <AttestationsGrid
+            <ActivityGrid
               items={items}
               view={view}
-              viewerId={viewerId}
-              onRetract={handleRetract}
             />
           </InfiniteScroll>
         )}

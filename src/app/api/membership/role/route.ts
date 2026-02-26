@@ -2,7 +2,7 @@ import {
   MembershipRole,
   MembershipStatus,
   Prisma,
-  ScoringType,
+  EventType,
 } from "@prisma/client";
 import type { NextRequest } from "next/server";
 import { z } from "zod";
@@ -204,28 +204,20 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      // Audit / preferences feed (best-effort): record a membership role change.
-      const scoringTypes = ScoringType as unknown as Record<string, ScoringType>;
-      const type =
-        scoringTypes.MEMBERSHIP_ROLE_CHANGED ??
-        scoringTypes.ROLE_CHANGED ??
-        scoringTypes.MEMBERSHIP_CHANGED;
-
-      if (type) {
-        await tx.scoringEvent.create({
-          data: {
-            communityId: updated.communityId,
-            actorId,
-            type,
-            metadata: {
-              subjectUserId: updated.userId,
-              fromRole: prevRole,
-              toRole: updated.role,
-            },
+      // Record a membership role change for the activity feed.
+      await tx.event.create({
+        data: {
+          communityId: updated.communityId,
+          actorId,
+          type: EventType.ROLE_UPDATED,
+          metadata: {
+            subjectUserId: updated.userId,
+            fromRole: prevRole,
+            toRole: updated.role,
           },
-          select: { id: true },
-        });
-      }
+        },
+        select: { id: true },
+      });
 
       return { kind: "ok", membership: updated, changed: true } as const;
     });

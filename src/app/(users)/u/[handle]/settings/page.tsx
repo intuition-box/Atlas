@@ -10,7 +10,7 @@ import { Loader2, X } from "lucide-react"
 
 import { apiGet, apiPost } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
-import { userPath, userSettingsPath, userAttestationsPath } from "@/lib/routes"
+import { userPath, userSettingsPath, userActivityPath, userAttestationsPath } from "@/lib/routes"
 import { COUNTRIES } from "@/config/countries"
 import { LANGUAGE_LIST as LANGUAGES } from "@/config/languages"
 import { SKILL_LIST as SKILLS, TOOL_LIST as TOOLS } from "@/lib/attestations/definitions"
@@ -1414,6 +1414,7 @@ export default function UserSettingsPage() {
             nav={[
               { label: "Profile", href: userPath(handle) },
               { label: "Attestations", href: userAttestationsPath(handle) },
+              { label: "Activity", href: userActivityPath(handle) },
               { label: "Settings", href: userSettingsPath(handle) },
             ]}
           />

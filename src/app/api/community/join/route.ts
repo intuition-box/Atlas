@@ -1,4 +1,4 @@
-import { MembershipRole, MembershipStatus, ScoringType } from "@prisma/client";
+import { MembershipRole, MembershipStatus, EventType } from "@prisma/client";
 import { z } from "zod";
 
 import type { NextRequest } from "next/server";
@@ -101,7 +101,7 @@ export async function POST(req: NextRequest) {
         return errJson({ code: "FORBIDDEN", message: "You are banned from this community.", status: 403 });
       }
 
-      // Repeated joins update activity timestamp, but do not create additional JOINED scoring events.
+      // Repeated joins update activity timestamp, but do not create additional JOINED events.
       await db.membership.update({
         where: { id: existing.id },
         data: { lastActiveAt: now },
@@ -115,7 +115,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Create a pending membership request and record a single JOINED scoring event.
+    // Create a pending membership request and record a single JOINED event.
     // Scores default to 0; role/status are explicit.
     const created = await db.$transaction(async (tx) => {
       const membership = await tx.membership.create({
@@ -130,11 +130,11 @@ export async function POST(req: NextRequest) {
         select: { id: true, status: true },
       });
 
-      await tx.scoringEvent.create({
+      await tx.event.create({
         data: {
           communityId,
           actorId: userId,
-          type: ScoringType.JOINED,
+          type: EventType.JOINED,
           // Keep metadata minimal; we can expand later if needed.
         },
         select: { id: true },

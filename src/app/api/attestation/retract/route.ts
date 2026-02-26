@@ -1,9 +1,9 @@
-import { ScoringType } from "@prisma/client";
+import { EventType } from "@prisma/client";
 import { z } from "zod";
 
 import { api, okJson, errJson } from "@/lib/api/server";
 import { db } from "@/lib/db/client";
-import { logScoringEvent, recomputeScoresForAttestationPair } from "@/lib/scoring";
+import { emitEvent, recomputeScoresForAttestationPair } from "@/lib/scoring";
 
 export const runtime = "nodejs";
 
@@ -27,6 +27,7 @@ export const POST = api(BodySchema, async (ctx) => {
       id: true,
       fromUserId: true,
       toUserId: true,
+      type: true,
       revokedAt: true,
       supersededById: true,
     },
@@ -63,7 +64,7 @@ export const POST = api(BodySchema, async (ctx) => {
     select: { id: true },
   });
 
-  logScoringEvent({ fromUserId: row.fromUserId, toUserId: row.toUserId, type: ScoringType.ATTESTATION_RETRACTED });
+  emitEvent({ fromUserId: row.fromUserId, toUserId: row.toUserId, type: EventType.ATTESTATION_RETRACTED, metadata: { attestationType: row.type } });
   recomputeScoresForAttestationPair({ fromUserId: row.fromUserId, toUserId: row.toUserId });
 
   return okJson<RetractOk>({ attestation: { id: row.id }, alreadyRevoked: false });

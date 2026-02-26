@@ -10,6 +10,8 @@ import {
   ROUTES,
   userPath,
   communityPath,
+  communityActivityPath,
+  communityMembersPath,
   communityOrbitPath,
   communityApplicationsPath,
   communityBansPath,
@@ -290,8 +292,10 @@ export default function CommunityBansPage() {
         actions={
           <PageToolbar
             nav={[
-              { label: "Orbit", href: communityOrbitPath(handle) },
               { label: "Profile", href: communityPath(handle) },
+              { label: "Orbit", href: communityOrbitPath(handle) },
+              { label: "Members", href: communityMembersPath(handle) },
+              { label: "Activity", href: communityActivityPath(handle) },
             ]}
             overflow={[
               { label: "Applications", href: communityApplicationsPath(handle) },

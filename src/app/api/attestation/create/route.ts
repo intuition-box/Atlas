@@ -1,10 +1,10 @@
-import { ScoringType } from "@prisma/client";
+import { EventType } from "@prisma/client";
 import { z } from "zod";
 
 import { api, okJson, errJson } from "@/lib/api/server";
 import { ATTESTATION_TYPES, type AttestationType } from "@/lib/attestations/definitions";
 import { db } from "@/lib/db/client";
-import { logScoringEvent, recomputeScoresForAttestationPair } from "@/lib/scoring";
+import { emitEvent, recomputeScoresForAttestationPair } from "@/lib/scoring";
 
 export const runtime = "nodejs";
 
@@ -98,7 +98,7 @@ export const POST = api(BodySchema, async (ctx) => {
       return replacement;
     });
 
-    logScoringEvent({ fromUserId: viewerId!, toUserId, type: ScoringType.ATTESTED });
+    emitEvent({ fromUserId: viewerId!, toUserId, type: EventType.ATTESTED, metadata: { attestationType: type } });
     recomputeScoresForAttestationPair({ fromUserId: viewerId!, toUserId });
 
     return okJson<CreateAttestationOk>({
@@ -118,7 +118,7 @@ export const POST = api(BodySchema, async (ctx) => {
     select: { id: true },
   });
 
-  logScoringEvent({ fromUserId: viewerId!, toUserId, type: ScoringType.ATTESTED });
+  emitEvent({ fromUserId: viewerId!, toUserId, type: EventType.ATTESTED, metadata: { attestationType: type } });
   recomputeScoresForAttestationPair({ fromUserId: viewerId!, toUserId });
 
   return okJson<CreateAttestationOk>({

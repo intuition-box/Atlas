@@ -5,7 +5,7 @@ import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 import { apiGet, apiPost } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
-import { ROUTES, userPath, communityPath, communityOrbitPath, communityApplicationsPath, communityBansPath, communityPermissionsPath, communitySettingsPath } from "@/lib/routes"
+import { ROUTES, userPath, communityPath, communityActivityPath, communityMembersPath, communityOrbitPath, communityApplicationsPath, communityBansPath, communityPermissionsPath, communitySettingsPath } from "@/lib/routes"
 
 import { PageHeader } from "@/components/common/page-header"
 import { PageToolbar } from "@/components/common/page-toolbar"
@@ -815,8 +815,10 @@ export default function CommunityApplicationsPage() {
               { label: "Filters", active: isFiltersOpen, onClick: () => setIsFiltersOpen((v) => !v) },
             ]}
             nav={[
-              { label: "Orbit", href: communityOrbitPath(handle) },
               { label: "Profile", href: communityPath(handle) },
+              { label: "Orbit", href: communityOrbitPath(handle) },
+              { label: "Members", href: communityMembersPath(handle) },
+              { label: "Activity", href: communityActivityPath(handle) },
             ]}
             overflow={[
               { label: "Applications", href: communityApplicationsPath(handle) },

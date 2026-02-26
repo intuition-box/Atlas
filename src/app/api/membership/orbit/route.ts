@@ -3,7 +3,7 @@ import {
   MembershipStatus,
   OrbitLevel,
   Prisma,
-  ScoringType,
+  EventType,
 } from "@prisma/client";
 import type { NextRequest } from "next/server";
 import { z } from "zod";
@@ -167,28 +167,19 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      // Audit / preferences feed (best-effort): record an orbit override change.
-      // We resolve the enum member defensively so this route stays compatible if the enum name changes.
-      const scoringTypes = ScoringType as unknown as Record<string, ScoringType>;
-      const orbitOverrideType =
-        scoringTypes.ORBIT_OVERRIDE ??
-        scoringTypes.ORBIT_LEVEL_OVERRIDE ??
-        scoringTypes.ORBIT_CHANGED;
-
-      if (orbitOverrideType) {
-        await tx.scoringEvent.create({
-          data: {
-            communityId,
-            actorId,
-            type: orbitOverrideType,
-            metadata: {
-              subjectUserId: userId,
-              orbitLevelOverride: nextOverride,
-            },
+      // Record orbit override change for the activity feed.
+      await tx.event.create({
+        data: {
+          communityId,
+          actorId,
+          type: EventType.ORBIT_OVERRIDE,
+          metadata: {
+            subjectUserId: userId,
+            orbitLevelOverride: nextOverride,
           },
-          select: { id: true },
-        });
-      }
+        },
+        select: { id: true },
+      });
 
       return { kind: "ok", membership: updated, changed: true } as const;
     });
