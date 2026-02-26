@@ -13,10 +13,15 @@ import {
 
 import { cn } from "@/lib/utils"
 import { apiGet } from "@/lib/api/client"
+import { formatRelativeTime, displayName } from "@/lib/format"
 import { ROUTES, userPath, communityPath } from "@/lib/routes"
 import { ATTESTATION_TYPES, ATTESTATION_TYPE_LIST, type AttestationType } from "@/lib/attestations/definitions"
-import { AttestationBadge } from "@/components/attestation/badge"
+import { useDebouncedValue } from "@/hooks/use-debounced-value"
+import { useActivityFeed } from "@/hooks/use-activity-feed"
 
+import { AttestationBadge } from "@/components/attestation/badge"
+import { UserLink } from "@/components/activity/event-feed"
+import { ListFeed, ListFeedSkeleton } from "@/components/common/list-feed"
 import { ProfileAvatar } from "@/components/common/profile-avatar"
 import { PageHeader } from "@/components/common/page-header"
 import { PageToolbar } from "@/components/common/page-toolbar"
@@ -73,12 +78,7 @@ type CommunityCreatedEvent = {
   creator: ActivityUser
 }
 
-type ActivityEvent = AttestationEvent | UserJoinedEvent | CommunityCreatedEvent
-
-type ActivityResponse = {
-  events: ActivityEvent[]
-  nextCursor: string | null
-}
+type GlobalActivityEvent = AttestationEvent | UserJoinedEvent | CommunityCreatedEvent
 
 type LeaderboardEntry = {
   user: {
@@ -97,7 +97,7 @@ type LeaderboardResponse = {
 
 type FilterState = {
   q: string
-  kind: ActivityEvent["kind"] | ""
+  kind: GlobalActivityEvent["kind"] | ""
   attestationType: AttestationType | ""
   direction: "given" | "received" | ""
   onchain: "onchain" | "offchain" | ""
@@ -116,67 +116,6 @@ const EMPTY_FILTERS: FilterState = {
 }
 
 // === HOOKS ===
-
-function useDebouncedValue<T>(value: T, delayMs: number): T {
-  const [debounced, setDebounced] = React.useState(value)
-
-  React.useEffect(() => {
-    const t = window.setTimeout(() => setDebounced(value), delayMs)
-    return () => window.clearTimeout(t)
-  }, [value, delayMs])
-
-  return debounced
-}
-
-function useActivityFeed(filters: FilterState) {
-  const [events, setEvents] = React.useState<ActivityEvent[]>([])
-  const [nextCursor, setNextCursor] = React.useState<string | null>(null)
-  const [loading, setLoading] = React.useState(true)
-  const [loadingMore, setLoadingMore] = React.useState(false)
-
-  // Serialize filters for dependency comparison (excludes cursor)
-  const filtersKey = JSON.stringify(filters)
-
-  const load = React.useCallback(async (cursor?: string) => {
-    const isInitial = !cursor
-    if (isInitial) setLoading(true)
-    else setLoadingMore(true)
-
-    const params: Record<string, string> = { take: "100" }
-    if (cursor) params.cursor = cursor
-    if (filters.kind) params.kind = filters.kind
-    if (filters.attestationType) params.attestationType = filters.attestationType
-    if (filters.direction) params.direction = filters.direction
-    if (filters.onchain) params.onchain = filters.onchain
-    if (filters.q) params.q = filters.q
-    if (filters.dateFrom) params.dateFrom = filters.dateFrom
-    if (filters.dateTo) params.dateTo = filters.dateTo
-
-    const res = await apiGet<ActivityResponse>("/api/activity/list", params)
-
-    if (res.ok) {
-      setEvents((prev) => isInitial ? res.value.events : [...prev, ...res.value.events])
-      setNextCursor(res.value.nextCursor)
-    }
-
-    setLoading(false)
-    setLoadingMore(false)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtersKey])
-
-  // Re-fetch on filter change
-  React.useEffect(() => {
-    setEvents([])
-    setNextCursor(null)
-    void load()
-  }, [load])
-
-  const loadMore = React.useCallback(() => {
-    if (nextCursor && !loadingMore) void load(nextCursor)
-  }, [nextCursor, loadingMore, load])
-
-  return { events, loading, loadingMore, hasMore: !!nextCursor, loadMore }
-}
 
 function useLeaderboard() {
   const [entries, setEntries] = React.useState<LeaderboardEntry[]>([])
@@ -205,41 +144,13 @@ function useLeaderboard() {
 
 // === UTILITIES ===
 
-function formatRelativeTime(iso: string): string {
-  const ts = Date.parse(iso)
-  if (!Number.isFinite(ts)) return ""
-
-  const diff = Date.now() - ts
-  const seconds = Math.floor(diff / 1000)
-  const minutes = Math.floor(seconds / 60)
-  const hours = Math.floor(minutes / 60)
-  const days = Math.floor(hours / 24)
-
-  if (days > 30) {
-    return new Date(iso).toLocaleDateString(undefined, {
-      month: "short",
-      day: "numeric",
-      year: days > 365 ? "numeric" : undefined,
-    })
-  }
-  if (days > 0) return `${days}d ago`
-  if (hours > 0) return `${hours}h ago`
-  if (minutes > 0) return `${minutes}m ago`
-  return "just now"
-}
-
-function displayName(user: ActivityUser): string {
-  return user.name?.trim() || (user.handle ? `@${user.handle}` : "Unknown")
-}
-
 function hasActiveFilters(filters: FilterState): boolean {
   return Boolean(filters.q || filters.kind || filters.attestationType || filters.direction || filters.onchain || filters.dateFrom || filters.dateTo)
 }
 
 // === ACTIVITY TYPE CONFIG ===
-// Extensible map — add new activity types here as the platform grows.
 
-const ACTIVITY_KIND_CONFIG: Record<ActivityEvent["kind"], { label: string; variant: "default" | "positive" | "info" | "destructive" | "secondary" }> = {
+const ACTIVITY_KIND_CONFIG: Record<GlobalActivityEvent["kind"], { label: string; variant: "default" | "positive" | "info" | "destructive" | "secondary" }> = {
   attestation: {
     label: "Attestation",
     variant: "default",
@@ -255,29 +166,15 @@ const ACTIVITY_KIND_CONFIG: Record<ActivityEvent["kind"], { label: string; varia
 }
 
 const ACTIVITY_KIND_LIST = Object.entries(ACTIVITY_KIND_CONFIG) as Array<
-  [ActivityEvent["kind"], { label: string; variant: string }]
+  [GlobalActivityEvent["kind"], { label: string; variant: string }]
 >
 
-function ActivityTypeBadge({ kind }: { kind: ActivityEvent["kind"] }) {
+function ActivityTypeBadge({ kind }: { kind: GlobalActivityEvent["kind"] }) {
   const config = ACTIVITY_KIND_CONFIG[kind]
   return (
     <Badge variant={config.variant} className="shrink-0">
       {config.label}
     </Badge>
-  )
-}
-
-// === SUB-COMPONENTS ===
-
-function UserLink({ user }: { user: ActivityUser }) {
-  const name = displayName(user)
-  const href = user.handle ? userPath(user.handle) : "#"
-
-  return (
-    <Link href={href} className="flex items-center gap-2 min-w-0 hover:opacity-80 transition-opacity">
-      <ProfileAvatar type="user" src={user.avatarUrl} name={name} size="sm" />
-      <span className="truncate text-sm font-medium">{name}</span>
-    </Link>
   )
 }
 
@@ -359,7 +256,7 @@ function CommunityCreatedEventCard({ event }: { event: CommunityCreatedEvent }) 
   )
 }
 
-function ActivityEventCard({ event }: { event: ActivityEvent }) {
+function ActivityEventCard({ event }: { event: GlobalActivityEvent }) {
   switch (event.kind) {
     case "attestation":
       return <AttestationEventCard event={event} />
@@ -467,7 +364,7 @@ function FiltersPanel({
             onValueChange={(v) => onFiltersChange({ kind: (v ?? "") as FilterState["kind"] })}
           >
             <SelectTrigger className="w-full">
-              <SelectValue>{(v: string | null) => v ? ACTIVITY_KIND_CONFIG[v as ActivityEvent["kind"]]?.label ?? v : "All types"}</SelectValue>
+              <SelectValue>{(v: string | null) => v ? ACTIVITY_KIND_CONFIG[v as GlobalActivityEvent["kind"]]?.label ?? v : "All types"}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
@@ -594,153 +491,116 @@ function ActivitySkeleton() {
             <Skeleton className="h-4 w-86" />
           </CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-col gap-2">
-          {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
-            <div key={i} className="flex items-center justify-between gap-3 rounded-lg border border-border/60 p-3">
-              <div className="flex items-center gap-2">
-                <Skeleton className="size-8" />
-                <Skeleton className="h-4 w-12" />
-                <Skeleton className="h-3 w-4" />
-                <Skeleton className="size-8" />
-                <Skeleton className="h-4 w-12" />
-              </div>
-              <div className="flex items-center gap-2">
-                <Skeleton className="h-5 w-20" />
-                <Skeleton className="h-5 w-20" />
-                <Skeleton className="h-4 w-12" />
-              </div>
-            </div>
-          ))}
+        <CardContent>
+          <ListFeedSkeleton rows={8} />
         </CardContent>
       </Card>
     </div>
   )
 }
 
-// === SECTIONS ===
+// === LEADERBOARD ROW ===
 
-function ActivityFeedContent({
-  events,
-  loadingMore,
-  hasMore,
-  onLoadMore,
-}: {
-  events: ActivityEvent[]
-  loadingMore: boolean
-  hasMore: boolean
-  onLoadMore: () => void
-}) {
-  if (events.length === 0) {
-    return (
-      <div className="rounded-lg border border-border/60 px-4 py-10 text-center text-sm text-muted-foreground">
-        No events found.
-      </div>
-    )
-  }
+function LeaderboardRow({ entry, index }: { entry: LeaderboardEntry; index: number }) {
+  const name = displayName(entry.user)
+  const href = entry.user.handle ? userPath(entry.user.handle) : "#"
 
   return (
-    <div className="flex flex-col gap-2">
-      {events.map((event) => (
-        <ActivityEventCard key={event.id} event={event} />
-      ))}
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 p-3">
+      <div className="flex items-center gap-3 min-w-0">
+        <span className={cn(
+          "w-6 text-center text-sm font-semibold shrink-0",
+          index === 0 && "text-amber-500",
+          index === 1 && "text-muted-foreground",
+          index === 2 && "text-orange-700",
+          index > 2 && "text-muted-foreground/60",
+        )}>
+          {index + 1}
+        </span>
 
-      {hasMore && (
-        <Button
-          type="button"
-          onClick={onLoadMore}
-          disabled={loadingMore}
-          className="mx-auto"
-        >
-          {loadingMore ? "Loading…" : "Load more"}
-        </Button>
-      )}
+        <Link href={href} className="flex items-center gap-2 min-w-0 hover:opacity-80 transition-opacity">
+          <ProfileAvatar type="user" src={entry.user.avatarUrl} name={name} size="sm" />
+          <span className="truncate text-sm font-medium">{name}</span>
+          {entry.user.handle && (
+            <span className="truncate text-xs text-muted-foreground">@{entry.user.handle}</span>
+          )}
+        </Link>
+      </div>
+
+      <div className="flex items-center gap-2 shrink-0 text-xs">
+        <div className="flex items-center gap-1">
+          <ArrowDownLeft className="size-3 text-emerald-500" />
+          <span className="font-medium">{entry.receivedCount}</span>
+          <span className="text-muted-foreground hidden sm:inline">received</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <ArrowUpRight className="size-3 text-amber-500" />
+          <span className="font-medium">{entry.givenCount}</span>
+          <span className="text-muted-foreground hidden sm:inline">given</span>
+        </div>
+      </div>
     </div>
   )
 }
 
+// === LEADERBOARD SECTION ===
+
 function LeaderboardContent() {
   const { entries, loading } = useLeaderboard()
 
-  if (loading) {
-    return (
-      <div className="flex flex-col gap-2">
-        {[1, 2, 3, 4, 5].map((i) => (
-          <div key={i} className="flex items-center justify-between gap-3 rounded-lg border border-border/60 p-3">
-            <div className="flex items-center gap-2">
-              <Skeleton className="size-4" />
-              <Skeleton className="size-8" />
-              <div className="flex flex-col gap-1.5">
-                <Skeleton className="h-4 w-24" />
-                <Skeleton className="h-3 w-12" />
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Skeleton className="h-4 w-12" />
-              <Skeleton className="h-4 w-12" />
-            </div>
-          </div>
-        ))}
-      </div>
-    )
-  }
+  return (
+    <ListFeed<LeaderboardEntry>
+      items={entries}
+      keyExtractor={(entry) => entry.user.id}
+      renderItem={(entry, index) => <LeaderboardRow entry={entry} index={index} />}
+      loading={loading}
+      emptyMessage="No attestations yet."
+    />
+  )
+}
 
-  if (entries.length === 0) {
-    return (
-      <div className="rounded-lg border border-border/60 px-4 py-10 text-center text-sm text-muted-foreground">
-        No attestations yet.
-      </div>
-    )
-  }
+// === EVENTS SECTION ===
+
+function EventsContent({
+  filters,
+}: {
+  filters: FilterState
+}) {
+  const debouncedQ = useDebouncedValue(filters.q, 300)
+
+  // Build API filter params (strip empty strings)
+  const apiFilters = React.useMemo(() => {
+    const f: Record<string, string> = {}
+    if (debouncedQ) f.q = debouncedQ
+    if (filters.kind) f.kind = filters.kind
+    if (filters.attestationType) f.attestationType = filters.attestationType
+    if (filters.direction) f.direction = filters.direction
+    if (filters.onchain) f.onchain = filters.onchain
+    if (filters.dateFrom) f.dateFrom = filters.dateFrom
+    if (filters.dateTo) f.dateTo = filters.dateTo
+    return f
+  }, [debouncedQ, filters.kind, filters.attestationType, filters.direction, filters.onchain, filters.dateFrom, filters.dateTo])
+
+  const emptyParams = React.useMemo(() => ({}), [])
+
+  const { events, loading, loadingMore, hasMore, loadMore } = useActivityFeed<GlobalActivityEvent>({
+    endpoint: "/api/activity/list",
+    params: emptyParams,
+    filters: apiFilters,
+    take: 100,
+  })
 
   return (
-    <div className="flex flex-col gap-2">
-      {entries.map((entry, index) => {
-        const name = displayName(entry.user)
-        const href = entry.user.handle ? userPath(entry.user.handle) : "#"
-
-        return (
-          <div
-            key={entry.user.id}
-            className="flex items-center justify-between gap-3 rounded-lg border border-border/60 p-3"
-          >
-            <div className="flex items-center gap-3 min-w-0">
-              <span className={cn(
-                "w-6 text-center text-sm font-semibold shrink-0",
-                index === 0 && "text-amber-500",
-                index === 1 && "text-muted-foreground",
-                index === 2 && "text-orange-700",
-                index > 2 && "text-muted-foreground/60",
-              )}>
-                {index + 1}
-              </span>
-
-              <Link href={href} className="flex items-center gap-3 min-w-0 hover:opacity-80 transition-opacity">
-                <ProfileAvatar type="user" src={entry.user.avatarUrl} name={name} size="sm" />
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium">{name}</div>
-                  {entry.user.handle && (
-                    <div className="truncate text-xs text-muted-foreground">@{entry.user.handle}</div>
-                  )}
-                </div>
-              </Link>
-            </div>
-
-            <div className="flex items-center gap-2 shrink-0 text-xs">
-              <div className="flex items-center gap-1">
-                <ArrowDownLeft className="size-3 text-emerald-500" />
-                <span className="font-medium">{entry.receivedCount}</span>
-                <span className="text-muted-foreground hidden sm:inline">received</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <ArrowUpRight className="size-3 text-amber-500" />
-                <span className="font-medium">{entry.givenCount}</span>
-                <span className="text-muted-foreground hidden sm:inline">given</span>
-              </div>
-            </div>
-          </div>
-        )
-      })}
-    </div>
+    <ListFeed<GlobalActivityEvent>
+      items={events}
+      keyExtractor={(event) => event.id}
+      renderItem={(event) => <ActivityEventCard event={event} />}
+      loading={loading}
+      loadingMore={loadingMore}
+      hasMore={hasMore}
+      onLoadMore={loadMore}
+      emptyMessage="No events found."
+    />
   )
 }
 
@@ -761,17 +621,6 @@ export default function ActivityPage() {
   const [isFiltersOpen, setIsFiltersOpen] = React.useState(false)
   const [filters, setFilters] = React.useState<FilterState>(EMPTY_FILTERS)
 
-  // Debounce only the text search; other filters apply immediately
-  const debouncedQ = useDebouncedValue(filters.q, 300)
-  const apiFilters = React.useMemo<FilterState>(
-    () => ({ ...filters, q: debouncedQ }),
-    [filters, debouncedQ],
-  )
-
-  const { events, loading, loadingMore, hasMore, loadMore } = useActivityFeed(apiFilters)
-
-  const activeFilters = hasActiveFilters(filters)
-
   function handleFiltersChange(updates: Partial<FilterState>) {
     setFilters((prev) => ({ ...prev, ...updates }))
   }
@@ -780,7 +629,7 @@ export default function ActivityPage() {
     setFilters(EMPTY_FILTERS)
   }
 
-  if (status !== "authenticated" || (tab === "events" && loading && !hasActiveFilters(apiFilters))) {
+  if (status !== "authenticated") {
     return <ActivitySkeleton />
   }
 
@@ -831,7 +680,7 @@ export default function ActivityPage() {
               filters={filters}
               onFiltersChange={handleFiltersChange}
               onClearAll={handleClearAll}
-              resultCount={events.length}
+              resultCount={0}
             />
           )}
 
@@ -840,13 +689,8 @@ export default function ActivityPage() {
               <CardTitle>Events</CardTitle>
               <CardDescription>What&apos;s happening across the platform</CardDescription>
             </CardHeader>
-            <CardContent className="flex flex-col gap-3">
-              <ActivityFeedContent
-                events={events}
-                loadingMore={loadingMore}
-                hasMore={hasMore}
-                onLoadMore={loadMore}
-              />
+            <CardContent>
+              <EventsContent filters={filters} />
             </CardContent>
           </Card>
         </div>

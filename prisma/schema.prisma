@@ -546,6 +546,10 @@ model Event {
   @@index([communityId, actorId, createdAt])
   @@index([communityId, type, createdAt])
   @@index([communityId, subjectUserId, createdAt])
+
+  // User-scoped indexes (cross-community user activity queries)
+  @@index([actorId, createdAt])
+  @@index([subjectUserId, createdAt])
 }
 
 /// -----------------------------

@@ -7,6 +7,7 @@ import { apiGet, apiPost } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
 import { ROUTES, userPath, communityPath, communityActivityPath, communityMembersPath, communityOrbitPath, communityApplicationsPath, communityBansPath, communityPermissionsPath, communitySettingsPath } from "@/lib/routes"
 
+import { ListFeed, ListFeedSkeleton } from "@/components/common/list-feed"
 import { PageHeader } from "@/components/common/page-header"
 import { PageToolbar } from "@/components/common/page-toolbar"
 import { ProfileAvatar } from "@/components/common/profile-avatar"
@@ -326,22 +327,8 @@ function ApplicationsSkeleton() {
           <Skeleton className="h-5 w-40" />
           <Skeleton className="h-4 w-72" />
         </CardHeader>
-        <CardContent className="flex flex-col gap-2">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="flex items-center justify-between gap-3 rounded-lg border border-border/60 p-3">
-              <div className="flex items-center gap-3">
-                <Skeleton className="size-8 rounded-full" />
-                <div className="flex flex-col gap-1">
-                  <Skeleton className="h-4 w-24" />
-                  <Skeleton className="h-3 w-16" />
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <Skeleton className="h-5 w-16 rounded-full" />
-                <Skeleton className="h-4 w-14 hidden sm:block" />
-              </div>
-            </div>
-          ))}
+        <CardContent>
+          <ListFeedSkeleton rows={6} />
         </CardContent>
       </Card>
     </div>
@@ -518,37 +505,6 @@ function ApplicationRow({
   )
 }
 
-function ApplicationsList({
-  applications,
-  onRowClick,
-}: {
-  applications: ApplicationItem[]
-  onRowClick: (app: ApplicationItem) => void
-}) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Membership requests</CardTitle>
-        <CardDescription>Review and manage applications. Click a row to see answers.</CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-2">
-        {applications.length > 0 ? (
-          applications.map((app) => (
-            <ApplicationRow
-              key={app.id}
-              app={app}
-              onRowClick={onRowClick}
-            />
-          ))
-        ) : (
-          <div className="rounded-lg border border-border/60 px-4 py-10 text-center text-sm text-muted-foreground">
-            No applications found.
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
 
 function ApplicationDialog({
   open,
@@ -845,10 +801,23 @@ export default function CommunityApplicationsPage() {
         </Alert>
       )}
 
-      <ApplicationsList
-        applications={filtered}
-        onRowClick={openDialog}
-      />
+      <Card>
+        <CardHeader>
+          <CardTitle>Membership requests</CardTitle>
+          <CardDescription>Review and manage applications. Click a row to see answers.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ListFeed<ApplicationItem>
+            items={filtered}
+            keyExtractor={(app) => app.id}
+            renderItem={(app) => (
+              <ApplicationRow app={app} onRowClick={openDialog} />
+            )}
+            loading={false}
+            emptyMessage="No applications found."
+          />
+        </CardContent>
+      </Card>
 
       <ApplicationDialog
         open={open}

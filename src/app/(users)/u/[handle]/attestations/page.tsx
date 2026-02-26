@@ -4,30 +4,26 @@ import * as React from "react"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 import { useSession } from "next-auth/react"
-import {
-  ArrowUpRight,
-  LayoutGrid,
-  Link2,
-  List,
-  Undo2,
-} from "lucide-react"
+import { ArrowUpRight, Link2, Undo2 } from "lucide-react"
 
 import { apiGet, apiPost } from "@/lib/api/client"
+import { formatRelativeTime } from "@/lib/format"
 import { sounds } from "@/lib/sounds"
 import { ROUTES, userPath, userActivityPath, userAttestationsPath, userSettingsPath } from "@/lib/routes"
 import { ATTESTATION_TYPES, ATTESTATION_TYPE_LIST, type AttestationType } from "@/lib/attestations/definitions"
+import { useDebouncedValue } from "@/hooks/use-debounced-value"
+
 import { AttestationBadge } from "@/components/attestation/badge"
 import { OnchainBanner } from "@/components/attestation/onchain-banner"
 import { useAttestationQueue } from "@/components/attestation/queue-provider"
-
+import { ListFeed, ListFeedSkeleton } from "@/components/common/list-feed"
 import { PageHeader } from "@/components/common/page-header"
 import { PageToolbar } from "@/components/common/page-toolbar"
 import { ProfileAvatar } from "@/components/common/profile-avatar"
-
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardAction, CardContent, CardHeader } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { InfiniteScroll } from "@/components/ui/infinite-scroll"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -70,32 +66,6 @@ type FilterState = {
 }
 
 // === UTILITY FUNCTIONS ===
-
-function formatAttestationDate(iso: string): string {
-  const ts = Date.parse(iso)
-  if (!Number.isFinite(ts)) return ""
-
-  const diff = Date.now() - ts
-  const hours = Math.floor(diff / 1000 / 60 / 60)
-
-  if (hours < 1) {
-    const minutes = Math.floor(diff / 1000 / 60)
-    if (minutes < 1) return "just now"
-    return `${minutes}m ago`
-  }
-
-  if (hours < 24) {
-    return `${hours}h ago`
-  }
-
-  const d = new Date(ts)
-  const pad = (n: number) => String(n).padStart(2, "0")
-  return d.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  }) + ` at ${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
 
 function mergeAttestationsUnique(prev: Attestation[], next: Attestation[]): Attestation[] {
   const out: Attestation[] = []
@@ -151,17 +121,6 @@ function useUserProfile(handle: string) {
   }, [handle])
 
   return profile
-}
-
-function useDebouncedValue<T>(value: T, delayMs: number): T {
-  const [debounced, setDebounced] = React.useState(value)
-
-  React.useEffect(() => {
-    const t = window.setTimeout(() => setDebounced(value), delayMs)
-    return () => window.clearTimeout(t)
-  }, [value, delayMs])
-
-  return debounced
 }
 
 function useAttestationsData(
@@ -283,172 +242,6 @@ function useAttestationsData(
 
 // === SUB-COMPONENTS ===
 
-function AttestationCard({
-  attestation,
-  viewerId,
-  onRetract,
-}: {
-  attestation: Attestation
-  viewerId: string | null
-  onRetract?: (id: string) => void
-}) {
-  const [isRetracting, setIsRetracting] = React.useState(false)
-  const otherUser = attestation.toUser
-  const displayName = otherUser.name?.trim() || `@${otherUser.handle}`
-  const href = userPath(otherUser.handle ?? otherUser.id)
-  const isMinted = !!attestation.mintedAt
-  const canRetract = viewerId === attestation.fromUser.id
-
-  const handleRetract = async () => {
-    if (isRetracting || !canRetract) return
-    setIsRetracting(true)
-    try {
-      const result = await apiPost<{ alreadyRevoked: boolean }>(
-        "/api/attestation/retract",
-        { attestationId: attestation.id }
-      )
-      if (result.ok) onRetract?.(attestation.id)
-    } finally {
-      setIsRetracting(false)
-    }
-  }
-
-  return (
-    <Card
-      size="sm"
-      className="transition-colors"
-    >
-      <CardHeader className="flex-row items-center gap-3">
-        <div className="flex items-center gap-3">
-          <Link href={href}>
-            <ProfileAvatar type="user" src={otherUser.avatarUrl} name={displayName} className="size-9" />
-          </Link>
-          <div className="min-w-0">
-            <Link href={href} className="hover:underline">
-              <span className="truncate text-sm font-medium">{displayName}</span>
-            </Link>
-            {otherUser.handle && (
-              <div className="truncate text-xs text-muted-foreground">@{otherUser.handle}</div>
-            )}
-          </div>
-        </div>
-        <CardAction>
-          <div className="flex items-center gap-2">
-            {canRetract && (
-              <Button
-                variant="destructive"
-                size="xs"
-                onClick={handleRetract}
-                disabled={isRetracting}
-                className="gap-1"
-              >
-                <Undo2 className="size-3" />
-                {isRetracting ? "Retracting…" : "Retract"}
-              </Button>
-            )}
-            {isMinted ? (
-              <Badge variant="positive" className="gap-1">
-                <Link2 className="size-3" />
-                Published
-              </Badge>
-            ) : (
-              <Badge variant="secondary" className="gap-1">
-                Pending
-              </Badge>
-            )}
-          </div>
-        </CardAction>
-      </CardHeader>
-
-      <CardContent className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
-        <Badge variant="info" className="gap-1">
-          <ArrowUpRight className="size-3" />
-          Given
-        </Badge>
-        <AttestationBadge type={attestation.type} />
-        <Separator orientation="vertical" className="!h-4 mx-1" />
-        <span>{formatAttestationDate(attestation.createdAt)}</span>
-      </CardContent>
-    </Card>
-  )
-}
-
-function AttestationCardSkeleton() {
-  return (
-    <Card size="sm">
-      <CardHeader className="flex-row items-center gap-3">
-        <div className="flex items-center gap-3">
-          <Skeleton className="size-9 rounded-full" />
-          <div className="flex flex-col gap-1.5">
-            <Skeleton className="h-4 w-28" />
-            <Skeleton className="h-3 w-20" />
-          </div>
-        </div>
-        <CardAction>
-          <div className="flex items-center gap-2">
-            <Skeleton className="h-3 w-10" />
-            <Skeleton className="h-5 w-16 rounded-full" />
-          </div>
-        </CardAction>
-      </CardHeader>
-      <CardContent className="flex items-center gap-2">
-        <Skeleton className="h-5 w-18 rounded-full" />
-        <Skeleton className="h-5 w-24 rounded-full" />
-        <Skeleton className="h-4 w-px" />
-        <Skeleton className="h-6 w-16 rounded-md" />
-        <Skeleton className="h-6 w-14 rounded-md" />
-      </CardContent>
-    </Card>
-  )
-}
-
-function AttestationRowSkeleton() {
-  return (
-    <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,0.5fr)] gap-3 px-4 py-3">
-      <div className="flex items-center min-w-0">
-        <div className="inline-flex items-center gap-3">
-          <Skeleton className="size-8 rounded-full shrink-0" />
-          <div className="flex flex-col gap-1">
-            <Skeleton className="h-4 w-24" />
-            <Skeleton className="h-3 w-16" />
-          </div>
-        </div>
-      </div>
-      <div className="flex items-center"><Skeleton className="h-5 w-20 rounded-full" /></div>
-      <div className="flex items-center"><Skeleton className="h-3 w-12" /></div>
-      <div className="flex items-center"><Skeleton className="h-5 w-16 rounded-full" /></div>
-      <div className="flex items-center justify-end"><Skeleton className="size-6 rounded" /></div>
-    </div>
-  )
-}
-
-function AttestationsGridSkeleton({ view }: { view: "cards" | "list" }) {
-  if (view === "cards") {
-    return (
-      <div className="grid gap-4 sm:grid-cols-2">
-        {Array.from({ length: 6 }, (_, i) => (
-          <AttestationCardSkeleton key={i} />
-        ))}
-      </div>
-    )
-  }
-
-  return (
-    <div className="rounded-2xl border border-border/60 bg-card/30 overflow-hidden">
-      <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,0.5fr)] gap-3 border-b border-border/60 px-4 py-3 text-xs font-medium text-foreground/70">
-        <div>User</div>
-        <div>Type</div>
-        <div>Date</div>
-        <div>Status</div>
-        <div />
-      </div>
-      {Array.from({ length: 6 }, (_, i) => (
-        <AttestationRowSkeleton key={i} />
-      ))}
-    </div>
-  )
-}
-
 function AttestationRow({
   attestation,
   viewerId,
@@ -462,6 +255,8 @@ function AttestationRow({
   const otherUser = attestation.toUser
   const canRetract = viewerId === attestation.fromUser.id
   const isMinted = !!attestation.mintedAt
+  const displayName = otherUser.name?.trim() || `@${otherUser.handle}`
+  const href = userPath(otherUser.handle ?? otherUser.id)
 
   const handleRetract = async (e: React.MouseEvent) => {
     e.preventDefault()
@@ -482,16 +277,12 @@ function AttestationRow({
       setIsRetracting(false)
     }
   }
-  const displayName = otherUser.name?.trim() || `@${otherUser.handle}`
-  const href = userPath(otherUser.handle ?? otherUser.id)
 
   return (
-    <div
-      className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,0.5fr)] gap-3 px-4 py-3 text-sm text-muted-foreground transition-colors hover:bg-muted"
-    >
-      <div className="flex items-center min-w-0">
-        <Link href={href} className="inline-flex min-w-0 items-center gap-3 rounded-md px-1.5 py-1 -mx-1.5 -my-1 transition-colors hover:text-primary">
-          <ProfileAvatar type="user" src={otherUser.avatarUrl} name={displayName} className="h-8 w-8 shrink-0" />
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 p-3">
+      <div className="flex items-center gap-2 min-w-0 text-sm">
+        <Link href={href} className="flex items-center gap-2 min-w-0 hover:opacity-80 transition-opacity">
+          <ProfileAvatar type="user" src={otherUser.avatarUrl} name={displayName} size="sm" />
           <div className="min-w-0">
             <div className="truncate font-medium">{displayName}</div>
             {otherUser.handle && (
@@ -499,29 +290,11 @@ function AttestationRow({
             )}
           </div>
         </Link>
-      </div>
-
-      <div className="flex items-center">
+        <ArrowUpRight className="size-3 shrink-0 text-amber-500" />
         <AttestationBadge type={attestation.type} />
       </div>
 
-      <div className="flex items-center text-xs text-muted-foreground">
-        {formatAttestationDate(attestation.createdAt)}
-      </div>
-
-      <div className="flex items-center">
-        {isMinted ? (
-          <Badge variant="positive" className="gap-1">
-            Published
-          </Badge>
-        ) : (
-          <Badge variant="secondary" className="gap-1">
-            Pending
-          </Badge>
-        )}
-      </div>
-
-      <div className="flex items-center justify-end gap-1">
+      <div className="flex items-center gap-2 shrink-0">
         {canRetract && (
           <Button
             variant="destructive"
@@ -531,8 +304,20 @@ function AttestationRow({
             className="gap-1"
           >
             <Undo2 className="size-3" />
+            {isRetracting ? "…" : "Retract"}
           </Button>
         )}
+        {isMinted ? (
+          <Badge variant="positive" className="gap-1">
+            <Link2 className="size-3" />
+            Published
+          </Badge>
+        ) : (
+          <Badge variant="secondary">Pending</Badge>
+        )}
+        <span className="text-xs text-muted-foreground">
+          {formatRelativeTime(attestation.createdAt)}
+        </span>
       </div>
     </div>
   )
@@ -574,12 +359,16 @@ function AttestationsSkeleton({ isSelf }: { isSelf: boolean }) {
         </div>
       )}
 
-      {/* Cards skeleton */}
-      <div className="grid gap-4 sm:grid-cols-2">
-        {Array.from({ length: 6 }, (_, i) => (
-          <AttestationCardSkeleton key={i} />
-        ))}
-      </div>
+      {/* List skeleton */}
+      <Card>
+        <CardHeader>
+          <CardTitle><Skeleton className="h-5 w-32" /></CardTitle>
+          <CardDescription><Skeleton className="h-4 w-64" /></CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ListFeedSkeleton rows={6} />
+        </CardContent>
+      </Card>
     </div>
   )
 }
@@ -679,78 +468,9 @@ function FiltersPanel({
   )
 }
 
-// === CONTENT SECTIONS ===
-
-function AttestationsGrid({
-  items,
-  view,
-  viewerId,
-  onRetract,
-}: {
-  items: Attestation[]
-  view: "cards" | "list"
-  viewerId: string | null
-  onRetract?: (id: string) => void
-}) {
-  if (view === "cards") {
-    return (
-      <div className="grid gap-4 sm:grid-cols-2">
-        {items.map((a) => (
-          <AttestationCard
-            key={a.id}
-            attestation={a}
-            viewerId={viewerId}
-            onRetract={onRetract}
-          />
-        ))}
-      </div>
-    )
-  }
-
-  return (
-    <div className="rounded-2xl border border-border/60 bg-card/30 overflow-hidden">
-      <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,0.5fr)] gap-3 border-b border-border/60 px-4 py-3 text-xs font-medium text-foreground/70">
-        <div>User</div>
-        <div>Type</div>
-        <div>Date</div>
-        <div>Status</div>
-        <div />
-      </div>
-
-      {items.map((a) => (
-        <AttestationRow
-          key={a.id}
-          attestation={a}
-          viewerId={viewerId}
-          onRetract={onRetract}
-        />
-      ))}
-    </div>
-  )
-}
-
-function EmptyState({ hasFilters, onClearFilters }: { hasFilters: boolean; onClearFilters: () => void }) {
-  return (
-    <div className="rounded-lg border border-border/60 px-4 py-10 text-center text-sm text-muted-foreground">
-      <p>No attestations found.</p>
-      {hasFilters && (
-        <Button
-          type="button"
-          variant="link"
-          onClick={onClearFilters}
-          className="mt-2"
-        >
-          Clear all filters
-        </Button>
-      )}
-    </div>
-  )
-}
-
 // === MAIN COMPONENT ===
 
 export default function AttestationsPage() {
-  const router = useRouter()
   const params = useParams<{ handle: string }>()
   const { data: session } = useSession()
   const handle = params.handle?.trim() || ""
@@ -765,7 +485,6 @@ export default function AttestationsPage() {
   // Get lastChangedAt from queue context to trigger refetch when cart saves
   const { lastChangedAt } = useAttestationQueue()
 
-  const [view, setView] = React.useState<"cards" | "list">("cards")
   const [cursor, setCursor] = React.useState<string | null>(null)
   const [isFiltersOpen, setIsFiltersOpen] = React.useState(false)
   const [localItems, setLocalItems] = React.useState<Attestation[]>([])
@@ -907,11 +626,7 @@ export default function AttestationsPage() {
   }
 
   function handleClearAll() {
-    setFilters({
-      q: "",
-      type: "",
-      status: "",
-    })
+    setFilters({ q: "", type: "", status: "" })
   }
 
   if (!handle) return null
@@ -932,14 +647,6 @@ export default function AttestationsPage() {
             actions={[
               { label: "Filters", active: isFiltersOpen, onClick: () => setIsFiltersOpen((v) => !v) },
             ]}
-            viewSwitch={{
-              value: view,
-              onChange: (v) => setView(v as "cards" | "list"),
-              options: [
-                { value: "cards", icon: LayoutGrid, label: "Cards" },
-                { value: "list", icon: List, label: "List" },
-              ],
-            }}
             nav={[
               { label: "Profile", href: userPath(handle) },
               { label: "Attestations", href: userAttestationsPath(handle) },
@@ -980,26 +687,51 @@ export default function AttestationsPage() {
         {loading || filtering ? "Loading attestations..." : `${items.length} attestations loaded`}
       </div>
 
-      <div className="flex flex-col gap-3">
-        {filtering ? (
-          <AttestationsGridSkeleton view={view} />
-        ) : items.length === 0 ? (
-          <EmptyState hasFilters={activeFilters} onClearFilters={handleClearAll} />
-        ) : (
-          <InfiniteScroll
-            onLoadMore={() => setCursor(nextCursor)}
-            hasMore={!!nextCursor}
-            isLoading={loadingMore}
-          >
-            <AttestationsGrid
-              items={items}
-              view={view}
-              viewerId={viewerId}
-              onRetract={handleRetract}
-            />
-          </InfiniteScroll>
-        )}
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Attestations</CardTitle>
+          <CardDescription>Attestations given by this user.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {filtering ? (
+            <ListFeedSkeleton rows={6} />
+          ) : (
+            <InfiniteScroll
+              onLoadMore={() => setCursor(nextCursor)}
+              hasMore={!!nextCursor}
+              isLoading={loadingMore}
+            >
+              <ListFeed<Attestation>
+                items={items}
+                keyExtractor={(a) => a.id}
+                renderItem={(a) => (
+                  <AttestationRow
+                    attestation={a}
+                    viewerId={viewerId}
+                    onRetract={handleRetract}
+                  />
+                )}
+                loading={false}
+                loadingMore={loadingMore}
+                emptyMessage={activeFilters ? "No attestations match your filters." : "No attestations yet."}
+                renderEmpty={activeFilters ? () => (
+                  <div className="rounded-lg border border-border/60 px-4 py-10 text-center text-sm text-muted-foreground">
+                    <p>No attestations found.</p>
+                    <Button
+                      type="button"
+                      variant="link"
+                      onClick={handleClearAll}
+                      className="mt-2"
+                    >
+                      Clear all filters
+                    </Button>
+                  </div>
+                ) : undefined}
+              />
+            </InfiniteScroll>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }

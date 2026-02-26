@@ -19,6 +19,7 @@ import {
   communitySettingsPath,
 } from "@/lib/routes"
 
+import { ListFeed, ListFeedSkeleton } from "@/components/common/list-feed"
 import { PageHeader } from "@/components/common/page-header"
 import { PageToolbar } from "@/components/common/page-toolbar"
 import { ProfileAvatar } from "@/components/common/profile-avatar"
@@ -118,22 +119,8 @@ function BansSkeleton() {
           <Skeleton className="h-5 w-40" />
           <Skeleton className="h-4 w-72" />
         </CardHeader>
-        <CardContent className="flex flex-col gap-2">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="flex items-center justify-between gap-3 rounded-lg border border-border/60 p-3">
-              <div className="flex items-center gap-3 min-w-0">
-                <Skeleton className="size-8 rounded-full shrink-0" />
-                <div className="flex flex-col gap-1">
-                  <Skeleton className="h-4 w-24" />
-                  <Skeleton className="h-3 w-16" />
-                </div>
-              </div>
-              <div className="flex items-center gap-3 shrink-0">
-                <Skeleton className="h-4 w-32 hidden sm:block" />
-                <Skeleton className="h-8 w-16 rounded-md" />
-              </div>
-            </div>
-          ))}
+        <CardContent>
+          <ListFeedSkeleton rows={4} />
         </CardContent>
       </Card>
     </div>
@@ -312,21 +299,20 @@ export default function CommunityBansPage() {
           <CardTitle>Banned members</CardTitle>
           <CardDescription>Members who have been banned from this community.</CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-col gap-2">
-          {members.length > 0 ? (
-            members.map((m) => (
+        <CardContent>
+          <ListFeed<BannedMember>
+            items={members}
+            keyExtractor={(m) => m.membershipId}
+            renderItem={(m) => (
               <BannedMemberRow
-                key={m.membershipId}
                 member={m}
                 onUnban={handleUnban}
                 unbanning={unbanningId === m.membershipId}
               />
-            ))
-          ) : (
-            <div className="rounded-lg border border-border/60 px-4 py-10 text-center text-sm text-muted-foreground">
-              No banned members.
-            </div>
-          )}
+            )}
+            loading={false}
+            emptyMessage="No banned members."
+          />
         </CardContent>
       </Card>
     </div>

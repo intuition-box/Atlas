@@ -27,6 +27,7 @@ import { COUNTRIES } from "@/config/countries"
 import { LANGUAGE_LIST as LANGUAGES } from "@/config/languages"
 import { SKILL_LIST as SKILLS, TOOL_LIST as TOOLS } from "@/lib/attestations/definitions"
 
+import { ListFeed } from "@/components/common/list-feed"
 import { PageHeader } from "@/components/common/page-header"
 import { PageToolbar } from "@/components/common/page-toolbar"
 import { ProfileAvatar } from "@/components/common/profile-avatar"
@@ -1139,20 +1140,25 @@ function MembersGrid({ items, view, isAdmin, isOwner, viewerUserId, communityHan
         <CardTitle>Members</CardTitle>
         <CardDescription>Community members directory.</CardDescription>
       </CardHeader>
-      <CardContent className="flex flex-col gap-2">
-        {items.map((m) => (
-          <MemberRow
-            key={m.membershipId}
-            member={m}
-            isAdmin={isAdmin}
-            isOwner={isOwner}
-            viewerUserId={viewerUserId}
-            communityHandle={communityHandle}
-            onOrbitOverride={onOrbitOverride}
-            onRoleChange={onRoleChange}
-            onBanSuccess={onBanSuccess}
-          />
-        ))}
+      <CardContent>
+        <ListFeed<CommunityMember>
+          items={items}
+          keyExtractor={(m) => m.membershipId}
+          renderItem={(m) => (
+            <MemberRow
+              member={m}
+              isAdmin={isAdmin}
+              isOwner={isOwner}
+              viewerUserId={viewerUserId}
+              communityHandle={communityHandle}
+              onOrbitOverride={onOrbitOverride}
+              onRoleChange={onRoleChange}
+              onBanSuccess={onBanSuccess}
+            />
+          )}
+          loading={false}
+          emptyMessage="No members match your filters."
+        />
       </CardContent>
     </Card>
   )
