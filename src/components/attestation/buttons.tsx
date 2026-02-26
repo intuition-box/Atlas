@@ -6,10 +6,15 @@ import { motion, AnimatePresence } from "motion/react";
 import { Check } from "lucide-react";
 import { useSession } from "next-auth/react";
 
+import { useRouter } from "next/navigation";
+
 import { cn } from "@/lib/utils";
 import { apiGet } from "@/lib/api/client";
 import { sounds } from "@/lib/sounds";
+import { ROUTES } from "@/lib/routes";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { ProfileAvatar } from "@/components/common/profile-avatar";
 import { useAttestationQueue } from "./queue-provider";
 import { ATTESTATION_TYPES, type AttestationType } from "@/lib/attestations/definitions";
 import { AttestationBadge } from "@/components/attestation/badge";
@@ -38,6 +43,10 @@ type AttestationButtonsProps = {
   className?: string;
   /** Size variant */
   size?: "xs" | "sm";
+  /** Show "+N" count badges on each button (fetched automatically) */
+  showCounts?: boolean;
+  /** Show tooltip with attestor names on hover (requires showCounts) */
+  showTooltip?: boolean;
 };
 
 type FlyingDot = {
@@ -46,8 +55,17 @@ type FlyingDot = {
   rect: DOMRect;
 };
 
+type AttestorInfo = {
+  id: string;
+  name: string | null;
+  handle: string | null;
+  avatarUrl: string | null;
+};
+
 type StatusResponse = {
   activeTypes: string[];
+  receivedCountsByType: Record<string, number>;
+  receivedUsersByType: Record<string, AttestorInfo[]>;
 };
 
 /* ────────────────────────────
@@ -61,12 +79,17 @@ export function AttestationButtons({
   toAvatarUrl,
   className,
   size = "xs",
+  showCounts = false,
+  showTooltip = false,
 }: AttestationButtonsProps) {
+  const router = useRouter();
   const { data: session, status: sessionStatus } = useSession();
   const [animatingTypes, setAnimatingTypes] = useState<Set<AttestationType>>(new Set());
   const [savingTypes, setSavingTypes] = useState<Set<AttestationType>>(new Set());
   const [flyingDots, setFlyingDots] = useState<FlyingDot[]>([]);
   const [activeTypes, setActiveTypes] = useState<Set<AttestationType>>(new Set());
+  const [receivedCounts, setReceivedCounts] = useState<Record<string, number>>({});
+  const [receivedUsers, setReceivedUsers] = useState<Record<string, AttestorInfo[]>>({});
   const [isFetching, setIsFetching] = useState(true);
   const { createAttestation, buttonRef, lastChangedAt } = useAttestationQueue();
 
@@ -83,15 +106,15 @@ export function AttestationButtons({
   const currentUserId = session?.user?.id;
   const isSessionLoading = sessionStatus === "loading";
 
-  // Fetch existing attestations on mount and when attestations change
+  // Fetch status (active types + counts + attestors) on mount and when attestations change
   useEffect(() => {
     // Wait for session to load before deciding
     if (isSessionLoading) {
       return;
     }
 
-    // No session or viewing own profile - no fetch needed
-    if (!currentUserId || currentUserId === toUserId) {
+    // Viewing own profile — no fetch needed (buttons hidden)
+    if (currentUserId && currentUserId === toUserId) {
       setIsFetching(false);
       return;
     }
@@ -108,6 +131,8 @@ export function AttestationButtons({
               (t): t is AttestationType => t in ATTESTATION_TYPES
             )
           ));
+          setReceivedCounts(result.value.receivedCountsByType ?? {});
+          setReceivedUsers(result.value.receivedUsersByType ?? {});
         }
         setIsFetching(false);
       })
@@ -120,8 +145,8 @@ export function AttestationButtons({
     return () => controller.abort();
   }, [currentUserId, toUserId, lastChangedAt, isSessionLoading]);
 
-  // Don't show attestation buttons if not logged in or viewing own profile
-  if (!currentUserId || currentUserId === toUserId) {
+  // Don't show attestation buttons when viewing own profile
+  if (currentUserId && currentUserId === toUserId) {
     return null;
   }
 
@@ -129,6 +154,12 @@ export function AttestationButtons({
     e: React.MouseEvent,
     type: AttestationType
   ) => {
+    // Redirect unauthenticated users to sign-in
+    if (!currentUserId) {
+      router.push(ROUTES.signIn);
+      return;
+    }
+
     if (animatingTypes.has(type) || savingTypes.has(type)) return;
 
     const rect = e.currentTarget.getBoundingClientRect();
@@ -199,6 +230,10 @@ export function AttestationButtons({
           const isAnimating = animatingTypes.has(type);
           const isSaving = savingTypes.has(type);
           const isActive = activeTypes.has(type);
+          const count = showCounts ? (receivedCounts[type] ?? 0) : 0;
+          const attestors = receivedUsers[type] ?? [];
+          const totalCount = receivedCounts[type] ?? 0;
+          const hasTooltip = showTooltip && attestors.length > 0;
 
           // 1. Loading — all buttons disabled with skeleton
           if (isLoading) {
@@ -221,30 +256,66 @@ export function AttestationButtons({
             );
           }
 
-          // 2. Already attested or currently saving — disabled secondary
-          if (isActive || isSaving) {
-            return (
-              <Button
-                key={attestType.id}
-                variant="secondary"
-                size={size}
-                disabled
-              >
-                <AttestationBadge type={attestType.id} bare />
-              </Button>
-            );
-          }
+          const buttonContent = (
+            <>
+              <AttestationBadge type={attestType.id} bare />
+              {count > 0 && (
+                <span className="text-xs text-muted-foreground">+{count}</span>
+              )}
+            </>
+          );
 
-          // 3. Available — enabled default
-          return (
+          const button = isActive || isSaving ? (
+            <Button
+              key={attestType.id}
+              variant="secondary"
+              size={size}
+              disabled
+            >
+              {buttonContent}
+            </Button>
+          ) : (
             <Button
               key={attestType.id}
               variant="default"
               size={size}
               onClick={(e) => handleAttestClick(e, type)}
             >
-              <AttestationBadge type={attestType.id} bare />
+              {buttonContent}
             </Button>
+          );
+
+          if (!hasTooltip) return button;
+
+          return (
+            <Tooltip key={attestType.id}>
+              <TooltipTrigger>
+                {button}
+              </TooltipTrigger>
+              <TooltipContent side="top" sideOffset={8}>
+                <div className="flex flex-col gap-1.5 py-0.5">
+                  {attestors.map((u) => (
+                    <div key={u.id} className="flex items-center gap-2">
+                      <ProfileAvatar
+                        type="user"
+                        src={u.avatarUrl}
+                        name={u.name ?? u.handle ?? ""}
+                        size="sm"
+                        className="size-4"
+                      />
+                      <span className="text-xs">
+                        {u.name ?? `@${u.handle}`}
+                      </span>
+                    </div>
+                  ))}
+                  {totalCount > attestors.length && (
+                    <span className="text-xs text-muted-foreground/60">
+                      +{totalCount - attestors.length} more
+                    </span>
+                  )}
+                </div>
+              </TooltipContent>
+            </Tooltip>
           );
         })}
       </div>

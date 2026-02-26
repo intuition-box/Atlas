@@ -204,8 +204,9 @@ export async function getAttestationsGiven(
     select: attestationSelect,
   });
 
+  const hasMore = rows.length > take;
   const page = rows.slice(0, take);
-  const nextCursor = rows.length > take ? rows[take]!.id : null;
+  const nextCursor = hasMore ? page[page.length - 1]!.id : null;
 
   return {
     attestations: page.map((r) => ({ ...r, type: r.type as AttestationType })),
@@ -239,8 +240,9 @@ export async function getAttestationsReceived(
     select: attestationSelect,
   });
 
+  const hasMore = rows.length > take;
   const page = rows.slice(0, take);
-  const nextCursor = rows.length > take ? rows[take]!.id : null;
+  const nextCursor = hasMore ? page[page.length - 1]!.id : null;
 
   return {
     attestations: page.map((r) => ({ ...r, type: r.type as AttestationType })),
@@ -310,31 +312,32 @@ export async function createAttestation(
   type: AttestationType,
   confidence?: number | null,
 ): Promise<Result<{ attestation: AttestationSummary; alreadyExists: boolean }, AttestationError>> {
-  // Check for existing active attestation
-  const existing = await db.attestation.findFirst({
-    where: {
-      fromUserId,
-      toUserId,
-      type,
-      revokedAt: null,
-      supersededById: null,
-    },
-    select: { id: true, type: true, confidence: true, createdAt: true },
-  });
-
   const normalizedConfidence = confidence ?? null;
 
-  // Idempotent: return existing if same confidence
-  if (existing) {
-    if (existing.confidence === normalizedConfidence) {
-      return ok({
-        attestation: { ...existing, type: existing.type as AttestationType },
-        alreadyExists: true,
-      });
-    }
+  // Wrap the entire read+write in a serializable transaction to prevent
+  // duplicate active attestations from concurrent requests.
+  return db.$transaction(async (tx) => {
+    const existing = await tx.attestation.findFirst({
+      where: {
+        fromUserId,
+        toUserId,
+        type,
+        revokedAt: null,
+        supersededById: null,
+      },
+      select: { id: true, type: true, confidence: true, createdAt: true },
+    });
 
-    // Supersede existing
-    const created = await db.$transaction(async (tx) => {
+    // Idempotent: return existing if same confidence
+    if (existing) {
+      if (existing.confidence === normalizedConfidence) {
+        return ok({
+          attestation: { ...existing, type: existing.type as AttestationType },
+          alreadyExists: true,
+        });
+      }
+
+      // Supersede existing
       const replacement = await tx.attestation.create({
         data: {
           fromUserId,
@@ -350,30 +353,28 @@ export async function createAttestation(
         data: { supersededById: replacement.id },
       });
 
-      return replacement;
+      return ok({
+        attestation: { ...replacement, type: replacement.type as AttestationType },
+        alreadyExists: false,
+      });
+    }
+
+    // Create new
+    const created = await tx.attestation.create({
+      data: {
+        fromUserId,
+        toUserId,
+        type,
+        confidence: normalizedConfidence,
+      },
+      select: attestationSummarySelect,
     });
 
     return ok({
       attestation: { ...created, type: created.type as AttestationType },
       alreadyExists: false,
     });
-  }
-
-  // Create new
-  const created = await db.attestation.create({
-    data: {
-      fromUserId,
-      toUserId,
-      type,
-      confidence: normalizedConfidence,
-    },
-    select: attestationSummarySelect,
-  });
-
-  return ok({
-    attestation: { ...created, type: created.type as AttestationType },
-    alreadyExists: false,
-  });
+  }, { isolationLevel: "Serializable" });
 }
 
 /**
@@ -385,46 +386,48 @@ export async function retractAttestation(
   viewerId: string,
   reason?: string,
 ): Promise<Result<{ alreadyRevoked: boolean }, AttestationError>> {
-  const row = await db.attestation.findUnique({
-    where: { id: attestationId },
-    select: {
-      id: true,
-      fromUserId: true,
-      revokedAt: true,
-      supersededById: true,
-    },
-  });
-
-  if (!row) {
-    return err({ code: "NOT_FOUND", message: "Attestation not found", status: 404 });
-  }
-
-  if (row.revokedAt) {
-    return ok({ alreadyRevoked: true });
-  }
-
-  if (row.supersededById) {
-    return err({
-      code: "CONFLICT",
-      message: "Attestation can't be retracted (superseded)",
-      status: 409,
+  return db.$transaction(async (tx) => {
+    const row = await tx.attestation.findUnique({
+      where: { id: attestationId },
+      select: {
+        id: true,
+        fromUserId: true,
+        revokedAt: true,
+        supersededById: true,
+      },
     });
-  }
 
-  if (row.fromUserId !== viewerId) {
-    return err({ code: "FORBIDDEN", message: "Not allowed", status: 403 });
-  }
+    if (!row) {
+      return err({ code: "NOT_FOUND", message: "Attestation not found", status: 404 });
+    }
 
-  await db.attestation.update({
-    where: { id: row.id },
-    data: {
-      revokedAt: new Date(),
-      revokedByUserId: viewerId,
-      revokedReason: reason ?? null,
-    },
+    if (row.revokedAt) {
+      return ok({ alreadyRevoked: true });
+    }
+
+    if (row.supersededById) {
+      return err({
+        code: "CONFLICT",
+        message: "Attestation can't be retracted (superseded)",
+        status: 409,
+      });
+    }
+
+    if (row.fromUserId !== viewerId) {
+      return err({ code: "FORBIDDEN", message: "Not allowed", status: 403 });
+    }
+
+    await tx.attestation.update({
+      where: { id: row.id },
+      data: {
+        revokedAt: new Date(),
+        revokedByUserId: viewerId,
+        revokedReason: reason ?? null,
+      },
+    });
+
+    return ok({ alreadyRevoked: false });
   });
-
-  return ok({ alreadyRevoked: false });
 }
 
 /**
@@ -444,51 +447,51 @@ export async function supersedeAttestation(
     });
   }
 
-  const existing = await db.attestation.findUnique({
-    where: { id: attestationId },
-    select: {
-      id: true,
-      fromUserId: true,
-      toUserId: true,
-      type: true,
-      confidence: true,
-      revokedAt: true,
-      supersededById: true,
-    },
-  });
-
-  if (!existing) {
-    return err({ code: "NOT_FOUND", message: "Attestation not found", status: 404 });
-  }
-
-  if (existing.revokedAt) {
-    return err({ code: "CONFLICT", message: "Attestation is revoked", status: 409 });
-  }
-
-  if (existing.supersededById) {
-    return err({
-      code: "CONFLICT",
-      message: "Attestation is already superseded",
-      status: 409,
+  return db.$transaction(async (tx) => {
+    const existing = await tx.attestation.findUnique({
+      where: { id: attestationId },
+      select: {
+        id: true,
+        fromUserId: true,
+        toUserId: true,
+        type: true,
+        confidence: true,
+        revokedAt: true,
+        supersededById: true,
+      },
     });
-  }
 
-  if (existing.fromUserId !== viewerId) {
-    return err({ code: "FORBIDDEN", message: "Not allowed", status: 403 });
-  }
+    if (!existing) {
+      return err({ code: "NOT_FOUND", message: "Attestation not found", status: 404 });
+    }
 
-  const nextConfidence = changes.confidence === null ? null : changes.confidence;
+    if (existing.revokedAt) {
+      return err({ code: "CONFLICT", message: "Attestation is revoked", status: 409 });
+    }
 
-  // No-op check
-  if (nextConfidence === (existing.confidence ?? null)) {
-    return err({
-      code: "INVALID_REQUEST",
-      message: "Nothing to change",
-      status: 400,
-    });
-  }
+    if (existing.supersededById) {
+      return err({
+        code: "CONFLICT",
+        message: "Attestation is already superseded",
+        status: 409,
+      });
+    }
 
-  const created = await db.$transaction(async (tx) => {
+    if (existing.fromUserId !== viewerId) {
+      return err({ code: "FORBIDDEN", message: "Not allowed", status: 403 });
+    }
+
+    const nextConfidence = changes.confidence === null ? null : changes.confidence;
+
+    // No-op check
+    if (nextConfidence === (existing.confidence ?? null)) {
+      return err({
+        code: "INVALID_REQUEST",
+        message: "Nothing to change",
+        status: 400,
+      });
+    }
+
     const replacement = await tx.attestation.create({
       data: {
         fromUserId: existing.fromUserId,
@@ -504,11 +507,9 @@ export async function supersedeAttestation(
       data: { supersededById: replacement.id },
     });
 
-    return replacement;
-  });
-
-  return ok({
-    attestation: { ...created, type: created.type as AttestationType },
-    supersedesId: existing.id,
+    return ok({
+      attestation: { ...replacement, type: replacement.type as AttestationType },
+      supersedesId: existing.id,
+    });
   });
 }
