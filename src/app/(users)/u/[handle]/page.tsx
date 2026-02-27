@@ -3,6 +3,7 @@
 import { ArrowUpRight, Wallet } from "lucide-react"
 
 import { AttestationButtons } from "@/components/attestation/buttons"
+import { EndorsableSkillsSection } from "@/components/attestation/endorsable-skills-section"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { EncryptedText } from "@/components/ui/encrypted-text"
@@ -346,14 +347,18 @@ export default function UserProfilePage() {
         <Card>
           <CardHeader>
             <CardTitle>Skills</CardTitle>
-            <CardDescription>What they&apos;re good at.</CardDescription>
+            <CardDescription>What they&apos;re good at.{!isSelf && " Click to endorse."}</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="flex flex-wrap gap-2">
-              {skills.map((s) => (
-                <Badge key={s} variant="secondary">{s}</Badge>
-              ))}
-            </div>
+            <EndorsableSkillsSection
+              items={skills}
+              type="SKILL_ENDORSE"
+              toUserId={user.id}
+              toName={displayName}
+              toHandle={handleLabel}
+              toAvatarUrl={avatarSrc}
+              isSelf={isSelf}
+            />
           </CardContent>
         </Card>
       ) : null}
@@ -362,14 +367,18 @@ export default function UserProfilePage() {
         <Card>
           <CardHeader>
             <CardTitle>Tools</CardTitle>
-            <CardDescription>What they work with.</CardDescription>
+            <CardDescription>What they work with.{!isSelf && " Click to endorse."}</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="flex flex-wrap gap-2">
-              {tags.map((t) => (
-                <Badge key={t} variant="secondary">{t}</Badge>
-              ))}
-            </div>
+            <EndorsableSkillsSection
+              items={tags}
+              type="TOOL_ENDORSE"
+              toUserId={user.id}
+              toName={displayName}
+              toHandle={handleLabel}
+              toAvatarUrl={avatarSrc}
+              isSelf={isSelf}
+            />
           </CardContent>
         </Card>
       ) : null}

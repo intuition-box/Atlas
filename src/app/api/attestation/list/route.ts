@@ -31,6 +31,7 @@ const QuerySchema = z.object({
 type AttestationListItem = {
   id: string;
   type: AttestationType;
+  attributeId: string | null;
   confidence: number | null;
   createdAt: string;
   mintedAt: string | null;
@@ -107,6 +108,7 @@ export const GET = api(QuerySchema, async (ctx) => {
       fromUserId: true,
       toUserId: true,
       type: true,
+      attributeId: true,
       confidence: true,
       createdAt: true,
       mintedAt: true,
@@ -154,6 +156,7 @@ export const GET = api(QuerySchema, async (ctx) => {
     return {
       id: a.id,
       type: a.type as AttestationType,
+      attributeId: a.attributeId ?? null,
       confidence: a.confidence,
       createdAt: a.createdAt.toISOString(),
       mintedAt: a.mintedAt?.toISOString() ?? null,

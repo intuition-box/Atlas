@@ -109,6 +109,8 @@ type MemberListItem = {
 type ListMembershipOk = {
   items: MemberListItem[]
   nextCursor: string | null
+  /** Endorsement counts per user per attributeId: { userId: { attributeId: count } } */
+  endorsementCounts: Record<string, Record<string, number>>
 }
 
 function zodIssuesToApiIssues(error: z.ZodError): { path: string[]; message: string }[] {
@@ -321,6 +323,27 @@ export async function GET(req: NextRequest) {
     if (id && !handleByUserId.has(id)) handleByUserId.set(id, h.name)
   }
 
+  // Batch-fetch endorsement counts for all members on this page
+  const memberUserIds = slice.map((r) => r.user.id)
+  const endorsementRows = await db.attestation.groupBy({
+    by: ["toUserId", "attributeId"],
+    where: {
+      toUserId: { in: memberUserIds },
+      type: { in: ["SKILL_ENDORSE", "TOOL_ENDORSE"] },
+      attributeId: { not: null },
+      revokedAt: null,
+      supersededById: null,
+    },
+    _count: true,
+  })
+
+  const endorsementCounts: Record<string, Record<string, number>> = {}
+  for (const row of endorsementRows) {
+    if (!row.attributeId) continue
+    if (!endorsementCounts[row.toUserId]) endorsementCounts[row.toUserId] = {}
+    endorsementCounts[row.toUserId][row.attributeId] = row._count
+  }
+
   const payload: ListMembershipOk = {
     items: slice.map((r) => ({
       membership: {
@@ -353,6 +376,7 @@ export async function GET(req: NextRequest) {
       },
     })),
     nextCursor,
+    endorsementCounts,
   }
 
   return okJson<ListMembershipOk>(payload)

@@ -13,7 +13,7 @@ import {
 } from "@/lib/routes"
 import { COUNTRIES } from "@/config/countries"
 import { LANGUAGE_LIST as LANGUAGES } from "@/config/languages"
-import { SKILL_LIST as SKILLS, TOOL_LIST as TOOLS } from "@/lib/attestations/definitions"
+import { SKILL_LIST as SKILLS, TOOL_LIST as TOOLS, getAttributeByLabel } from "@/lib/attestations/definitions"
 
 import { ListFeed } from "@/components/common/list-feed"
 import { ProfileAvatar } from "@/components/common/profile-avatar"
@@ -100,6 +100,8 @@ type CommunityMember = {
 type MembersResponse = {
   page: { nextCursor: string | null }
   members: CommunityMember[]
+  /** Endorsement counts per user per attributeId: { userId: { attributeId: count } } */
+  endorsementCounts: Record<string, Record<string, number>>
 }
 
 type FilterState = {
@@ -161,6 +163,7 @@ type ApiMemberItem = {
 type ApiMembersResponse = {
   items: ApiMemberItem[]
   nextCursor: string | null
+  endorsementCounts?: Record<string, Record<string, number>>
 }
 
 // === HELPERS ===
@@ -198,7 +201,7 @@ function normalizeMembersPayload(raw: unknown, _fallbackHandle: string): Members
     },
   }))
 
-  return { page: { nextCursor }, members }
+  return { page: { nextCursor }, members, endorsementCounts: r?.endorsementCounts ?? {} }
 }
 
 function mergeMembersUnique(prev: CommunityMember[], next: CommunityMember[]): CommunityMember[] {
@@ -295,6 +298,7 @@ function useMembersData(communityHandle: string, filters: FilterState, cursor: s
   const router = useRouter()
   const [data, setData] = React.useState<MembersResponse | null>(null)
   const [items, setItems] = React.useState<CommunityMember[]>([])
+  const [endorsementCounts, setEndorsementCounts] = React.useState<Record<string, Record<string, number>>>({})
   const [loading, setLoading] = React.useState(true)
   const [loadingMore, setLoadingMore] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
@@ -344,6 +348,7 @@ function useMembersData(communityHandle: string, filters: FilterState, cursor: s
         const normalized = normalizeMembersPayload(res.value as unknown, communityHandle)
         setData(normalized)
         setItems((prev) => cursor ? mergeMembersUnique(prev, normalized.members) : normalized.members)
+        setEndorsementCounts((prev) => cursor ? { ...prev, ...normalized.endorsementCounts } : normalized.endorsementCounts)
         setLoading(false)
         setLoadingMore(false)
       } catch {
@@ -359,7 +364,7 @@ function useMembersData(communityHandle: string, filters: FilterState, cursor: s
     return () => { ac.abort() }
   }, [router, queryObject, cursor, communityHandle])
 
-  return { data, items, loading, loadingMore, error }
+  return { data, items, endorsementCounts, loading, loadingMore, error }
 }
 
 // === CONSTANTS (UI) ===
@@ -598,12 +603,13 @@ function AdminMemberMenu({
   )
 }
 
-function MemberCard({ member, isAdmin, isOwner: viewerIsOwner, viewerUserId, communityHandle, onOrbitOverride, onRoleChange, onBanSuccess }: {
+function MemberCard({ member, isAdmin, isOwner: viewerIsOwner, viewerUserId, communityHandle, endorsementCounts, onOrbitOverride, onRoleChange, onBanSuccess }: {
   member: CommunityMember
   isAdmin?: boolean
   isOwner?: boolean
   viewerUserId?: string | null
   communityHandle?: string
+  endorsementCounts?: Record<string, number>
   onOrbitOverride?: (userId: string, newOverride: string | null) => void
   onRoleChange?: (userId: string, newRole: MemberRole) => void
   onBanSuccess?: (membershipId: string) => void
@@ -707,9 +713,16 @@ function MemberCard({ member, isAdmin, isOwner: viewerIsOwner, viewerUserId, com
           <CardContent>
             <h3 className="text-[11px] font-medium text-muted-foreground">Skills</h3>
             <div className="mt-1.5 flex flex-wrap gap-1">
-              {(u.skills || []).slice(0, 5).map((s) => (
-                <Badge key={`s:${s}`} variant="secondary">{s}</Badge>
-              ))}
+              {(u.skills || []).slice(0, 5).map((s) => {
+                const attr = getAttributeByLabel(s)
+                const count = attr && endorsementCounts ? endorsementCounts[attr.id] ?? 0 : 0
+                return (
+                  <Badge key={`s:${s}`} variant="secondary">
+                    {s}
+                    {count > 0 && <span className="text-[10px] text-muted-foreground tabular-nums">+{count}</span>}
+                  </Badge>
+                )
+              })}
             </div>
           </CardContent>
         )}
@@ -718,9 +731,16 @@ function MemberCard({ member, isAdmin, isOwner: viewerIsOwner, viewerUserId, com
           <CardContent>
             <h3 className="text-[11px] font-medium text-muted-foreground">Tools</h3>
             <div className="mt-1.5 flex flex-wrap gap-1">
-              {(u.tools || []).slice(0, 5).map((t) => (
-                <Badge key={`t:${t}`} variant="secondary">{t}</Badge>
-              ))}
+              {(u.tools || []).slice(0, 5).map((t) => {
+                const attr = getAttributeByLabel(t)
+                const count = attr && endorsementCounts ? endorsementCounts[attr.id] ?? 0 : 0
+                return (
+                  <Badge key={`t:${t}`} variant="secondary">
+                    {t}
+                    {count > 0 && <span className="text-[10px] text-muted-foreground tabular-nums">+{count}</span>}
+                  </Badge>
+                )
+              })}
             </div>
           </CardContent>
         )}
@@ -1047,13 +1067,14 @@ function FiltersPanel({
   )
 }
 
-function MembersGrid({ items, view, isAdmin, isOwner, viewerUserId, communityHandle, onOrbitOverride, onRoleChange, onBanSuccess }: {
+function MembersGrid({ items, view, isAdmin, isOwner, viewerUserId, communityHandle, endorsementCounts, onOrbitOverride, onRoleChange, onBanSuccess }: {
   items: CommunityMember[]
   view: "cards" | "list"
   isAdmin?: boolean
   isOwner?: boolean
   viewerUserId?: string | null
   communityHandle?: string
+  endorsementCounts?: Record<string, Record<string, number>>
   onOrbitOverride?: (userId: string, newOverride: string | null) => void
   onRoleChange?: (userId: string, newRole: MemberRole) => void
   onBanSuccess?: (membershipId: string) => void
@@ -1069,6 +1090,7 @@ function MembersGrid({ items, view, isAdmin, isOwner, viewerUserId, communityHan
             isOwner={isOwner}
             viewerUserId={viewerUserId}
             communityHandle={communityHandle}
+            endorsementCounts={endorsementCounts?.[m.user.id]}
             onOrbitOverride={onOrbitOverride}
             onRoleChange={onRoleChange}
             onBanSuccess={onBanSuccess}
@@ -1179,7 +1201,7 @@ export default function CommunityMembersPage() {
   })
 
   const canViewDirectory = ctx.status === "ready" && ctx.canViewDirectory
-  const { data: membersData, items: memberItems, loading: membersLoading, loadingMore, error: membersError } =
+  const { data: membersData, items: memberItems, endorsementCounts, loading: membersLoading, loadingMore, error: membersError } =
     useMembersData(canViewDirectory ? handle : "", filters, cursor)
 
   const activeFilters = hasActiveFilters(filters)
@@ -1349,6 +1371,7 @@ export default function CommunityMembersPage() {
                 isOwner={viewerMembership?.role === "OWNER"}
                 viewerUserId={viewerUserId}
                 communityHandle={handleLabel}
+                endorsementCounts={endorsementCounts}
                 onOrbitOverride={handleOrbitOverride}
                 onRoleChange={handleRoleChange}
                 onBanSuccess={handleBanSuccess}

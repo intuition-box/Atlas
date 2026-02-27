@@ -487,6 +487,11 @@ model Attestation {
   type        String   // AttestationType from src/config/attestations.ts
   confidence  Float?   // optional 0..1
 
+  /// Optional attribute ID for endorsement attestations (SKILL_ENDORSE, TOOL_ENDORSE).
+  /// References an AttributeId from src/lib/attestations/definitions.ts.
+  /// Null for non-endorsement attestation types (FOLLOW, TRUST, etc.).
+  attributeId String?
+
   /// Soft-delete (retract) support.
   /// When revokedAt is set, this attestation should be treated as inactive.
   revokedAt       DateTime?
@@ -519,6 +524,8 @@ model Attestation {
   @@index([fromUserId, createdAt])
   @@index([toUserId, createdAt])
   @@index([fromUserId, toUserId, type])
+  @@index([fromUserId, toUserId, type, attributeId])
+  @@index([toUserId, type, attributeId])
   @@index([revokedAt, createdAt])
   @@index([supersededById])
   @@index([fromUserId, mintedAt])  // for querying unminted attestations

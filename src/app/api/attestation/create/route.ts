@@ -2,7 +2,7 @@ import { EventType } from "@prisma/client";
 import { z } from "zod";
 
 import { api, okJson, errJson } from "@/lib/api/server";
-import { ATTESTATION_TYPES, type AttestationType } from "@/lib/attestations/definitions";
+import { ATTESTATION_TYPES, type AttestationType, getAttributeById, isEndorsementType } from "@/lib/attestations/definitions";
 import { db } from "@/lib/db/client";
 import { emitEvent, recomputeScoresForAttestationPair } from "@/lib/scoring";
 
@@ -19,7 +19,13 @@ const BodySchema = z.object({
 
   // Optional confidence value (0-1)
   confidence: z.number().min(0).max(1).optional(),
-});
+
+  // Required for SKILL_ENDORSE — references AttributeId from definitions.ts
+  attributeId: z.string().trim().min(1).optional(),
+}).refine(
+  (data) => !isEndorsementType(data.type) || !!data.attributeId,
+  { message: "attributeId is required for endorsement attestations", path: ["attributeId"] },
+);
 
 type CreateAttestationOk = {
   attestation: {
@@ -31,7 +37,7 @@ type CreateAttestationOk = {
 
 export const POST = api(BodySchema, async (ctx) => {
   const { viewerId, json } = ctx;
-  const { toUserId, type, confidence } = json;
+  const { toUserId, type, confidence, attributeId } = json;
 
   // Can't attest yourself
   if (toUserId === viewerId) {
@@ -42,10 +48,10 @@ export const POST = api(BodySchema, async (ctx) => {
     });
   }
 
-  // Verify target user exists
+  // Verify target user exists (include skills/tags for endorsement validation)
   const targetUser = await db.user.findUnique({
     where: { id: toUserId },
-    select: { id: true },
+    select: { id: true, skills: true, tags: true },
   });
 
   if (!targetUser) {
@@ -56,12 +62,50 @@ export const POST = api(BodySchema, async (ctx) => {
     });
   }
 
-  // Check for existing active attestation of the same type
+  // Validate endorsements: attributeId must exist, category must match type,
+  // and target user must have the skill/tool listed on their profile.
+  if (isEndorsementType(type)) {
+    const attribute = getAttributeById(attributeId!);
+    if (!attribute) {
+      return errJson({
+        code: "INVALID_REQUEST",
+        message: "Invalid attribute ID",
+        status: 400,
+      });
+    }
+
+    // Enforce category alignment: SKILL_ENDORSE → skill, TOOL_ENDORSE → tool
+    const expectedCategory = type === "SKILL_ENDORSE" ? "skill" : "tool";
+    if (attribute.category !== expectedCategory) {
+      return errJson({
+        code: "INVALID_REQUEST",
+        message: `Attribute "${attribute.label}" is a ${attribute.category}, not a ${expectedCategory}`,
+        status: 400,
+      });
+    }
+
+    const userAttributes = type === "SKILL_ENDORSE"
+      ? (targetUser.skills || [])
+      : (targetUser.tags || []);
+    const hasAttribute = userAttributes.some(
+      (label) => label.toLowerCase() === attribute.label.toLowerCase(),
+    );
+    if (!hasAttribute) {
+      return errJson({
+        code: "INVALID_REQUEST",
+        message: `User does not have this ${expectedCategory} listed`,
+        status: 400,
+      });
+    }
+  }
+
+  // Check for existing active attestation of the same type (+ attributeId for endorsements)
   const existing = await db.attestation.findFirst({
     where: {
       fromUserId: viewerId!,
       toUserId,
       type,
+      attributeId: attributeId ?? null,
       revokedAt: null,
       supersededById: null,
     },
@@ -86,6 +130,7 @@ export const POST = api(BodySchema, async (ctx) => {
           toUserId,
           type,
           confidence: confidence ?? null,
+          attributeId: attributeId ?? null,
         },
         select: { id: true },
       });
@@ -114,6 +159,7 @@ export const POST = api(BodySchema, async (ctx) => {
       toUserId,
       type,
       confidence: confidence ?? null,
+      attributeId: attributeId ?? null,
     },
     select: { id: true },
   });

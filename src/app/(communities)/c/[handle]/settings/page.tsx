@@ -603,32 +603,35 @@ function ProfileSection({
           )}
         </Field>
 
-        <FormField<CommunitySettingsValues, "handle">
-          name="handle"
-          label="Handle"
-          required
-          description="The old URL will return 404 immediately after a rename. The old handle may be reclaimable for a limited time."
-          render={({ id, field, fieldState }) => (
-            <HandleField
-              id={id}
-              field={field}
-              fieldState={fieldState}
-              nameValue={watchedName}
-              currentHandle={currentHandle}
-              ownerType="COMMUNITY"
-              ownerId={community?.id}
-            />
-          )}
-        />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <FormField<CommunitySettingsValues, "handle">
+            name="handle"
+            label="Handle"
+            required
+            description="The old handle is reclaimable for a limited time."
+            render={({ id, field, fieldState }) => (
+              <HandleField
+                id={id}
+                field={field}
+                fieldState={fieldState}
+                nameValue={watchedName}
+                currentHandle={currentHandle}
+                ownerType="COMMUNITY"
+                ownerId={community?.id}
+              />
+            )}
+          />
 
-        <FormField<CommunitySettingsValues, "name">
-          name="name"
-          label="Name"
-          required
-          render={({ id, field, fieldState }) => (
-            <Input {...fieldControlProps(field, { id, invalid: fieldState.invalid })} value={field.value ?? ""} />
-          )}
-        />
+          <FormField<CommunitySettingsValues, "name">
+            name="name"
+            label="Name"
+            description="The name of your community or organization"
+            required
+            render={({ id, field, fieldState }) => (
+              <Input {...fieldControlProps(field, { id, invalid: fieldState.invalid })} value={field.value ?? ""} />
+            )}
+            />
+        </div>
 
         <FormField<CommunitySettingsValues, "description">
           name="description"
@@ -662,28 +665,26 @@ function SocialLinksSection({ form }: { form: ReturnType<typeof useForm<Communit
         <CardTitle>Social accounts</CardTitle>
         <CardDescription>Add links so members can find your community elsewhere.</CardDescription>
       </CardHeader>
-      <CardContent className="px-5">
-        <div className="grid gap-3 sm:grid-cols-2">
-          {SOCIAL_FIELDS.map(({ name, label, icon: Icon, placeholder }) => (
-            <div key={name} className="rounded-lg border border-border/60 p-3 text-sm">
-              <h2 className="text-xs font-medium text-muted-foreground mb-2">{label}</h2>
-              <div className="flex items-center gap-2">
-                <Icon className="size-4 shrink-0 text-muted-foreground" />
-                <FormField<CommunitySettingsValues, typeof name>
-                  className="w-full"
-                  name={name}
-                  render={({ id, field, fieldState }) => (
-                    <Input
-                      {...fieldControlProps(field, { id, invalid: fieldState.invalid })}
-                      placeholder={placeholder}
-                      className="h-8 text-sm"
-                    />
-                  )}
-                />
-              </div>
+      <CardContent className="px-5 grid gap-4 sm:grid-cols-2">
+        {SOCIAL_FIELDS.map(({ name, label, icon: Icon, placeholder }) => (
+          <div key={name} className="rounded-lg border border-border/60 p-3 text-sm">
+            <h2 className="text-xs font-medium text-muted-foreground mb-2">{label}</h2>
+            <div className="flex items-center gap-2">
+              <Icon className="size-4 shrink-0 text-muted-foreground" />
+              <FormField<CommunitySettingsValues, typeof name>
+                className="w-full"
+                name={name}
+                render={({ id, field, fieldState }) => (
+                  <Input
+                    {...fieldControlProps(field, { id, invalid: fieldState.invalid })}
+                    placeholder={placeholder}
+                    className="h-8 text-sm"
+                  />
+                )}
+              />
             </div>
-          ))}
-        </div>
+          </div>
+        ))}
       </CardContent>
     </Card>
   )
@@ -697,11 +698,11 @@ function PrivacySection({ form }: { form: ReturnType<typeof useForm<CommunitySet
         <CardDescription>Control what non-members can see and whether applications are allowed.</CardDescription>
       </CardHeader>
 
-      <CardContent className="flex flex-col gap-4">
+      <CardContent className="grid gap-4 sm:grid-cols-2">
         <FormField<CommunitySettingsValues, "isPublicDirectory">
           name="isPublicDirectory"
           render={({ id, field }) => (
-            <div className="flex items-center justify-between gap-3 rounded-2xl border border-border/60 p-4">
+            <div className="flex items-center justify-between gap-4 rounded-2xl border border-border/60 p-4">
               <div className="flex flex-col gap-1">
                 <div className="text-sm font-medium">Public directory</div>
                 <div className="text-xs text-muted-foreground">
@@ -716,7 +717,7 @@ function PrivacySection({ form }: { form: ReturnType<typeof useForm<CommunitySet
         <FormField<CommunitySettingsValues, "isMembershipOpen">
           name="isMembershipOpen"
           render={({ id, field }) => (
-            <div className="flex items-center justify-between gap-3 rounded-2xl border border-border/60 p-4">
+            <div className="flex items-center justify-between gap-4 rounded-2xl border border-border/60 p-4">
               <div className="flex flex-col gap-1">
                 <div className="text-sm font-medium">Accepting applications</div>
                 <div className="text-xs text-muted-foreground">If off, hide apply and treat as closed.</div>
@@ -748,7 +749,7 @@ function ApplicationQuestionsSection({
 
       <CardContent className="flex flex-col gap-4">
         {questions.fields.length > 0 ? (
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-4">
             {questions.fields.map((q, index) => (
               <QuestionField
                 key={q.id}
@@ -864,7 +865,7 @@ function QuestionField({
             label="Required"
             description="If on, applicants can't submit without answering."
             render={({ id, field }) => (
-              <div className="flex items-center justify-between gap-3 rounded-2xl border border-border/60 p-4">
+              <div className="flex items-center justify-between gap-4 rounded-2xl border border-border/60 p-4">
                 <div className="text-sm font-medium">Required</div>
                 <Switch id={id} checked={!!field.value} onCheckedChange={field.onChange} />
               </div>
