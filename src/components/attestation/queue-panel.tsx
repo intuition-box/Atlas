@@ -24,6 +24,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { getAttributeById } from "@/lib/attestations/definitions";
 import { useAttestationQueue, type UnmintedAttestation } from "./queue-provider";
 import { AttestationBadge } from "@/components/attestation/badge";
 import { ProfileAvatar } from "@/components/common/profile-avatar";
@@ -65,6 +66,9 @@ function CartItem({
         </div>
         <span className="text-xs text-muted-foreground">
           <AttestationBadge type={item.type} bare />
+          {(item.type === "SKILL_ENDORSE" || item.type === "TOOL_ENDORSE") && item.attributeId && (
+            <span className="ml-1 text-foreground/60">{getAttributeById(item.attributeId)?.label ?? item.attributeId}</span>
+          )}
         </span>
       </div>
 

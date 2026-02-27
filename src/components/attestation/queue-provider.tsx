@@ -14,6 +14,7 @@ import { sounds } from "@/lib/sounds";
 export type UnmintedAttestation = {
   id: string;
   type: AttestationType;
+  attributeId: string | null;
   createdAt: string;
   toUser: {
     id: string;
@@ -31,6 +32,8 @@ type CreateAttestationParams = {
   toAvatarUrl?: string | null;
   toWalletAddress?: string | null;
   type: AttestationType;
+  /** Required for SKILL_ENDORSE — references AttributeId from definitions.ts */
+  attributeId?: string;
 };
 
 type AttestationCartContextValue = {
@@ -66,6 +69,7 @@ type ListResponse = {
   attestations: Array<{
     id: string;
     type: string;
+    attributeId: string | null;
     confidence: number | null;
     createdAt: string;
     mintedAt: string | null;
@@ -132,6 +136,7 @@ export function AttestationQueueProvider({ children }: { children: React.ReactNo
           result.value.attestations.map((a) => ({
             id: a.id,
             type: a.type as AttestationType,
+            attributeId: a.attributeId ?? null,
             createdAt: a.createdAt,
             toUser: {
               id: a.toUser.id,
@@ -202,6 +207,7 @@ export function AttestationQueueProvider({ children }: { children: React.ReactNo
       const result = await apiPost<CreateResponse>("/api/attestation/create", {
         toUserId: params.toUserId,
         type: params.type,
+        ...(params.attributeId ? { attributeId: params.attributeId } : {}),
       });
 
       if (!result.ok) {
@@ -216,6 +222,7 @@ export function AttestationQueueProvider({ children }: { children: React.ReactNo
           {
             id,
             type: params.type,
+            attributeId: params.attributeId ?? null,
             createdAt: new Date().toISOString(),
             toUser: {
               id: params.toUserId,

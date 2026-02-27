@@ -16,15 +16,14 @@ import { ROUTES } from "@/lib/routes";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ProfileAvatar } from "@/components/common/profile-avatar";
+import { Burst } from "@/components/ui/burst";
 import { useAttestationQueue } from "./queue-provider";
 import { ATTESTATION_TYPES, type AttestationType } from "@/lib/attestations/definitions";
 import { AttestationBadge } from "@/components/attestation/badge";
 
 const ANIMATION = {
-  shineDelay: 250,
-  shineCleanup: 300,
-  dotLifetime: 800,
-  flightDuration: 0.45,
+  dotLifetime: 600,
+  flightDuration: 0.35,
 };
 
 /* ────────────────────────────
@@ -86,13 +85,13 @@ export function AttestationButtons({
 }: AttestationButtonsProps) {
   const router = useRouter();
   const { data: session, status: sessionStatus } = useSession();
-  const [animatingTypes, setAnimatingTypes] = useState<Set<AttestationType>>(new Set());
   const [savingTypes, setSavingTypes] = useState<Set<AttestationType>>(new Set());
   const [flyingDots, setFlyingDots] = useState<FlyingDot[]>([]);
+  const [burst, setBurst] = useState<{ emoji: string; rect: DOMRect; seed: number } | null>(null);
   const [activeTypes, setActiveTypes] = useState<Set<AttestationType>>(new Set());
   const [receivedCounts, setReceivedCounts] = useState<Record<string, number>>({});
   const [receivedUsers, setReceivedUsers] = useState<Record<string, AttestorInfo[]>>({});
-  const [isFetching, setIsFetching] = useState(true);
+  const [hasLoaded, setHasLoaded] = useState(false);
   const { createAttestation, buttonRef, lastChangedAt } = useAttestationQueue();
 
   const timeoutsRef = React.useRef<number[]>([]);
@@ -117,11 +116,10 @@ export function AttestationButtons({
 
     // Viewing own profile — no fetch needed (buttons hidden)
     if (currentUserId && currentUserId === toUserId) {
-      setIsFetching(false);
+      setHasLoaded(true);
       return;
     }
 
-    setIsFetching(true);
     const controller = new AbortController();
 
     apiGet<StatusResponse>("/api/attestation/status", { toUserId }, { signal: controller.signal })
@@ -136,12 +134,12 @@ export function AttestationButtons({
           setReceivedCounts(result.value.receivedCountsByType ?? {});
           setReceivedUsers(result.value.receivedUsersByType ?? {});
         }
-        setIsFetching(false);
+        setHasLoaded(true);
       })
       .catch(() => {
         // Don't update state if aborted (component unmounted or deps changed)
         if (controller.signal.aborted) return;
-        setIsFetching(false);
+        setHasLoaded(true);
       });
 
     return () => controller.abort();
@@ -152,7 +150,7 @@ export function AttestationButtons({
     return null;
   }
 
-  const handleAttestClick = (
+  const handleAttestClick = async (
     e: React.MouseEvent,
     type: AttestationType
   ) => {
@@ -162,74 +160,65 @@ export function AttestationButtons({
       return;
     }
 
-    if (animatingTypes.has(type) || savingTypes.has(type)) return;
+    if (savingTypes.has(type)) return;
 
     const rect = e.currentTarget.getBoundingClientRect();
     const dotId = `${type}-${Date.now()}`;
 
-    // Optimistically disable button
+    // Trigger emoji burst animation from the button
+    const emoji = ATTESTATION_TYPES[type]?.emoji;
+    if (emoji) {
+      setBurst({ emoji, rect, seed: Date.now() });
+    }
+
+    // Optimistically disable button + play spatial sound
     setSavingTypes((prev) => {
       const next = new Set(prev);
       next.add(type);
       return next;
     });
+    sounds.select({ spatial: rect.left + rect.width / 2 });
 
-    // Start button animation (shine)
-    setAnimatingTypes((prev) => {
+    // Fire API immediately (no delay)
+    const result = await createAttestation({ toUserId, toName, toHandle, toAvatarUrl, type });
+
+    if (result.ok) {
+      // Optimistically mark as active BEFORE clearing saving state
+      // This prevents the disable→enable→disable flicker
+      setActiveTypes((prev) => {
+        const next = new Set(prev);
+        next.add(type);
+        return next;
+      });
+
+      // Spawn flying dot on success
+      setFlyingDots((prev) => [...prev, { id: dotId, type, rect }]);
+
+      // Remove flying dot after flight
+      timeoutsRef.current.push(
+        window.setTimeout(() => {
+          setFlyingDots((prev) => prev.filter((d) => d.id !== dotId));
+        }, ANIMATION.dotLifetime)
+      );
+    } else {
+      sounds.error();
+    }
+
+    // Clear saving state — button stays disabled via activeTypes on success
+    setSavingTypes((prev) => {
       const next = new Set(prev);
-      next.add(type);
+      next.delete(type);
       return next;
     });
-
-    // After shine delay, call API and spawn flying dot on success
-    timeoutsRef.current.push(
-      window.setTimeout(async () => {
-        const result = await createAttestation({ toUserId, toName, toHandle, toAvatarUrl, type });
-
-        if (result.ok) {
-          // Spawn flying dot and play sound on success
-          setFlyingDots((prev) => [...prev, { id: dotId, type, rect }]);
-          sounds.select({ spatial: rect.left + rect.width / 2 });
-
-          // Remove flying dot after flight
-          timeoutsRef.current.push(
-            window.setTimeout(() => {
-              setFlyingDots((prev) => prev.filter((d) => d.id !== dotId));
-            }, ANIMATION.dotLifetime - ANIMATION.shineDelay)
-          );
-        } else {
-          sounds.error();
-        }
-
-        // Clear saving state
-        setSavingTypes((prev) => {
-          const next = new Set(prev);
-          next.delete(type);
-          return next;
-        });
-      }, ANIMATION.shineDelay)
-    );
-
-    // Clean up shine animation state
-    timeoutsRef.current.push(
-      window.setTimeout(() => {
-        setAnimatingTypes((prev) => {
-          const next = new Set(prev);
-          next.delete(type);
-          return next;
-        });
-      }, ANIMATION.shineCleanup)
-    );
   };
 
-  const isLoading = isSessionLoading || isFetching;
+  const isLoading = isSessionLoading || !hasLoaded;
 
   return (
     <>
       <div className={cn("flex flex-wrap gap-1.5", className)}>
-        {Object.values(ATTESTATION_TYPES).map((attestType) => {
+        {Object.values(ATTESTATION_TYPES).filter((t) => t.id !== "SKILL_ENDORSE" && t.id !== "TOOL_ENDORSE").map((attestType) => {
           const type = attestType.id as AttestationType;
-          const isAnimating = animatingTypes.has(type);
           const isSaving = savingTypes.has(type);
           const isActive = activeTypes.has(type);
           const count = showCounts ? (receivedCounts[type] ?? 0) : 0;
@@ -248,10 +237,9 @@ export function AttestationButtons({
                 className="relative"
               >
                 <span className="invisible">
-                  <AttestationBadge type={attestType.id} bare />
+                  <AttestationBadge type={attestType.id} bare showEmoji={false} />
                 </span>
                 <span className="absolute inset-0 flex items-center justify-center gap-2">
-                  <span className="size-3.5 rounded-full bg-muted-foreground/20 animate-pulse" />
                   <span className="h-3 w-12 rounded-full bg-muted-foreground/20 animate-pulse" />
                 </span>
               </Button>
@@ -260,7 +248,7 @@ export function AttestationButtons({
 
           const buttonContent = (
             <>
-              <AttestationBadge type={attestType.id} bare />
+              <AttestationBadge type={attestType.id} bare showEmoji={false} />
               {count > 0 && (
                 <span className="text-xs text-muted-foreground">+{count}</span>
               )}
@@ -324,6 +312,25 @@ export function AttestationButtons({
           );
         })}
       </div>
+
+      {/* Emoji Burst Animation */}
+      <AnimatePresence>
+        {burst && (
+          <div
+            className="fixed z-[100] pointer-events-none"
+            style={{
+              left: burst.rect.left + burst.rect.width / 2,
+              top: burst.rect.top + burst.rect.height / 2,
+            }}
+          >
+            <Burst
+              key={burst.seed}
+              emoji={burst.emoji}
+              onDone={() => setBurst(null)}
+            />
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Flying Dot Animation */}
       <AnimatePresence>

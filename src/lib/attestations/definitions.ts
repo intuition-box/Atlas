@@ -52,11 +52,38 @@ export const ATTESTATION_TYPES = {
     description: "Having meetings and calls to discuss",
     predicate: "MET",
   },
+  SKILL_ENDORSE: {
+    id: "SKILL_ENDORSE",
+    label: "Endorsed skill",
+    emoji: "🎯",
+    description: "Endorse this user's skill",
+    predicate: "is_skilled_in",
+  },
+  TOOL_ENDORSE: {
+    id: "TOOL_ENDORSE",
+    label: "Endorsed tool",
+    emoji: "⚡",
+    description: "Endorse this user's tool proficiency",
+    predicate: "uses_tool",
+  },
 } as const;
 
 export type AttestationType = keyof typeof ATTESTATION_TYPES;
 
 export const ATTESTATION_TYPE_LIST = Object.values(ATTESTATION_TYPES);
+
+/** Set of attestation types that are endorsements (require attributeId). */
+export const ENDORSEMENT_TYPES = new Set<AttestationType>(["SKILL_ENDORSE", "TOOL_ENDORSE"]);
+
+/** Check if an attestation type is an endorsement type. */
+export function isEndorsementType(type: string): boolean {
+  return type === "SKILL_ENDORSE" || type === "TOOL_ENDORSE";
+}
+
+/** Get the correct endorsement attestation type for an attribute category. */
+export function endorsementTypeForCategory(category: AttributeCategory): AttestationType {
+  return category === "skill" ? "SKILL_ENDORSE" : "TOOL_ENDORSE";
+}
 
 /**
  * Get the blockchain predicate for an attestation type.
@@ -886,4 +913,16 @@ export type Tool = string;
  */
 export function getAttributeAtomData(id: AttributeId): string {
   return ATTRIBUTES[id].atomData;
+}
+
+/** Reverse lookup: find an attribute by its display label (case-insensitive). */
+export function getAttributeByLabel(label: string): Attribute | undefined {
+  return Object.values(ATTRIBUTES).find(
+    (a) => a.label.toLowerCase() === label.toLowerCase(),
+  );
+}
+
+/** Lookup an attribute by its ID. */
+export function getAttributeById(id: string): Attribute | undefined {
+  return ATTRIBUTES[id as AttributeId];
 }
