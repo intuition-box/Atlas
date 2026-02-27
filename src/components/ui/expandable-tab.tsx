@@ -1,27 +1,52 @@
+"use client";
+
 import * as React from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion } from "motion/react";
 import { useOnClickOutside } from "usehooks-ts";
 import { cn } from "@/lib/utils";
-import { LucideIcon } from "lucide-react";
 
-interface Tab {
+// ── Types ──────────────────────────────────────────────────────────
+
+export interface Tab {
   title: string;
-  icon: LucideIcon;
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+  /** Per-tab active color override (e.g. "text-amber-500"). */
+  activeColor?: string;
+  /** Per-tab active background override (e.g. "bg-amber-500/10"). */
+  activeBg?: string;
   type?: "tab";
 }
 
-interface Separator {
+export interface Separator {
   type: "separator";
 }
 
 export type TabItem = Tab | Separator;
 
-interface ExpandableTabsProps {
+export interface ExpandableTabsProps {
   tabs: TabItem[];
   className?: string;
+  /** Default active color for all tabs. */
   activeColor?: string;
+  /**
+   * Controlled active index. When provided the component is fully controlled —
+   * no internal state and no click-outside-to-deselect behaviour.
+   */
+  activeIndex?: number | null;
+  /** Called when a tab is clicked. */
   onChange?: (index: number | null) => void;
+  /**
+   * Custom render wrapper for each tab (e.g. wrapping in `<Link>`).
+   * Must forward children and spread any necessary props.
+   */
+  renderTab?: (props: {
+    children: React.ReactNode;
+    index: number;
+    tab: Tab;
+  }) => React.ReactElement;
 }
+
+// ── Animation variants ─────────────────────────────────────────────
 
 const buttonVariants = {
   initial: {
@@ -49,62 +74,81 @@ const transition = {
   duration: 0.6,
 };
 
+// ── Component ──────────────────────────────────────────────────────
+
 export function ExpandableTabs({
   tabs,
   className,
   activeColor = "text-primary",
+  activeIndex,
   onChange,
+  renderTab,
 }: ExpandableTabsProps) {
-  const [selected, setSelected] = React.useState<number | null>(null);
-  const outsideClickRef = React.useRef<HTMLDivElement>(null);
+  const isControlled = activeIndex !== undefined;
+  const [internalSelected, setInternalSelected] = React.useState<number | null>(
+    null,
+  );
+  const selected = isControlled ? activeIndex : internalSelected;
 
+  const outsideClickRef = React.useRef<HTMLDivElement>(null!);
+
+  // Only use click-outside-to-deselect in uncontrolled mode
   useOnClickOutside(outsideClickRef, () => {
-    setSelected(null);
+    if (isControlled) return;
+    setInternalSelected(null);
     onChange?.(null);
   });
 
   const handleSelect = (index: number) => {
-    setSelected(index);
+    if (!isControlled) {
+      setInternalSelected(index);
+    }
     onChange?.(index);
   };
-
-  const Separator = () => (
-    <div className="mx-1 h-[24px] w-[1.2px] bg-border" aria-hidden="true" />
-  );
 
   return (
     <div
       ref={outsideClickRef}
       className={cn(
-        "flex flex-wrap items-center gap-2 rounded-2xl border bg-background p-1 shadow-sm",
-        className
+        "flex flex-wrap items-center gap-1 rounded-full border border-border bg-input/30 bg-clip-padding px-1 py-[3px]",
+        className,
       )}
     >
       {tabs.map((tab, index) => {
         if (tab.type === "separator") {
-          return <Separator key={`separator-${index}`} />;
+          return (
+            <div
+              key={`separator-${index}`}
+              className="mx-1 h-[24px] w-[1.2px] bg-border"
+              aria-hidden="true"
+            />
+          );
         }
 
         const Icon = tab.icon;
-        return (
-          <motion.button
+        const isActive = selected === index;
+        const color = tab.activeColor ?? activeColor;
+        const bg = tab.activeBg ?? "bg-primary/10";
+
+        const inner = (
+          <motion.span
             key={tab.title}
             variants={buttonVariants}
-            initial={false}
+            initial={isControlled ? "animate" : "initial"}
             animate="animate"
-            custom={selected === index}
-            onClick={() => handleSelect(index)}
+            custom={isActive}
             transition={transition}
             className={cn(
-              "relative flex items-center rounded-xl px-4 py-2 text-sm font-medium transition-colors duration-300",
-              selected === index
-                ? cn("bg-muted", activeColor)
-                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              "relative flex items-center rounded-full px-4 py-2 text-sm leading-none font-medium transition-colors duration-300",
+              isActive
+                ? cn(bg, color)
+                : "text-muted-foreground hover:bg-input/50 hover:text-foreground",
             )}
+            onClick={() => handleSelect(index)}
           >
-            <Icon size={20} />
+            <Icon size={16} />
             <AnimatePresence initial={false}>
-              {selected === index && (
+              {isActive && (
                 <motion.span
                   variants={spanVariants}
                   initial="initial"
@@ -117,8 +161,14 @@ export function ExpandableTabs({
                 </motion.span>
               )}
             </AnimatePresence>
-          </motion.button>
+          </motion.span>
         );
+
+        if (renderTab) {
+          return renderTab({ children: inner, index, tab });
+        }
+
+        return inner;
       })}
     </div>
   );
