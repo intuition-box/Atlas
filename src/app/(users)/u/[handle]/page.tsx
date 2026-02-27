@@ -3,7 +3,6 @@
 import { ArrowUpRight, Wallet } from "lucide-react"
 
 import { AttestationButtons } from "@/components/attestation/buttons"
-import { EndorsableSkillsSection } from "@/components/attestation/endorsable-skills-section"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { EncryptedText } from "@/components/ui/encrypted-text"
@@ -350,14 +349,15 @@ export default function UserProfilePage() {
             <CardDescription>What they&apos;re good at.{!isSelf && " Click to endorse."}</CardDescription>
           </CardHeader>
           <CardContent>
-            <EndorsableSkillsSection
+            <AttestationButtons
               items={skills}
-              type="SKILL_ENDORSE"
+              endorsementType="SKILL_ENDORSE"
               toUserId={user.id}
               toName={displayName}
               toHandle={handleLabel}
               toAvatarUrl={avatarSrc}
               isSelf={isSelf}
+              showTooltip
             />
           </CardContent>
         </Card>
@@ -370,14 +370,15 @@ export default function UserProfilePage() {
             <CardDescription>What they work with.{!isSelf && " Click to endorse."}</CardDescription>
           </CardHeader>
           <CardContent>
-            <EndorsableSkillsSection
+            <AttestationButtons
               items={tags}
-              type="TOOL_ENDORSE"
+              endorsementType="TOOL_ENDORSE"
               toUserId={user.id}
               toName={displayName}
               toHandle={handleLabel}
               toAvatarUrl={avatarSrc}
               isSelf={isSelf}
+              showTooltip
             />
           </CardContent>
         </Card>
@@ -398,7 +399,6 @@ export default function UserProfilePage() {
               toAvatarUrl={avatarSrc}
               showCounts
               showTooltip
-              size="sm"
             />
           </CardContent>
         </Card>

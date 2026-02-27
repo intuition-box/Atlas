@@ -1,11 +1,9 @@
 "use client";
 
 import * as React from "react";
-import { useState, useEffect } from "react";
-import { motion, AnimatePresence } from "motion/react";
-import { Check } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { AnimatePresence } from "motion/react";
 import { useSession } from "next-auth/react";
-
 import { useRouter } from "next/navigation";
 
 import { cn } from "@/lib/utils";
@@ -18,13 +16,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { ProfileAvatar } from "@/components/common/profile-avatar";
 import { Burst } from "@/components/ui/burst";
 import { useAttestationQueue } from "./queue-provider";
-import { ATTESTATION_TYPES, type AttestationType } from "@/lib/attestations/definitions";
+import {
+  ATTESTATION_TYPES,
+  getAttributeByLabel,
+  type AttestationType,
+} from "@/lib/attestations/definitions";
 import { AttestationBadge } from "@/components/attestation/badge";
-
-const ANIMATION = {
-  dotLifetime: 600,
-  flightDuration: 0.35,
-};
 
 /* ────────────────────────────
    Types
@@ -41,18 +38,21 @@ type AttestationButtonsProps = {
   toAvatarUrl?: string | null;
   /** Optional className for the container */
   className?: string;
-  /** Size variant */
+  /** Size variant (network mode only) */
   size?: "xs" | "sm";
   /** Show "+N" count badges on each button (fetched automatically) */
   showCounts?: boolean;
-  /** Show tooltip with attestor names on hover (requires showCounts) */
+  /** Show tooltip with attestor names on hover */
   showTooltip?: boolean;
-};
-
-type FlyingDot = {
-  id: string;
-  type: AttestationType;
-  rect: DOMRect;
+  /**
+   * Endorsement mode — pass skill/tool labels to render endorsable badges
+   * instead of network attestation buttons.
+   */
+  items?: string[];
+  /** Required with items — which endorsement type (SKILL_ENDORSE or TOOL_ENDORSE) */
+  endorsementType?: "SKILL_ENDORSE" | "TOOL_ENDORSE";
+  /** Whether this is the viewer's own profile (endorsement mode: read-only) */
+  isSelf?: boolean;
 };
 
 type AttestorInfo = {
@@ -67,6 +67,9 @@ type StatusResponse = {
   activeTypes: string[];
   receivedCountsByType: Record<string, number>;
   receivedUsersByType: Record<string, AttestorInfo[]>;
+  endorsementCountsByAttribute: Record<string, number>;
+  endorsementUsersByAttribute: Record<string, AttestorInfo[]>;
+  viewerEndorsedAttributes: string[];
 };
 
 /* ────────────────────────────
@@ -79,43 +82,43 @@ export function AttestationButtons({
   toHandle,
   toAvatarUrl,
   className,
-  size = "xs",
+  size = "sm",
   showCounts = false,
   showTooltip = false,
+  items,
+  endorsementType,
+  isSelf = false,
 }: AttestationButtonsProps) {
   const router = useRouter();
   const { data: session, status: sessionStatus } = useSession();
-  const [savingTypes, setSavingTypes] = useState<Set<AttestationType>>(new Set());
-  const [flyingDots, setFlyingDots] = useState<FlyingDot[]>([]);
+  const { createAttestation, lastChangedAt } = useAttestationQueue();
+
+  // Shared state
   const [burst, setBurst] = useState<{ emoji: string; rect: DOMRect; seed: number } | null>(null);
+  const [hasLoaded, setHasLoaded] = useState(false);
+
+  // Network mode state
+  const [savingTypes, setSavingTypes] = useState<Set<AttestationType>>(new Set());
   const [activeTypes, setActiveTypes] = useState<Set<AttestationType>>(new Set());
   const [receivedCounts, setReceivedCounts] = useState<Record<string, number>>({});
   const [receivedUsers, setReceivedUsers] = useState<Record<string, AttestorInfo[]>>({});
-  const [hasLoaded, setHasLoaded] = useState(false);
-  const { createAttestation, buttonRef, lastChangedAt } = useAttestationQueue();
 
-  const timeoutsRef = React.useRef<number[]>([]);
-
-  useEffect(() => {
-    return () => {
-      timeoutsRef.current.forEach(clearTimeout);
-      timeoutsRef.current = [];
-      setFlyingDots([]);
-    };
-  }, []);
+  // Endorsement mode state
+  const [endorsementCounts, setEndorsementCounts] = useState<Record<string, number>>({});
+  const [endorsementUsers, setEndorsementUsers] = useState<Record<string, AttestorInfo[]>>({});
+  const [viewerEndorsed, setViewerEndorsed] = useState<Set<string>>(new Set());
+  const [savingAttributes, setSavingAttributes] = useState<Set<string>>(new Set());
 
   const currentUserId = session?.user?.id;
   const isSessionLoading = sessionStatus === "loading";
+  const isEndorsementMode = !!items;
 
-  // Fetch status (active types + counts + attestors) on mount and when attestations change
+  // Fetch status on mount and when attestations change
   useEffect(() => {
-    // Wait for session to load before deciding
-    if (isSessionLoading) {
-      return;
-    }
+    if (isSessionLoading) return;
 
-    // Viewing own profile — no fetch needed (buttons hidden)
-    if (currentUserId && currentUserId === toUserId) {
+    // Network mode: viewing own profile — no fetch needed (buttons hidden)
+    if (!isEndorsementMode && currentUserId && currentUserId === toUserId) {
       setHasLoaded(true);
       return;
     }
@@ -126,6 +129,7 @@ export function AttestationButtons({
       .then((result) => {
         if (controller.signal.aborted) return;
         if (result.ok) {
+          // Network data
           setActiveTypes(new Set(
             result.value.activeTypes.filter(
               (t): t is AttestationType => t in ATTESTATION_TYPES
@@ -133,28 +137,34 @@ export function AttestationButtons({
           ));
           setReceivedCounts(result.value.receivedCountsByType ?? {});
           setReceivedUsers(result.value.receivedUsersByType ?? {});
+          // Endorsement data
+          setEndorsementCounts(result.value.endorsementCountsByAttribute ?? {});
+          setEndorsementUsers(result.value.endorsementUsersByAttribute ?? {});
+          setViewerEndorsed(new Set(result.value.viewerEndorsedAttributes ?? []));
         }
         setHasLoaded(true);
       })
       .catch(() => {
-        // Don't update state if aborted (component unmounted or deps changed)
         if (controller.signal.aborted) return;
         setHasLoaded(true);
       });
 
     return () => controller.abort();
-  }, [currentUserId, toUserId, lastChangedAt, isSessionLoading]);
+  }, [currentUserId, toUserId, lastChangedAt, isSessionLoading, isEndorsementMode]);
 
-  // Don't show attestation buttons when viewing own profile
-  if (currentUserId && currentUserId === toUserId) {
+  // Don't show network buttons when viewing own profile
+  if (!isEndorsementMode && currentUserId && currentUserId === toUserId) {
     return null;
   }
+
+  const isLoading = isSessionLoading || !hasLoaded;
+
+  /* ── Network attestation handler ── */
 
   const handleAttestClick = async (
     e: React.MouseEvent,
     type: AttestationType
   ) => {
-    // Redirect unauthenticated users to sign-in
     if (!currentUserId) {
       router.push(ROUTES.signIn);
       return;
@@ -163,56 +173,158 @@ export function AttestationButtons({
     if (savingTypes.has(type)) return;
 
     const rect = e.currentTarget.getBoundingClientRect();
-    const dotId = `${type}-${Date.now()}`;
 
-    // Trigger emoji burst animation from the button
     const emoji = ATTESTATION_TYPES[type]?.emoji;
-    if (emoji) {
-      setBurst({ emoji, rect, seed: Date.now() });
-    }
+    if (emoji) setBurst({ emoji, rect, seed: Date.now() });
 
-    // Optimistically disable button + play spatial sound
-    setSavingTypes((prev) => {
-      const next = new Set(prev);
-      next.add(type);
-      return next;
-    });
+    setSavingTypes((prev) => { const next = new Set(prev); next.add(type); return next; });
     sounds.select({ spatial: rect.left + rect.width / 2 });
 
-    // Fire API immediately (no delay)
     const result = await createAttestation({ toUserId, toName, toHandle, toAvatarUrl, type });
 
     if (result.ok) {
-      // Optimistically mark as active BEFORE clearing saving state
-      // This prevents the disable→enable→disable flicker
-      setActiveTypes((prev) => {
-        const next = new Set(prev);
-        next.add(type);
-        return next;
-      });
-
-      // Spawn flying dot on success
-      setFlyingDots((prev) => [...prev, { id: dotId, type, rect }]);
-
-      // Remove flying dot after flight
-      timeoutsRef.current.push(
-        window.setTimeout(() => {
-          setFlyingDots((prev) => prev.filter((d) => d.id !== dotId));
-        }, ANIMATION.dotLifetime)
-      );
+      setActiveTypes((prev) => { const next = new Set(prev); next.add(type); return next; });
     } else {
       sounds.error();
     }
 
-    // Clear saving state — button stays disabled via activeTypes on success
-    setSavingTypes((prev) => {
-      const next = new Set(prev);
-      next.delete(type);
-      return next;
-    });
+    setSavingTypes((prev) => { const next = new Set(prev); next.delete(type); return next; });
   };
 
-  const isLoading = isSessionLoading || !hasLoaded;
+  /* ── Endorsement handler ── */
+
+  const handleEndorseClick = useCallback(async (
+    e: React.MouseEvent,
+    attributeId: string,
+    type: AttestationType
+  ) => {
+    if (!currentUserId) {
+      router.push(ROUTES.signIn);
+      return;
+    }
+
+    if (savingAttributes.has(attributeId)) return;
+
+    const rect = e.currentTarget.getBoundingClientRect();
+
+    const emoji = ATTESTATION_TYPES[type]?.emoji;
+    if (emoji) setBurst({ emoji, rect, seed: Date.now() });
+
+    // Optimistic update
+    setSavingAttributes((prev) => { const next = new Set(prev); next.add(attributeId); return next; });
+    setViewerEndorsed((prev) => { const next = new Set(prev); next.add(attributeId); return next; });
+    setEndorsementCounts((prev) => ({ ...prev, [attributeId]: (prev[attributeId] ?? 0) + 1 }));
+    sounds.select({ spatial: rect.left + rect.width / 2 });
+
+    const result = await createAttestation({
+      toUserId,
+      toName,
+      toHandle,
+      toAvatarUrl,
+      type,
+      attributeId,
+    });
+
+    if (!result.ok) {
+      // Rollback
+      setViewerEndorsed((prev) => { const next = new Set(prev); next.delete(attributeId); return next; });
+      setEndorsementCounts((prev) => ({ ...prev, [attributeId]: (prev[attributeId] ?? 0) - 1 }));
+      sounds.error();
+    }
+
+    setSavingAttributes((prev) => { const next = new Set(prev); next.delete(attributeId); return next; });
+  }, [currentUserId, savingAttributes, toUserId, toName, toHandle, toAvatarUrl, createAttestation, router]);
+
+  /* ── Endorsement mode render ── */
+
+  if (isEndorsementMode && endorsementType) {
+    if (isLoading) {
+      return (
+        <div className={cn("flex flex-wrap gap-1.5", className)}>
+          {items.map((label) => (
+            <Button key={label} variant="secondary" size={size} disabled className="relative">
+              <span className="invisible">{label}</span>
+              <span className="absolute inset-0 flex items-center justify-center">
+                <span className="h-3 w-12 rounded-full bg-muted-foreground/20 animate-pulse" />
+              </span>
+            </Button>
+          ))}
+        </div>
+      );
+    }
+
+    return (
+      <>
+        <div className={cn("flex flex-wrap gap-1.5", className)}>
+          {items.map((label) => {
+            const attribute = getAttributeByLabel(label);
+
+            // No matching attribute in definitions — render disabled button
+            if (!attribute) {
+              return (
+                <Button key={label} variant="secondary" size={size} disabled>
+                  {label}
+                </Button>
+              );
+            }
+
+            const attributeId = attribute.id;
+            const count = endorsementCounts[attributeId] ?? 0;
+            const endorsed = viewerEndorsed.has(attributeId);
+            const endorsers = endorsementUsers[attributeId] ?? [];
+            const isSaving = savingAttributes.has(attributeId);
+            const hasTooltipData = showTooltip && endorsers.length > 0;
+
+            const buttonContent = (
+              <>
+                {label}
+                {count > 0 && (
+                  <span className="text-xs text-foreground">+{count}</span>
+                )}
+              </>
+            );
+
+            const button = endorsed || isSaving || isSelf ? (
+              <Button key={attributeId} variant="secondary" size={size} disabled>
+                {buttonContent}
+              </Button>
+            ) : (
+              <Button
+                key={attributeId}
+                variant="default"
+                size={size}
+                onClick={(e) => handleEndorseClick(e, attributeId, endorsementType)}
+              >
+                {buttonContent}
+              </Button>
+            );
+
+            if (!hasTooltipData) return button;
+
+            return (
+              <Tooltip key={attributeId}>
+                <TooltipTrigger>
+                  {button}
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={8}>
+                  <AttestorTooltip attestors={endorsers} totalCount={count} />
+                </TooltipContent>
+              </Tooltip>
+            );
+          })}
+        </div>
+
+        {/* Emoji Burst Animation */}
+        <AnimatePresence>
+          {burst && (
+            <BurstOverlay burst={burst} onDone={() => setBurst(null)} />
+          )}
+        </AnimatePresence>
+      </>
+    );
+  }
+
+  /* ── Network mode render ── */
 
   return (
     <>
@@ -226,7 +338,6 @@ export function AttestationButtons({
           const totalCount = receivedCounts[type] ?? 0;
           const hasTooltip = showTooltip && attestors.length > 0;
 
-          // 1. Loading — all buttons disabled with skeleton
           if (isLoading) {
             return (
               <Button
@@ -250,7 +361,7 @@ export function AttestationButtons({
             <>
               <AttestationBadge type={attestType.id} bare showEmoji={false} />
               {count > 0 && (
-                <span className="text-xs text-muted-foreground">+{count}</span>
+                <span className="text-xs text-foreground">+{count}</span>
               )}
             </>
           );
@@ -283,30 +394,7 @@ export function AttestationButtons({
                 {button}
               </TooltipTrigger>
               <TooltipContent side="top" sideOffset={8}>
-                <div className="flex flex-col gap-1.5 py-0.5">
-                  {attestors.map((u) => (
-                    <div key={u.id} className="flex items-center gap-2">
-                      <ProfileAvatar
-                        type="user"
-                        src={u.avatarUrl}
-                        name={u.name ?? u.handle ?? ""}
-                        size="sm"
-                        className="size-4"
-                      />
-                      <span className="text-xs text-white">
-                        {u.name ?? `@${u.handle}`}
-                      </span>
-                      <span className="text-xs text-muted-foreground">
-                        {formatRelativeTime(u.createdAt)}
-                      </span>
-                    </div>
-                  ))}
-                  {totalCount > attestors.length && (
-                    <span className="text-xs text-muted-foreground">
-                      +{totalCount - attestors.length} more
-                    </span>
-                  )}
-                </div>
+                <AttestorTooltip attestors={attestors} totalCount={totalCount} />
               </TooltipContent>
             </Tooltip>
           );
@@ -316,69 +404,60 @@ export function AttestationButtons({
       {/* Emoji Burst Animation */}
       <AnimatePresence>
         {burst && (
-          <div
-            className="fixed z-[100] pointer-events-none"
-            style={{
-              left: burst.rect.left + burst.rect.width / 2,
-              top: burst.rect.top + burst.rect.height / 2,
-            }}
-          >
-            <Burst
-              key={burst.seed}
-              emoji={burst.emoji}
-              onDone={() => setBurst(null)}
-            />
-          </div>
+          <BurstOverlay burst={burst} onDone={() => setBurst(null)} />
         )}
       </AnimatePresence>
-
-      {/* Flying Dot Animation */}
-      <AnimatePresence>
-        {flyingDots.map((dot) => {
-          const targetRect = buttonRef?.current?.getBoundingClientRect();
-          if (!targetRect) return null;
-
-          const endX = targetRect.left + targetRect.width / 2;
-          const endY = targetRect.top + targetRect.height / 2;
-
-          return (
-            <motion.div
-              key={dot.id}
-              className="fixed z-[100] pointer-events-none"
-              initial={{
-                left: dot.rect.left + dot.rect.width / 2 - 12,
-                top: dot.rect.top + dot.rect.height / 2 - 12,
-                width: 24,
-                height: 24,
-                opacity: 1,
-                scale: 1,
-              }}
-              animate={{
-                left: endX - 10,
-                top: endY - 10,
-                width: 20,
-                height: 20,
-                opacity: 1,
-                scale: 1,
-              }}
-              exit={{
-                opacity: 0,
-                scale: 0,
-              }}
-              transition={{
-                duration: ANIMATION.flightDuration,
-                ease: [0.32, 0, 0.15, 1],
-                left: { duration: ANIMATION.flightDuration, ease: [0.32, 0, 0.15, 1] },
-                top: { duration: ANIMATION.flightDuration, ease: [0.0, 0.55, 0.35, 1] },
-              }}
-            >
-              <div className="w-full h-full rounded-full bg-primary text-primary-foreground flex items-center justify-center shadow-lg shadow-primary/50">
-                <Check className="size-3" strokeWidth={3} />
-              </div>
-            </motion.div>
-          );
-        })}
-      </AnimatePresence>
     </>
+  );
+}
+
+/* ────────────────────────────
+   Private sub-components
+──────────────────────────── */
+
+function AttestorTooltip({ attestors, totalCount }: { attestors: AttestorInfo[]; totalCount: number }) {
+  return (
+    <div className="flex flex-col gap-1.5 py-0.5">
+      {attestors.map((u) => (
+        <div key={u.id} className="flex items-center gap-2">
+          <ProfileAvatar
+            type="user"
+            src={u.avatarUrl}
+            name={u.name ?? u.handle ?? ""}
+            size="sm"
+            className="size-4"
+          />
+          <span className="text-xs text-white">
+            {u.name ?? `@${u.handle}`}
+          </span>
+          <span className="text-xs text-muted-foreground">
+            {formatRelativeTime(u.createdAt)}
+          </span>
+        </div>
+      ))}
+      {totalCount > attestors.length && (
+        <span className="text-xs text-muted-foreground">
+          +{totalCount - attestors.length} more
+        </span>
+      )}
+    </div>
+  );
+}
+
+function BurstOverlay({ burst, onDone }: { burst: { emoji: string; rect: DOMRect; seed: number }; onDone: () => void }) {
+  return (
+    <div
+      className="fixed z-[100] pointer-events-none"
+      style={{
+        left: burst.rect.left + burst.rect.width / 2,
+        top: burst.rect.top + burst.rect.height / 2,
+      }}
+    >
+      <Burst
+        key={burst.seed}
+        emoji={burst.emoji}
+        onDone={onDone}
+      />
+    </div>
   );
 }
