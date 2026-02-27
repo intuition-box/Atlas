@@ -10,6 +10,7 @@ import { useRouter } from "next/navigation";
 
 import { cn } from "@/lib/utils";
 import { apiGet } from "@/lib/api/client";
+import { formatRelativeTime } from "@/lib/format";
 import { sounds } from "@/lib/sounds";
 import { ROUTES } from "@/lib/routes";
 import { Button } from "@/components/ui/button";
@@ -60,6 +61,7 @@ type AttestorInfo = {
   name: string | null;
   handle: string | null;
   avatarUrl: string | null;
+  createdAt: string;
 };
 
 type StatusResponse = {
@@ -303,13 +305,16 @@ export function AttestationButtons({
                         size="sm"
                         className="size-4"
                       />
-                      <span className="text-xs">
+                      <span className="text-xs text-white">
                         {u.name ?? `@${u.handle}`}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {formatRelativeTime(u.createdAt)}
                       </span>
                     </div>
                   ))}
                   {totalCount > attestors.length && (
-                    <span className="text-xs text-muted-foreground/60">
+                    <span className="text-xs text-muted-foreground">
                       +{totalCount - attestors.length} more
                     </span>
                   )}

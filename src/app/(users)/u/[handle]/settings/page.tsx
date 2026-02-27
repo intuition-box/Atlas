@@ -1299,10 +1299,6 @@ export default function UserSettingsPage() {
     }
   }
 
-  function handleCancel() {
-    router.replace(userPath(handle))
-  }
-
   const rootError = form.formState.errors.root?.message
   const countryItems = React.useMemo(() => getCountryItems(), [])
 

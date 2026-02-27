@@ -465,6 +465,9 @@ export function UniverseView({
             handle: community.handle,
             data: result.value,
           };
+          // Signal the orbit page to play the drum entrance sound (consumed once on mount)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (window as any).__orbitPlayDrum = true;
         }
         s.fetchDone = true;
         // If zoom already finished and we're waiting, navigate now

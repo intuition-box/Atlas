@@ -40,7 +40,7 @@ function UserLayoutShell({ children }: { children: React.ReactNode }) {
   // Not-found state
   if (ctx.status === "not-found") {
     return (
-      <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
+      <div className="mx-auto flex w-full max-w-4xl flex-col mt-24 gap-6 pb-40">
         <Alert>
           <AlertDescription>We couldn&apos;t find @{ctx.handle}.</AlertDescription>
         </Alert>
@@ -51,7 +51,7 @@ function UserLayoutShell({ children }: { children: React.ReactNode }) {
   // Error state
   if (ctx.status === "error") {
     return (
-      <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
+      <div className="mx-auto flex w-full max-w-4xl flex-col mt-24 gap-6 pb-40">
         <Alert variant="destructive">
           <AlertDescription>{ctx.errorMessage}</AlertDescription>
         </Alert>
@@ -64,12 +64,13 @@ function UserLayoutShell({ children }: { children: React.ReactNode }) {
     )
   }
 
+  const isLoading = ctx.status === "loading"
   const handleLabel = ctx.user?.handle ?? ctx.handle
-  const displayName = ctx.user?.name?.trim() || `@${handleLabel}`
+  const displayName = ctx.user ? (ctx.user.name?.trim() || `@${handleLabel}`) : ""
   const avatarUrl = ctx.user?.avatarUrl || ctx.user?.image || ""
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 pb-40">
+    <div className="mx-auto flex w-full max-w-4xl flex-col mt-24 pb-40">
       <PageHeader
         leading={
           ctx.leadingOverride ?? (
@@ -79,7 +80,7 @@ function UserLayoutShell({ children }: { children: React.ReactNode }) {
           )
         }
         title={displayName}
-        description={`@${handleLabel}`}
+        description={isLoading ? "" : `@${handleLabel}`}
         sticky
         actions={
           <PageToolbar

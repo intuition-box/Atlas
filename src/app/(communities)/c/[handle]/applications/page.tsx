@@ -714,9 +714,8 @@ export default function CommunityApplicationsPage() {
   const ctx = useCommunity()
 
   // Inject toolbar slot — Filters button
-  const isReady = !loading && !!data
   React.useEffect(() => {
-    if (!isReady) {
+    if (ctx.status !== "ready") {
       ctx.setToolbarSlot(null)
       return
     }
@@ -727,11 +726,11 @@ export default function CommunityApplicationsPage() {
     })
     return () => ctx.setToolbarSlot(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isReady, isFiltersOpen])
+  }, [ctx.status, isFiltersOpen])
 
   if (!handle) return null
 
-  if (!isReady) {
+  if (loading || !data) {
     return (
       <Card>
         <CardHeader>

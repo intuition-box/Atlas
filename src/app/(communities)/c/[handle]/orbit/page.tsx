@@ -5,6 +5,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 
 import { communityPath, userPath } from "@/lib/routes"
+import { sounds } from "@/lib/sounds"
 
 import { PageHeader } from "@/components/common/page-header"
 import { PageToolbar } from "@/components/common/page-toolbar"
@@ -69,6 +70,24 @@ export default function CommunityOrbitPage() {
     ctx.setHeaderHidden(true)
     return () => ctx.setHeaderHidden(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Consume one-time drum flag set by the universe scene (read once, delete immediately)
+  const fromUniverseRef = React.useRef<boolean | undefined>(undefined)
+  if (fromUniverseRef.current === undefined) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const w = window as any
+    fromUniverseRef.current = !!w.__orbitPlayDrum
+    delete w.__orbitPlayDrum
+  }
+
+  // Play drum directly on mount when coming from universe (no sim dependency)
+  const drumPlayedRef = React.useRef(false)
+  React.useEffect(() => {
+    if (fromUniverseRef.current && !drumPlayedRef.current) {
+      drumPlayedRef.current = true
+      sounds.play("drum")
+    }
   }, [])
 
   const handleMemberClick = React.useCallback(

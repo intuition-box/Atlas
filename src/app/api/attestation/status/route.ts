@@ -24,6 +24,7 @@ type AttestorInfo = {
   name: string | null;
   handle: string | null;
   avatarUrl: string | null;
+  createdAt: string;
 };
 
 type AttestationStatusOk = {
@@ -58,6 +59,7 @@ export const GET = api(QuerySchema, async (ctx) => {
       },
       select: {
         type: true,
+        createdAt: true,
         fromUser: { select: { id: true, name: true, image: true, avatarUrl: true } },
       },
       orderBy: { createdAt: "desc" },
@@ -102,6 +104,7 @@ export const GET = api(QuerySchema, async (ctx) => {
         name: row.fromUser.name,
         handle: null, // resolved below
         avatarUrl: row.fromUser.avatarUrl ?? row.fromUser.image,
+        createdAt: row.createdAt.toISOString(),
       });
     }
   }

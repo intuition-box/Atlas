@@ -65,8 +65,6 @@ export function OrbitView({
   const [communityTooltip, setCommunityTooltip] = useState<CommunityTooltipState>(null);
   // Tracks pointer presence independently of React state to avoid rerenders
   const mouseInsideRef = useRef(false);
-  // Track if drum sound already played (only once per mount)
-  const drumPlayedRef = useRef(false);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -89,14 +87,6 @@ export function OrbitView({
     size.h / 2,
     startFromCenter,
   );
-
-  // Play drum sound when orbit first has nodes (matches scene.tsx)
-  useEffect(() => {
-    if (sim.nodes.length > 0 && !drumPlayedRef.current) {
-      drumPlayedRef.current = true;
-      sounds.play("drum");
-    }
-  }, [sim.nodes.length]);
 
   /* ────────────────────────────
      Cursor — derived from React state so it re-renders

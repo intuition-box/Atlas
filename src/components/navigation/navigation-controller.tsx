@@ -162,8 +162,8 @@ export function NavigationController({
           {/* Attestation Queue (authed only) */}
           {showControls && isAuthed && <AttestationQueueButton />}
 
-          {/* Sound Toggle (authed only) */}
-          {showControls && isAuthed && (
+          {/* Sound Toggle */}
+          {showControls && (
             <NavigationButton
               icon={isSoundEnabled ? Volume2 : VolumeX}
               label={isSoundEnabled ? "Mute sounds" : "Unmute sounds"}

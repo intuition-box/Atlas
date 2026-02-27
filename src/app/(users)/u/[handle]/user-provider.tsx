@@ -171,7 +171,6 @@ export function UserProvider({ handle, children }: UserProviderProps) {
     })()
 
     return () => controller.abort()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [normalized, fetchKey])
 
   const refetch = React.useCallback(() => {

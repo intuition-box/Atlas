@@ -3,6 +3,7 @@
 import * as React from "react";
 
 import { FormActions } from "@/components/ui/form";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { motion } from "motion/react";
 
@@ -95,7 +96,7 @@ function PageHeader({
       >
         <header
           data-slot="page-header-title"
-          className="flex min-w-0 items-start gap-3"
+          className="flex min-w-0 items-center gap-3"
         >
           {leading ? (
             <div
@@ -107,9 +108,17 @@ function PageHeader({
           ) : null}
 
           <div data-slot="page-header-text" className="min-w-0 flex flex-col">
-            <h1 className="text-2xl font-semibold leading-tight">{title}</h1>
-            {description ? (
-              <p className="text-xs text-muted-foreground">{description}</p>
+            {title ? (
+              <h1 className="text-2xl font-semibold leading-tight">{title}</h1>
+            ) : (
+              <Skeleton className="h-6 w-40" />
+            )}
+            {description !== undefined ? (
+              description ? (
+                <p className="text-xs text-muted-foreground">{description}</p>
+              ) : (
+                <Skeleton className="h-2 w-24 mt-2" />
+              )
             ) : null}
           </div>
         </header>
