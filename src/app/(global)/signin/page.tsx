@@ -142,11 +142,15 @@ export default async function SignInPage({
             </form>
             <div className="flex gap-2">
               <Button disabled variant="secondary" className="flex-1 py-6 text-base relative">
+                Github
+                <span className="absolute -top-1 right-2 rounded-full bg-muted px-2 py-0 text-xs">soon</span>
+              </Button>
+              <Button disabled variant="secondary" className="flex-1 py-6 text-base relative">
                 X
                 <span className="absolute -top-1 right-2 rounded-full bg-muted px-2 py-0 text-xs">soon</span>
               </Button>
               <Button disabled variant="secondary" className="flex-1 py-6 text-base relative">
-                Github
+                Telegram
                 <span className="absolute -top-1 right-2 rounded-full bg-muted px-2 py-0 text-xs">soon</span>
               </Button>
             </div>

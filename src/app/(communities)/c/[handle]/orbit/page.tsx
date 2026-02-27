@@ -7,18 +7,12 @@ import { useRouter } from "next/navigation"
 import { communityPath, userPath } from "@/lib/routes"
 import { sounds } from "@/lib/sounds"
 
-import { PageHeader } from "@/components/common/page-header"
-import { PageToolbar } from "@/components/common/page-toolbar"
-import { communityNav, communityAdminNav } from "../nav"
-import { ProfileAvatar } from "@/components/common/profile-avatar"
-import { useNavigationVisibility } from "@/components/navigation/navigation-provider"
 import { OrbitView } from "@/components/orbit/view"
 import type { OrbitMember, OrbitCommunityData } from "@/components/orbit/types"
 
 import { OrbitSkeleton } from "@/components/orbit/orbit-skeleton"
 
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
-import { Skeleton } from "@/components/ui/skeleton"
 
 import { useCommunity, type CommunityData } from "../community-provider"
 
@@ -63,12 +57,11 @@ function toCommunityData(
 export default function CommunityOrbitPage() {
   const router = useRouter()
   const ctx = useCommunity()
-  const { isVisible: navVisible } = useNavigationVisibility()
 
-  // Hide the shared layout header — orbit has its own floating pinned header
+  // Switch layout header to toolbar-only mode (animated transition)
   React.useEffect(() => {
-    ctx.setHeaderHidden(true)
-    return () => ctx.setHeaderHidden(false)
+    ctx.setHeaderMode("toolbar-only")
+    return () => ctx.setHeaderMode("full")
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -101,7 +94,6 @@ export default function CommunityOrbitPage() {
   const data = ctx.data
   const community = ctx.community
   const handleLabel = community?.handle ?? ctx.handle
-  const displayName = community?.name ?? ""
   const avatarUrl = community?.avatarUrl ?? ""
   const members = data ? toOrbitMembers(data.orbitMembers) : []
   const canViewDirectory = ctx.canViewDirectory
@@ -109,38 +101,7 @@ export default function CommunityOrbitPage() {
   const isOrbitLoading = ctx.status === "loading"
 
   return (
-    <>
-      {/* Page header — pinned overlay, hidden when nav is toggled off */}
-      {navVisible && (
-        <div className="pointer-events-none fixed inset-x-0 top-0 z-30 flex justify-center px-4 pt-1">
-          <div className="pointer-events-auto w-full max-w-4xl">
-            <PageHeader
-              leading={
-                avatarUrl
-                  ? <ProfileAvatar
-                      type="community"
-                      src={avatarUrl}
-                      name={displayName}
-                      className="h-12 w-12"
-                    />
-                  : <Skeleton className="size-12 rounded-full" />
-              }
-              title={displayName}
-              description={`@${handleLabel}`}
-              sticky
-              pinned
-              actions={
-                <PageToolbar
-                  nav={communityNav(handleLabel)}
-                  overflow={ctx.isAdmin ? communityAdminNav(handleLabel) : undefined}
-                />
-              }
-              actionsAsFormActions={false}
-            />
-          </div>
-        </div>
-      )}
-
+    <div className="fixed inset-0">
       {/* Full-screen orbit canvas */}
       {isReady && canViewDirectory && members.length > 0 ? (
         <OrbitView
@@ -185,6 +146,6 @@ export default function CommunityOrbitPage() {
           </Empty>
         </div>
       ) : null}
-    </>
+    </div>
   )
 }

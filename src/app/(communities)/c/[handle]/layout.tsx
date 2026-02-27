@@ -5,11 +5,14 @@ import Link from "next/link"
 import { useParams } from "next/navigation"
 
 import { communityJoinPath } from "@/lib/routes"
+import { cn } from "@/lib/utils"
+import { AnimatePresence, motion } from "motion/react"
 
 import { PageHeader } from "@/components/common/page-header"
 import { PageToolbar } from "@/components/common/page-toolbar"
 import { communityNav, communityAdminNav } from "./nav"
 import { ProfileAvatar } from "@/components/common/profile-avatar"
+import { useNavigationVisibility } from "@/components/navigation/navigation-provider"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -73,6 +76,7 @@ function JoinBanner({ name, handle, pending }: { name: string; handle: string; p
 
 function CommunityLayoutShell({ children }: { children: React.ReactNode }) {
   const ctx = useCommunity()
+  const { isVisible: navVisible } = useNavigationVisibility()
 
   // Not-found state
   if (ctx.status === "not-found") {
@@ -105,38 +109,79 @@ function CommunityLayoutShell({ children }: { children: React.ReactNode }) {
   const handleLabel = ctx.community?.handle ?? ctx.handle
   const displayName = ctx.community?.name ?? ""
   const avatarUrl = ctx.community?.avatarUrl ?? ""
+  const isToolbarOnly = ctx.headerMode === "toolbar-only"
   const showJoinBanner =
     ctx.viewerMembership?.status !== "APPROVED" &&
     ctx.community?.isMembershipOpen === true
 
-  if (ctx.headerHidden) return <>{children}</>
+  // Track when the full header has finished its exit animation
+  const [headerFaded, setHeaderFaded] = React.useState(false)
+  React.useEffect(() => {
+    if (!isToolbarOnly) setHeaderFaded(false)
+  }, [isToolbarOnly])
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col mt-24 pb-40">
-      <PageHeader
-        leading={
-          ctx.leadingOverride ?? (
-            avatarUrl
-              ? <ProfileAvatar type="community" src={avatarUrl} name={displayName} className="h-12 w-12" />
-              : <Skeleton className="size-12 rounded-full" />
-          )
-        }
-        title={displayName}
-        description={isLoading ? "" : `@${handleLabel}`}
-        sticky
-        actions={
-          <PageToolbar
-            actions={ctx.toolbarSlot?.actions}
-            viewSwitch={ctx.toolbarSlot?.viewSwitch}
-            nav={communityNav(handleLabel)}
-            overflow={ctx.isAdmin ? communityAdminNav(handleLabel) : undefined}
-          />
-        }
-        actionsAsFormActions={false}
-      />
+    <div className="mx-auto flex w-full max-w-4xl mt-24 flex-col pb-40">
+      {/* Full header — fades out entirely when entering orbit */}
+      <AnimatePresence
+        initial={false}
+        onExitComplete={() => { if (isToolbarOnly) setHeaderFaded(true) }}
+      >
+        {!isToolbarOnly && (
+          <motion.div
+            key="full-header"
+            initial={{ opacity: 0, filter: "blur(4px)" }}
+            animate={{ opacity: 1, filter: "blur(0px)" }}
+            exit={{ opacity: 0, filter: "blur(4px)" }}
+            transition={{ duration: 0.25, ease: "easeInOut" }}
+          >
+            <PageHeader
+              leading={
+                ctx.leadingOverride ?? (
+                  avatarUrl
+                    ? <ProfileAvatar type="community" src={avatarUrl} name={displayName} className="h-12 w-12" />
+                    : <Skeleton className="size-12 rounded-full" />
+                )
+              }
+              title={displayName}
+              description={isLoading ? "" : `@${handleLabel}`}
+              actions={
+                <PageToolbar
+                  actions={ctx.toolbarSlot?.actions}
+                  viewSwitch={ctx.toolbarSlot?.viewSwitch}
+                  nav={communityNav(handleLabel)}
+                  overflow={ctx.isAdmin ? communityAdminNav(handleLabel) : undefined}
+                />
+              }
+              actionsAsFormActions={false}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      <div className="flex flex-col gap-6 pt-8">
-        {showJoinBanner && (
+      {/* Floating toolbar — appears at top-center after header fades */}
+      <AnimatePresence>
+        {isToolbarOnly && headerFaded && navVisible && (
+          <motion.div
+            key="floating-toolbar"
+            className="pointer-events-none fixed inset-x-0 top-0 z-40"
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+          >
+            <div className="pointer-events-auto mx-auto max-w-4xl px-4 py-3 flex justify-center">
+              <PageToolbar
+                nav={communityNav(handleLabel)}
+                overflow={ctx.isAdmin ? communityAdminNav(handleLabel) : undefined}
+              />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div className={cn("flex flex-col gap-6", !isToolbarOnly && "pt-8")}>
+        {showJoinBanner && !isToolbarOnly && (
           <JoinBanner
             name={displayName}
             handle={handleLabel}

@@ -83,8 +83,8 @@ export type CommunityContextValue = {
   setToolbarSlot: (slot: ToolbarSlotValue | null) => void
 
   // Header overrides
-  headerHidden: boolean
-  setHeaderHidden: (hidden: boolean) => void
+  headerMode: "full" | "toolbar-only"
+  setHeaderMode: (mode: "full" | "toolbar-only") => void
   leadingOverride: React.ReactNode | null
   setLeadingOverride: (node: React.ReactNode | null) => void
 
@@ -152,7 +152,7 @@ export function CommunityProvider({ handle, children }: CommunityProviderProps) 
   const [toolbarSlot, setToolbarSlot] = React.useState<ToolbarSlotValue | null>(null)
 
   // Header overrides
-  const [headerHidden, setHeaderHidden] = React.useState(false)
+  const [headerMode, setHeaderMode] = React.useState<"full" | "toolbar-only">("full")
   const [leadingOverride, setLeadingOverride] = React.useState<React.ReactNode | null>(null)
 
   // Fetch counter for refetch
@@ -230,15 +230,15 @@ export function CommunityProvider({ handle, children }: CommunityProviderProps) 
     orbitMembers: data?.orbitMembers ?? [],
     toolbarSlot,
     setToolbarSlot,
-    headerHidden,
-    setHeaderHidden,
+    headerMode,
+    setHeaderMode,
     leadingOverride,
     setLeadingOverride,
     injectData,
     refetch,
   }), [
     normalized, status, data, errorMessage,
-    toolbarSlot, headerHidden, leadingOverride,
+    toolbarSlot, headerMode, leadingOverride,
     injectData, refetch,
   ])
 

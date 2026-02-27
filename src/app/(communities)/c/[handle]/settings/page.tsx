@@ -670,6 +670,7 @@ function SocialLinksSection({ form }: { form: ReturnType<typeof useForm<Communit
               <div className="flex items-center gap-2">
                 <Icon className="size-4 shrink-0 text-muted-foreground" />
                 <FormField<CommunitySettingsValues, typeof name>
+                  className="w-full"
                   name={name}
                   render={({ id, field, fieldState }) => (
                     <Input
