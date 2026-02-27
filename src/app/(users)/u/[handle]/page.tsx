@@ -1,76 +1,16 @@
 "use client"
 
-import * as React from "react"
-import Link from "next/link"
-import { useParams } from "next/navigation"
-import { useSession } from "next-auth/react"
 import { ArrowUpRight, Wallet } from "lucide-react"
 
-import { apiGet } from "@/lib/api/client"
-import { parseApiError } from "@/lib/api/errors"
-import { normalizeHandle, validateHandle } from "@/lib/handle"
-import { userPath, userSettingsPath, userActivityPath, userAttestationsPath } from "@/lib/routes"
-
 import { AttestationButtons } from "@/components/attestation/buttons"
-import { PageHeader } from "@/components/common/page-header"
-import { PageToolbar } from "@/components/common/page-toolbar"
-import { ProfileAvatar } from "@/components/common/profile-avatar"
-import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { EncryptedText } from "@/components/ui/encrypted-text"
 import { DiscordIcon, GitHubIcon, XIcon } from "@/components/ui/icons"
 import { Skeleton } from "@/components/ui/skeleton"
 
-// === TYPES ===
-
-type UserGetResponse = {
-  user: {
-    id: string
-    handle: string | null
-    name: string | null
-    image: string | null
-    avatarUrl: string | null
-    headline: string | null
-    bio: string | null
-    location: string | null
-    links: string[] | null
-    skills: string[] | null
-    tags: string[] | null
-    languages: string[] | null
-    contactPreference: string | null
-    discordId: string | null
-    discordHandle: string | null
-    twitterHandle: string | null
-    githubHandle: string | null
-    walletAddresses: string[]
-    linkedProviders: string[]
-    createdAt: string
-    lastActiveAt: string | null
-  }
-  isSelf: boolean
-  attestations: Array<{
-    id: string
-    type: string
-    confidence: number | null
-    direction: "given" | "received"
-    createdAt: string
-    peer: {
-      id: string
-      name: string | null
-      handle: string | null
-      image: string | null
-      avatarUrl: string | null
-    }
-  }>
-}
-
-type LoadState =
-  | { status: "idle" | "loading" }
-  | { status: "error"; message: string }
-  | { status: "not-found" }
-  | { status: "ready"; data: UserGetResponse }
+import { useUser } from "./user-provider"
+import type { UserData } from "./user-provider"
 
 // === HELPERS ===
 
@@ -108,7 +48,7 @@ function safeUrl(input: string): string | null {
   }
 }
 
-/** Strips protocol and trailing slash for display (e.g. "https://wave.so/" → "wave.so"). */
+/** Strips protocol and trailing slash for display (e.g. "https://wave.so/" -> "wave.so"). */
 function displayUrl(input: string): string {
   return input.replace(/^https?:\/\//i, "").replace(/\/+$/, "")
 }
@@ -127,22 +67,9 @@ const CONTACT_LABELS: Record<string, string> = {
 
 // === LOADING SKELETON ===
 
-function ProfileSkeleton() {
+function ContentSkeleton() {
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-7 pb-40">
-      <div className="w-full p-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex min-w-0 items-start gap-3">
-          <Skeleton className="size-12 rounded-full shrink-0" />
-          <div className="flex flex-col gap-1.5">
-            <Skeleton className="h-7 w-48" />
-            <Skeleton className="h-3 w-24" />
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Skeleton className="h-9 w-64 rounded-4xl" />
-        </div>
-      </div>
-
+    <>
       <Card>
         <CardHeader className="gap-4">
           <CardTitle>
@@ -195,13 +122,13 @@ function ProfileSkeleton() {
           </CardContent>
         </Card>
       ))}
-    </div>
+    </>
   )
 }
 
 // === SUB-COMPONENTS ===
 
-function SocialsCard({ user }: { user: UserGetResponse["user"] }) {
+function SocialsCard({ user }: { user: UserData["user"] }) {
   const wallets = user.walletAddresses ?? []
   const hasDiscord = !!user.discordHandle
   const hasTwitter = !!user.twitterHandle
@@ -283,91 +210,16 @@ function SocialsCard({ user }: { user: UserGetResponse["user"] }) {
 // === PAGE ===
 
 export default function UserProfilePage() {
-  const params = useParams<{ handle: string }>()
-  const rawHandle = String(params?.handle ?? "")
-  const handle = React.useMemo(() => normalizeHandle(rawHandle), [rawHandle])
+  const ctx = useUser()
+  const { status, data, user, isSelf, handle } = ctx
 
-  const { data: session } = useSession()
-  const [state, setState] = React.useState<LoadState>({ status: "idle" })
-
-  React.useEffect(() => {
-    const parsed = validateHandle(handle)
-    if (!parsed.ok) {
-      setState({ status: "not-found" })
-      return
-    }
-
-    const controller = new AbortController()
-    setState({ status: "loading" })
-
-    void (async () => {
-      const result = await apiGet<UserGetResponse>(
-        "/api/user/get",
-        { handle },
-        { signal: controller.signal },
-      )
-
-      if (controller.signal.aborted) return
-
-      if (result.ok) {
-        setState({ status: "ready", data: result.value })
-        return
-      }
-
-      if (result.error && typeof result.error === "object" && "status" in result.error) {
-        const parsedErr = parseApiError(result.error)
-        if (parsedErr.status === 404) {
-          setState({ status: "not-found" })
-          return
-        }
-        setState({ status: "error", message: parsedErr.formError || "Something went wrong." })
-        return
-      }
-
-      const parsedErr = parseApiError(result.error)
-      setState({ status: "error", message: parsedErr.formError || "Something went wrong." })
-    })()
-
-    return () => controller.abort()
-  }, [handle])
-
-  if (state.status === "loading" || state.status === "idle") {
-    return <ProfileSkeleton />
+  if (status === "loading") {
+    return <ContentSkeleton />
   }
 
-  if (state.status === "not-found") {
-    return (
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 mt-24 pb-40">
-        <Alert>
-          <AlertDescription>We couldn&apos;t find @{handle}.</AlertDescription>
-        </Alert>
-      </div>
-    )
-  }
-
-  if (state.status === "error") {
-    return (
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 mt-24 pb-40">
-        <Alert variant="destructive">
-          <AlertDescription>{state.message}</AlertDescription>
-        </Alert>
-        <div>
-          <Button type="button" variant="secondary" onClick={() => setState({ status: "idle" })}>
-            Retry
-          </Button>
-        </div>
-      </div>
-    )
-  }
-
-  if (state.status !== "ready") {
+  if (status !== "ready" || !user || !data) {
     return null
   }
-
-  const { user, isSelf: apiIsSelf } = state.data
-
-  // Combine API + client-side check for robustness
-  const isSelf = apiIsSelf || session?.user?.id === user.id
 
   const handleLabel = user.handle ?? handle
   const displayName = user.name?.trim() || handleLabel
@@ -379,26 +231,7 @@ export default function UserProfilePage() {
   const links = (user.links ?? []).map((l) => String(l || "").trim()).filter(Boolean)
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 mt-24 pb-40">
-      <PageHeader
-        leading={
-          <ProfileAvatar type="user" src={avatarSrc} name={displayName} className="h-12 w-12" />
-        }
-        title={displayName}
-        description={`@${handleLabel}`}
-        actionsAsFormActions={false}
-        actions={
-          <PageToolbar
-            nav={[
-              { label: "Profile", href: userPath(handleLabel) },
-              { label: "Attestations", href: userAttestationsPath(handleLabel) },
-              { label: "Activity", href: userActivityPath(handleLabel) },
-              ...(isSelf ? [{ label: "Settings", href: userSettingsPath(handleLabel) }] : []),
-            ]}
-          />
-        }
-      />
-
+    <>
       <SocialsCard user={user} />
 
       <Card>
@@ -561,6 +394,6 @@ export default function UserProfilePage() {
           </CardContent>
         </Card>
       )}
-    </div>
+    </>
   )
 }

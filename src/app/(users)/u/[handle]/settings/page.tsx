@@ -4,21 +4,19 @@ import * as React from "react"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { Controller, useFieldArray } from "react-hook-form"
-import { useParams, useRouter } from "next/navigation"
-import { getSession, signIn, useSession } from "next-auth/react"
+import { useRouter } from "next/navigation"
+import { signIn, useSession } from "next-auth/react"
 import { Loader2, X } from "lucide-react"
 
-import { apiGet, apiPost } from "@/lib/api/client"
+import { apiPost } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
-import { userPath, userSettingsPath, userActivityPath, userAttestationsPath } from "@/lib/routes"
+import { userPath, userSettingsPath } from "@/lib/routes"
 import { COUNTRIES } from "@/config/countries"
 import { LANGUAGE_LIST as LANGUAGES } from "@/config/languages"
 import { SKILL_LIST as SKILLS, TOOL_LIST as TOOLS } from "@/lib/attestations/definitions"
 
 import { AvatarDropzone } from "@/components/common/avatar-dropzone"
 import { HandleField } from "@/components/common/handle-field"
-import { PageHeader } from "@/components/common/page-header"
-import { PageToolbar } from "@/components/common/page-toolbar"
 import { ProfileAvatar } from "@/components/common/profile-avatar"
 import { UnsavedChangesBar } from "@/components/common/unsaved-changes-bar"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -55,6 +53,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { WalletLinkSection } from "@/components/users/wallet-link-section"
 
+import { useUser } from "../user-provider"
+
 // === SCHEMAS ===
 
 const SettingsSchema = z.object({
@@ -76,26 +76,6 @@ const SettingsSchema = z.object({
 type SettingsValues = z.infer<typeof SettingsSchema>
 
 // === TYPES ===
-
-type UserData = {
-  handle: string | null
-  name: string | null
-  avatarUrl: string | null
-  headline: string | null
-  bio: string | null
-  location: string | null
-  links: string[]
-  languages: string[]
-  skills: string[]
-  tags: string[]
-  contactPreference: string | null
-  /** Provider names with an Account record (source of truth for linked status). */
-  linkedProviders: string[]
-}
-
-type UserGetResponse = {
-  user: UserData
-}
 
 type UpdateUserResponse = {
   user: {
@@ -138,78 +118,6 @@ function filterAvailableItems(allItems: readonly string[], selected: string[]): 
 }
 
 // === CUSTOM HOOKS ===
-
-function useSessionCheck(handle: string) {
-  const router = useRouter()
-  const [isOwner, setIsOwner] = React.useState<boolean | null>(null)
-
-  React.useEffect(() => {
-    let cancelled = false
-
-    getSession().then((session) => {
-      if (cancelled) return
-
-      const sessionHandle = session?.user?.handle
-      const isAuthorized = !!(session?.user?.id && sessionHandle && sessionHandle === handle)
-
-      setIsOwner(isAuthorized)
-
-      if (!isAuthorized) {
-        router.replace(userPath(handle))
-      }
-    })
-
-    return () => {
-      cancelled = true
-    }
-  }, [handle, router])
-
-  return isOwner
-}
-
-function useUserData(handle: string, isOwner: boolean | null) {
-  const router = useRouter()
-  const [userData, setUserData] = React.useState<UserData | null>(null)
-  const [loading, setLoading] = React.useState(true)
-  const [error, setError] = React.useState<string | null>(null)
-
-  React.useEffect(() => {
-    if (isOwner === null || !isOwner) {
-      return
-    }
-
-    let cancelled = false
-
-    async function load() {
-      try {
-        const res = await apiGet<UserGetResponse>("/api/user/get", { handle })
-
-        if (cancelled) return
-
-        if (!res.ok) {
-          router.replace(userPath(handle))
-          return
-        }
-
-        setUserData(res.value.user)
-        setLoading(false)
-      } catch {
-        if (!cancelled) {
-          setError("An unexpected error occurred while loading your profile.")
-          setLoading(false)
-        }
-      }
-    }
-
-    void load()
-
-    return () => {
-      cancelled = true
-    }
-  }, [handle, isOwner, router])
-
-  return { userData, loading, error }
-}
 
 function useSkillsState() {
   const [skillOptions, setSkillOptions] = React.useState<string[]>([...SKILLS])
@@ -278,20 +186,7 @@ function useToolsState() {
 
 function SettingsSkeleton() {
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-7 pb-40">
-      <div className="w-full p-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex min-w-0 items-start gap-3">
-          <Skeleton className="size-12 rounded-full shrink-0" />
-          <div className="flex flex-col gap-1.5">
-            <Skeleton className="h-7 w-48" />
-            <Skeleton className="h-3 w-24" />
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Skeleton className="h-9 w-64 rounded-4xl" />
-        </div>
-      </div>
-
+    <>
       <Card>
         <CardHeader className="gap-4">
           <CardTitle>
@@ -341,7 +236,7 @@ function SettingsSkeleton() {
           </CardContent>
         </Card>
       ))}
-    </div>
+    </>
   )
 }
 
@@ -1213,11 +1108,15 @@ function ContactSection({
 
 export default function UserSettingsPage() {
   const router = useRouter()
-  const params = useParams<{ handle: string }>()
-  const handle = String(params?.handle || "")
+  const ctx = useUser()
+  const { handle } = ctx
 
-  const isOwner = useSessionCheck(handle)
-  const { userData, loading, error } = useUserData(handle, isOwner)
+  // Auth gate: redirect non-owners once context is ready
+  React.useEffect(() => {
+    if (ctx.status === "ready" && !ctx.isSelf) {
+      router.replace(userPath(ctx.handle))
+    }
+  }, [ctx.status, ctx.isSelf, ctx.handle, router])
 
   const form = useForm<SettingsValues>({
     resolver: zodResolver(SettingsSchema),
@@ -1243,38 +1142,49 @@ export default function UserSettingsPage() {
   const { toolOptions, toolQuery, setToolQuery, addToolOption } = useToolsState()
 
   // Track whether the form has been initialized with server data.
-  // Before initialization, we fall back to userData?.avatarUrl for display.
   const [formReady, setFormReady] = React.useState(false)
 
-  // Initialize form when userData loads
+  const user = ctx.data?.user ?? null
+
+  // Initialize form when context data loads
   React.useEffect(() => {
-    if (!userData) return
+    if (!user) return
 
     form.reset(
       {
-        handle: userData.handle ?? "",
-        name: userData.name ?? "",
-        headline: userData.headline ?? "",
-        bio: userData.bio ?? "",
-        location: userData.location ?? "",
-        links: initializeLinks(userData.links),
-        languages: Array.isArray(userData.languages) ? userData.languages : [],
-        skills: Array.isArray(userData.skills) ? userData.skills : [],
-        tools: Array.isArray(userData.tags) ? userData.tags : [],
-        avatarUrl: userData.avatarUrl ?? "",
-        contactPreference: (userData.contactPreference ?? "") as SettingsValues["contactPreference"],
+        handle: user.handle ?? "",
+        name: user.name ?? "",
+        headline: user.headline ?? "",
+        bio: user.bio ?? "",
+        location: user.location ?? "",
+        links: initializeLinks(user.links),
+        languages: Array.isArray(user.languages) ? user.languages : [],
+        skills: Array.isArray(user.skills) ? user.skills : [],
+        tools: Array.isArray(user.tags) ? user.tags : [],
+        avatarUrl: user.avatarUrl ?? "",
+        contactPreference: (user.contactPreference ?? "") as SettingsValues["contactPreference"],
       },
       { keepDirty: false },
     )
     setFormReady(true)
-  }, [userData, form])
+  }, [user, form])
 
-  // Set error from hook
+  // Leading override: show avatar preview from form state in the layout header
+  const watchedAvatarUrl = form.watch("avatarUrl")
+  const displayName = user?.name?.trim() || `@${handle}`
+
   React.useEffect(() => {
-    if (error) {
-      form.setError("root", { type: "server", message: error })
+    const avatarSrc = watchedAvatarUrl || user?.avatarUrl || user?.image
+    if (avatarSrc) {
+      ctx.setLeadingOverride(
+        <ProfileAvatar type="user" src={avatarSrc} name={displayName} className="h-12 w-12" />
+      )
+    } else {
+      ctx.setLeadingOverride(null)
     }
-  }, [error, form])
+    return () => ctx.setLeadingOverride(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchedAvatarUrl, user?.avatarUrl, user?.image])
 
   const [avatarStatus, setAvatarStatus] = React.useState<AvatarStatus>({ type: "idle" })
 
@@ -1300,7 +1210,7 @@ export default function UserSettingsPage() {
         form.setValue("avatarUrl", "", { shouldDirty: true })
         setAvatarStatus({ type: "deleted", message: "Avatar deleted" })
         setTimeout(() => setAvatarStatus({ type: "idle" }), 3_000)
-        router.refresh()
+        ctx.refetch()
       } else {
         const parsed = parseApiError(result.error)
         setAvatarStatus({
@@ -1360,11 +1270,13 @@ export default function UserSettingsPage() {
       }
       form.reset(cleanValues)
 
+      // Refresh the shared user context so layout header etc. reflect the changes
+      ctx.refetch()
+
       const newHandle = result.value.user.handle
       if (newHandle && newHandle !== handle) {
         router.replace(userSettingsPath(newHandle))
       }
-      router.refresh()
       return
     }
 
@@ -1396,31 +1308,13 @@ export default function UserSettingsPage() {
 
   if (!handle) return null
 
-  if (isOwner === null || loading) {
+  // Show skeleton while context is loading or if not owner (redirecting)
+  if (ctx.status === "loading" || (ctx.status === "ready" && !ctx.isSelf)) {
     return <SettingsSkeleton />
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
-      <PageHeader
-        leading={
-          <ProfileAvatar type="user" src={form.watch("avatarUrl") || (formReady ? undefined : userData?.avatarUrl) || undefined} name={`@${handle}`} className="h-12 w-12" />
-        }
-        title="Settings"
-        description={`@${handle}`}
-        actionsAsFormActions={false}
-        actions={
-          <PageToolbar
-            nav={[
-              { label: "Profile", href: userPath(handle) },
-              { label: "Attestations", href: userAttestationsPath(handle) },
-              { label: "Activity", href: userActivityPath(handle) },
-              { label: "Settings", href: userSettingsPath(handle) },
-            ]}
-          />
-        }
-      />
-
+    <>
       <Form form={form} onSubmit={handleSubmit}>
         {rootError ? (
           <Alert variant="destructive">
@@ -1428,7 +1322,7 @@ export default function UserSettingsPage() {
           </Alert>
         ) : null}
 
-        <ConnectedAccountsSection linkedProviders={userData?.linkedProviders ?? []} />
+        <ConnectedAccountsSection linkedProviders={user?.linkedProviders ?? []} />
 
         <WalletLinkSection />
 
@@ -1436,7 +1330,7 @@ export default function UserSettingsPage() {
 
         <ProfileSection
           form={form}
-          avatarUrl={form.watch("avatarUrl") || (formReady ? undefined : userData?.avatarUrl) || undefined}
+          avatarUrl={form.watch("avatarUrl") || (formReady ? undefined : user?.avatarUrl) || undefined}
           onAvatarError={handleAvatarError}
           onAvatarUploaded={handleAvatarUploaded}
           onDeleteAvatar={handleDeleteAvatar}
@@ -1476,6 +1370,6 @@ export default function UserSettingsPage() {
         onSave={() => form.handleSubmit(handleSubmit)()}
         onReset={() => form.reset()}
       />
-    </div>
+    </>
   )
 }

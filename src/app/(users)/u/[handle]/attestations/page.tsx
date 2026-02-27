@@ -2,14 +2,14 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { useParams, useRouter } from "next/navigation"
+import { useRouter } from "next/navigation"
 import { useSession } from "next-auth/react"
-import { ArrowUpRight, Link2, Undo2 } from "lucide-react"
+import { ArrowUpRight, Link2, Search, Undo2 } from "lucide-react"
 
 import { apiGet, apiPost } from "@/lib/api/client"
 import { formatRelativeTime } from "@/lib/format"
 import { sounds } from "@/lib/sounds"
-import { ROUTES, userPath, userActivityPath, userAttestationsPath, userSettingsPath } from "@/lib/routes"
+import { ROUTES, userPath } from "@/lib/routes"
 import { ATTESTATION_TYPES, ATTESTATION_TYPE_LIST, type AttestationType } from "@/lib/attestations/definitions"
 import { useDebouncedValue } from "@/hooks/use-debounced-value"
 
@@ -17,8 +17,6 @@ import { AttestationBadge } from "@/components/attestation/badge"
 import { OnchainBanner } from "@/components/attestation/onchain-banner"
 import { useAttestationQueue } from "@/components/attestation/queue-provider"
 import { ListFeed, ListFeedSkeleton } from "@/components/common/list-feed"
-import { PageHeader } from "@/components/common/page-header"
-import { PageToolbar } from "@/components/common/page-toolbar"
 import { ProfileAvatar } from "@/components/common/profile-avatar"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -29,6 +27,8 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
+
+import { useUser } from "../user-provider"
 
 // === CONSTANTS ===
 
@@ -91,37 +91,6 @@ function hasActiveFilters(filters: FilterState): boolean {
 }
 
 // === CUSTOM HOOKS ===
-
-type UserProfile = {
-  name: string | null
-  avatarUrl: string | null
-  image: string | null
-}
-
-function useUserProfile(handle: string) {
-  const [profile, setProfile] = React.useState<UserProfile | null>(null)
-
-  React.useEffect(() => {
-    if (!handle) return
-
-    const ac = new AbortController()
-
-    void (async () => {
-      const res = await apiGet<{ user: UserProfile }>(
-        "/api/user/get",
-        { handle },
-        { signal: ac.signal },
-      )
-      if (!ac.signal.aborted && res.ok) {
-        setProfile(res.value.user)
-      }
-    })()
-
-    return () => ac.abort()
-  }, [handle])
-
-  return profile
-}
 
 function useAttestationsData(
   handle: string,
@@ -325,21 +294,7 @@ function AttestationRow({
 
 function AttestationsSkeleton({ isSelf }: { isSelf: boolean }) {
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
-      {/* PageHeader skeleton */}
-      <div className="w-full p-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex min-w-0 items-start gap-3">
-          <Skeleton className="size-12 rounded-full shrink-0" />
-          <div className="flex flex-col gap-1.5">
-            <Skeleton className="h-7 w-36" />
-            <Skeleton className="h-4 w-20" />
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Skeleton className="h-9 w-64 rounded-4xl" />
-        </div>
-      </div>
-
+    <>
       {/* OnchainBanner skeleton — only for profile owner */}
       {isSelf && (
         <div className="rounded-2xl border border-border/60 bg-gradient-to-b from-card/80 via-card/60 to-primary/5 p-6">
@@ -367,7 +322,7 @@ function AttestationsSkeleton({ isSelf }: { isSelf: boolean }) {
           <ListFeedSkeleton rows={6} />
         </CardContent>
       </Card>
-    </div>
+    </>
   )
 }
 
@@ -469,16 +424,12 @@ function FiltersPanel({
 // === MAIN COMPONENT ===
 
 export default function AttestationsPage() {
-  const params = useParams<{ handle: string }>()
+  const ctx = useUser()
   const { data: session } = useSession()
-  const handle = params.handle?.trim() || ""
 
+  const handle = ctx.handle
   const viewerId = session?.user?.id ?? null
-  const isSelf = session?.user?.handle === handle
-  const profile = useUserProfile(handle)
-
-  const displayName = profile?.name?.trim() || `@${handle}`
-  const avatarSrc = profile?.avatarUrl || profile?.image || ""
+  const isSelf = ctx.isSelf
 
   // Get lastChangedAt from queue context to trigger refetch when cart saves
   const { lastChangedAt } = useAttestationQueue()
@@ -494,6 +445,19 @@ export default function AttestationsPage() {
     type: "",
     status: "",
   })
+
+  // Inject toolbar slot — Filters button
+  React.useEffect(() => {
+    if (ctx.status !== "ready") {
+      ctx.setToolbarSlot(null)
+      return
+    }
+    ctx.setToolbarSlot({
+      actions: [{ label: "Filters", icon: Search, active: isFiltersOpen, onClick: () => setIsFiltersOpen((v) => !v) }],
+    })
+    return () => ctx.setToolbarSlot(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx.status, isFiltersOpen])
 
   // Reset cursor when cart saves to force fresh fetch from page 1
   React.useEffect(() => {
@@ -629,32 +593,10 @@ export default function AttestationsPage() {
 
   if (!handle) return null
 
-  if (loading) return <AttestationsSkeleton isSelf={isSelf} />
+  if (loading || ctx.status === "loading") return <AttestationsSkeleton isSelf={isSelf} />
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
-      <PageHeader
-        leading={
-          <ProfileAvatar type="user" src={avatarSrc} name={displayName} className="h-12 w-12" />
-        }
-        title="Attestations"
-        description={`@${handle}`}
-        actionsAsFormActions={false}
-        actions={
-          <PageToolbar
-            actions={[
-              { label: "Filters", active: isFiltersOpen, onClick: () => setIsFiltersOpen((v) => !v) },
-            ]}
-            nav={[
-              { label: "Profile", href: userPath(handle) },
-              { label: "Attestations", href: userAttestationsPath(handle) },
-              { label: "Activity", href: userActivityPath(handle) },
-              ...(isSelf ? [{ label: "Settings", href: userSettingsPath(handle) }] : []),
-            ]}
-          />
-        }
-      />
-
+    <>
       {/* Onchain Banner — only show for profile owner */}
       {isSelf && totalCount > 0 && (
         <OnchainBanner
@@ -730,6 +672,6 @@ export default function AttestationsPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </>
   )
 }
