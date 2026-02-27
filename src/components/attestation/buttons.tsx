@@ -70,6 +70,8 @@ type StatusResponse = {
   endorsementCountsByAttribute: Record<string, number>;
   endorsementUsersByAttribute: Record<string, AttestorInfo[]>;
   viewerEndorsedAttributes: string[];
+  viewerAttestationIds: Record<string, string>;
+  viewerEndorsementIds: Record<string, string>;
 };
 
 /* ────────────────────────────
@@ -91,7 +93,7 @@ export function AttestationButtons({
 }: AttestationButtonsProps) {
   const router = useRouter();
   const { data: session, status: sessionStatus } = useSession();
-  const { createAttestation, lastChangedAt } = useAttestationQueue();
+  const { createAttestation, retractAttestation, lastChangedAt } = useAttestationQueue();
 
   // Shared state
   const [burst, setBurst] = useState<{ emoji: string; rect: DOMRect; seed: number } | null>(null);
@@ -108,6 +110,14 @@ export function AttestationButtons({
   const [endorsementUsers, setEndorsementUsers] = useState<Record<string, AttestorInfo[]>>({});
   const [viewerEndorsed, setViewerEndorsed] = useState<Set<string>>(new Set());
   const [savingAttributes, setSavingAttributes] = useState<Set<string>>(new Set());
+
+  // ID maps for retraction (type/attributeId → attestation record ID)
+  const [attestationIdsByType, setAttestationIdsByType] = useState<Record<string, string>>({});
+  const [endorsementIdsByAttribute, setEndorsementIdsByAttribute] = useState<Record<string, string>>({});
+
+  // Retraction in-progress tracking
+  const [retractingTypes, setRetractingTypes] = useState<Set<AttestationType>>(new Set());
+  const [retractingAttributes, setRetractingAttributes] = useState<Set<string>>(new Set());
 
   const currentUserId = session?.user?.id;
   const isSessionLoading = sessionStatus === "loading";
@@ -141,6 +151,9 @@ export function AttestationButtons({
           setEndorsementCounts(result.value.endorsementCountsByAttribute ?? {});
           setEndorsementUsers(result.value.endorsementUsersByAttribute ?? {});
           setViewerEndorsed(new Set(result.value.viewerEndorsedAttributes ?? []));
+          // ID maps for retraction
+          setAttestationIdsByType(result.value.viewerAttestationIds ?? {});
+          setEndorsementIdsByAttribute(result.value.viewerEndorsementIds ?? {});
         }
         setHasLoaded(true);
       })
@@ -184,11 +197,41 @@ export function AttestationButtons({
 
     if (result.ok) {
       setActiveTypes((prev) => { const next = new Set(prev); next.add(type); return next; });
+      if (result.id) setAttestationIdsByType((prev) => ({ ...prev, [type]: result.id! }));
+      setReceivedCounts((prev) => ({ ...prev, [type]: (prev[type] ?? 0) + 1 }));
     } else {
       sounds.error();
     }
 
     setSavingTypes((prev) => { const next = new Set(prev); next.delete(type); return next; });
+  };
+
+  /* ── Network retract handler ── */
+
+  const handleRetractClick = async (
+    e: React.MouseEvent,
+    type: AttestationType
+  ) => {
+    const attestationId = attestationIdsByType[type];
+    if (!attestationId || retractingTypes.has(type)) return;
+
+    // Snapshot for rollback
+    const prevCount = receivedCounts[type] ?? 0;
+
+    // Optimistic update
+    setRetractingTypes((prev) => { const next = new Set(prev); next.add(type); return next; });
+    setActiveTypes((prev) => { const next = new Set(prev); next.delete(type); return next; });
+    setReceivedCounts((prev) => ({ ...prev, [type]: Math.max(0, prevCount - 1) }));
+    setAttestationIdsByType((prev) => { const { [type]: _, ...rest } = prev; return rest; });
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    sounds.tap({ spatial: rect.left + rect.width / 2 });
+
+    await retractAttestation(attestationId);
+
+    // Note: retractAttestation in queue-provider handles its own rollback on failure
+    // and bumps lastChangedAt which triggers a status re-fetch above.
+    setRetractingTypes((prev) => { const next = new Set(prev); next.delete(type); return next; });
   };
 
   /* ── Endorsement handler ── */
@@ -225,7 +268,9 @@ export function AttestationButtons({
       attributeId,
     });
 
-    if (!result.ok) {
+    if (result.ok) {
+      if (result.id) setEndorsementIdsByAttribute((prev) => ({ ...prev, [attributeId]: result.id! }));
+    } else {
       // Rollback
       setViewerEndorsed((prev) => { const next = new Set(prev); next.delete(attributeId); return next; });
       setEndorsementCounts((prev) => ({ ...prev, [attributeId]: (prev[attributeId] ?? 0) - 1 }));
@@ -234,6 +279,32 @@ export function AttestationButtons({
 
     setSavingAttributes((prev) => { const next = new Set(prev); next.delete(attributeId); return next; });
   }, [currentUserId, savingAttributes, toUserId, toName, toHandle, toAvatarUrl, createAttestation, router]);
+
+  /* ── Endorsement retract handler ── */
+
+  const handleRetractEndorsement = useCallback(async (
+    e: React.MouseEvent,
+    attributeId: string,
+  ) => {
+    const attestationId = endorsementIdsByAttribute[attributeId];
+    if (!attestationId || retractingAttributes.has(attributeId)) return;
+
+    // Snapshot for rollback
+    const prevCount = endorsementCounts[attributeId] ?? 0;
+
+    // Optimistic update
+    setRetractingAttributes((prev) => { const next = new Set(prev); next.add(attributeId); return next; });
+    setViewerEndorsed((prev) => { const next = new Set(prev); next.delete(attributeId); return next; });
+    setEndorsementCounts((prev) => ({ ...prev, [attributeId]: Math.max(0, prevCount - 1) }));
+    setEndorsementIdsByAttribute((prev) => { const { [attributeId]: _, ...rest } = prev; return rest; });
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    sounds.tap({ spatial: rect.left + rect.width / 2 });
+
+    await retractAttestation(attestationId);
+
+    setRetractingAttributes((prev) => { const next = new Set(prev); next.delete(attributeId); return next; });
+  }, [endorsementIdsByAttribute, retractingAttributes, endorsementCounts, retractAttestation]);
 
   /* ── Endorsement mode render ── */
 
@@ -273,31 +344,73 @@ export function AttestationButtons({
             const endorsed = viewerEndorsed.has(attributeId);
             const endorsers = endorsementUsers[attributeId] ?? [];
             const isSaving = savingAttributes.has(attributeId);
+            const isRetracting = retractingAttributes.has(attributeId);
             const hasTooltipData = showTooltip && endorsers.length > 0;
 
             const buttonContent = (
               <>
                 {label}
                 {count > 0 && (
-                  <span className="text-xs text-foreground">+{count}</span>
+                  <span className="text-xs">+{count}</span>
                 )}
               </>
             );
 
-            const button = endorsed || isSaving || isSelf ? (
-              <Button key={attributeId} variant="secondary" size={size} disabled>
-                {buttonContent}
-              </Button>
-            ) : (
-              <Button
-                key={attributeId}
-                variant="default"
-                size={size}
-                onClick={(e) => handleEndorseClick(e, attributeId, endorsementType)}
-              >
-                {buttonContent}
-              </Button>
-            );
+            const button = (() => {
+              // Self profile — always read-only
+              if (isSelf) {
+                return (
+                  <Button key={attributeId} variant="secondary" size={size} disabled>
+                    {buttonContent}
+                  </Button>
+                );
+              }
+
+              // Retracting in progress
+              if (isRetracting) {
+                return (
+                  <Button key={attributeId} variant="secondary" size={size} disabled>
+                    {buttonContent}
+                  </Button>
+                );
+              }
+
+              // Already endorsed — secondary, hover shows destructive via CSS
+              if (endorsed) {
+                return (
+                  <Button
+                    key={attributeId}
+                    variant="secondary"
+                    size={size}
+                    className="opacity-50 hover:opacity-100 hover:bg-destructive/10 hover:text-destructive"
+                    onClick={(e) => handleRetractEndorsement(e, attributeId)}
+                  >
+                    {buttonContent}
+                  </Button>
+                );
+              }
+
+              // Saving (create in progress)
+              if (isSaving) {
+                return (
+                  <Button key={attributeId} variant="default" size={size} disabled>
+                    {buttonContent}
+                  </Button>
+                );
+              }
+
+              // Not endorsed — click to endorse
+              return (
+                <Button
+                  key={attributeId}
+                  variant="default"
+                  size={size}
+                  onClick={(e) => handleEndorseClick(e, attributeId, endorsementType)}
+                >
+                  {buttonContent}
+                </Button>
+              );
+            })();
 
             if (!hasTooltipData) return button;
 
@@ -333,6 +446,7 @@ export function AttestationButtons({
           const type = attestType.id as AttestationType;
           const isSaving = savingTypes.has(type);
           const isActive = activeTypes.has(type);
+          const isRetracting = retractingTypes.has(type);
           const count = showCounts ? (receivedCounts[type] ?? 0) : 0;
           const attestors = receivedUsers[type] ?? [];
           const totalCount = receivedCounts[type] ?? 0;
@@ -361,30 +475,57 @@ export function AttestationButtons({
             <>
               <AttestationBadge type={attestType.id} bare showEmoji={false} />
               {count > 0 && (
-                <span className="text-xs text-foreground">+{count}</span>
+                <span className="text-xs">+{count}</span>
               )}
             </>
           );
 
-          const button = isActive || isSaving ? (
-            <Button
-              key={attestType.id}
-              variant="secondary"
-              size={size}
-              disabled
-            >
-              {buttonContent}
-            </Button>
-          ) : (
-            <Button
-              key={attestType.id}
-              variant="default"
-              size={size}
-              onClick={(e) => handleAttestClick(e, type)}
-            >
-              {buttonContent}
-            </Button>
-          );
+          const button = (() => {
+            // Retracting in progress
+            if (isRetracting) {
+              return (
+                <Button key={attestType.id} variant="secondary" size={size} disabled>
+                  {buttonContent}
+                </Button>
+              );
+            }
+
+            // Already attested — secondary, hover shows destructive via CSS
+            if (isActive) {
+              return (
+                <Button
+                  key={attestType.id}
+                  variant="secondary"
+                  size={size}
+                  className="opacity-50 hover:opacity-100 hover:bg-destructive/10 hover:text-destructive"
+                  onClick={(e) => handleRetractClick(e, type)}
+                >
+                  {buttonContent}
+                </Button>
+              );
+            }
+
+            // Saving (create in progress)
+            if (isSaving) {
+              return (
+                <Button key={attestType.id} variant="default" size={size} disabled>
+                  {buttonContent}
+                </Button>
+              );
+            }
+
+            // Not attested — click to attest
+            return (
+              <Button
+                key={attestType.id}
+                variant="default"
+                size={size}
+                onClick={(e) => handleAttestClick(e, type)}
+              >
+                {buttonContent}
+              </Button>
+            );
+          })();
 
           if (!hasTooltip) return button;
 
@@ -417,9 +558,9 @@ export function AttestationButtons({
 
 function AttestorTooltip({ attestors, totalCount }: { attestors: AttestorInfo[]; totalCount: number }) {
   return (
-    <div className="flex flex-col gap-1.5 py-0.5">
+    <div className="flex flex-col gap-3 py-0.5">
       {attestors.map((u) => (
-        <div key={u.id} className="flex items-center gap-2">
+        <div key={u.id} className="flex items-center justify-between gap-4">
           <ProfileAvatar
             type="user"
             src={u.avatarUrl}

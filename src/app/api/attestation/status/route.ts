@@ -43,6 +43,10 @@ type AttestationStatusOk = {
   endorsementUsersByAttribute: Record<string, AttestorInfo[]>;
   /** Array of attributeIds the viewer has endorsed for this user */
   viewerEndorsedAttributes: string[];
+  /** Maps attestation type → viewer's attestation record ID (for retraction) */
+  viewerAttestationIds: Record<string, string>;
+  /** Maps attributeId → viewer's endorsement record ID (for retraction) */
+  viewerEndorsementIds: Record<string, string>;
 };
 
 /**
@@ -93,7 +97,7 @@ export const GET = api(QuerySchema, async (ctx) => {
             revokedAt: null,
             supersededById: null,
           },
-          select: { type: true, attributeId: true, mintedAt: true },
+          select: { id: true, type: true, attributeId: true, mintedAt: true },
         })
       : Promise.resolve([]),
   ]);
@@ -189,6 +193,8 @@ export const GET = api(QuerySchema, async (ctx) => {
       endorsementCountsByAttribute,
       endorsementUsersByAttribute,
       viewerEndorsedAttributes: [],
+      viewerAttestationIds: {},
+      viewerEndorsementIds: {},
     });
   }
 
@@ -204,6 +210,17 @@ export const GET = api(QuerySchema, async (ctx) => {
     .filter((r) => isEndorsement(r.type) && r.attributeId)
     .map((r) => r.attributeId!);
 
+  // Build ID maps for client-side retraction
+  const viewerAttestationIds: Record<string, string> = {};
+  const viewerEndorsementIds: Record<string, string> = {};
+  for (const r of viewerRows) {
+    if (isEndorsement(r.type) && r.attributeId) {
+      viewerEndorsementIds[r.attributeId] = r.id;
+    } else if (!isEndorsement(r.type)) {
+      viewerAttestationIds[r.type] = r.id;
+    }
+  }
+
   return okJson<AttestationStatusOk>({
     activeTypes,
     activeAttestations,
@@ -212,5 +229,7 @@ export const GET = api(QuerySchema, async (ctx) => {
     endorsementCountsByAttribute,
     endorsementUsersByAttribute,
     viewerEndorsedAttributes,
+    viewerAttestationIds,
+    viewerEndorsementIds,
   });
 }, { methods: ["GET"], auth: "public" });

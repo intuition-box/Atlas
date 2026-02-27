@@ -104,7 +104,7 @@ export function NavigationController({
                   "focus:outline-none focus-visible:ring-2 focus-visible:ring-primary",
                 )}
               >
-                <Logo className="size-4.5" />
+                <Logo className="size-6" />
                 <span className="text-xl font-semibold text-foreground">Atlas</span>
                 <ChevronDown className="size-3 text-muted-foreground" />
               </MenuTrigger>
