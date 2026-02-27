@@ -2,25 +2,13 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { useParams, useRouter } from "next/navigation"
+import { useRouter } from "next/navigation"
 
-import { apiGet } from "@/lib/api/client"
-import { parseApiError } from "@/lib/api/errors"
-import { normalizeHandle, validateHandle } from "@/lib/handle"
-import {
-  communityPath,
-  communityActivityPath,
-  communityMembersPath,
-  communityOrbitPath,
-  communityApplicationsPath,
-  communityBansPath,
-  communityPermissionsPath,
-  communitySettingsPath,
-  userPath,
-} from "@/lib/routes"
+import { communityPath, userPath } from "@/lib/routes"
 
 import { PageHeader } from "@/components/common/page-header"
 import { PageToolbar } from "@/components/common/page-toolbar"
+import { communityNav, communityAdminNav } from "../nav"
 import { ProfileAvatar } from "@/components/common/profile-avatar"
 import { useNavigationVisibility } from "@/components/navigation/navigation-provider"
 import { OrbitView } from "@/components/orbit/view"
@@ -28,57 +16,14 @@ import type { OrbitMember, OrbitCommunityData } from "@/components/orbit/types"
 
 import { OrbitSkeleton } from "@/components/orbit/orbit-skeleton"
 
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Button } from "@/components/ui/button"
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
+import { Skeleton } from "@/components/ui/skeleton"
 
-// === TYPES ===
-
-type CommunityGetResponse = {
-  mode: "full" | "splash"
-  community: {
-    id: string
-    handle: string
-    name: string
-    description: string | null
-    avatarUrl: string | null
-    createdAt: string
-    isMembershipOpen: boolean
-    isPublicDirectory: boolean
-  }
-  memberCount: number
-  canViewDirectory: boolean
-  isAdmin: boolean
-  viewerMembership: {
-    status: string
-    role: string
-  } | null
-  orbitMembers: Array<{
-    id: string
-    handle: string | null
-    name: string | null
-    avatarUrl: string | null
-    image: string | null
-    orbitLevel: string
-    loveScore: number
-    reachScore: number
-    gravityScore: number
-    headline: string | null
-    tags: string[] | null
-    lastActiveAt: string | null
-    joinedAt: string | null
-  }>
-}
-
-type LoadState =
-  | { status: "idle" | "loading" }
-  | { status: "error"; message: string }
-  | { status: "not-found" }
-  | { status: "ready"; data: CommunityGetResponse }
+import { useCommunity, type CommunityData } from "../community-provider"
 
 // === HELPERS ===
 
-function toOrbitMembers(raw: CommunityGetResponse["orbitMembers"]): OrbitMember[] {
+function toOrbitMembers(raw: CommunityData["orbitMembers"]): OrbitMember[] {
   return raw.map((m) => ({
     id: m.id,
     handle: m.handle,
@@ -87,16 +32,16 @@ function toOrbitMembers(raw: CommunityGetResponse["orbitMembers"]): OrbitMember[
     headline: m.headline,
     tags: m.tags ?? [],
     orbitLevel: (m.orbitLevel as OrbitMember["orbitLevel"]) || "EXPLORER",
-    loveScore: m.loveScore,
-    reachScore: m.reachScore,
-    gravityScore: m.gravityScore,
+    loveScore: m.loveScore ?? 0,
+    reachScore: m.reachScore ?? 0,
+    gravityScore: m.gravityScore ?? 0,
     lastActiveAt: m.lastActiveAt,
     joinedAt: m.joinedAt,
   }))
 }
 
 function toCommunityData(
-  data: CommunityGetResponse,
+  data: CommunityData,
 ): OrbitCommunityData {
   return {
     id: data.community.id,
@@ -114,78 +59,17 @@ function toCommunityData(
 
 // === PAGE ===
 
-// Check for prefetched data from universe zoom (set on window before navigation)
-function consumePrefetch(handle: string): CommunityGetResponse | null {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const w = window as any
-  const pf = w.__orbitPrefetch as { handle: string; data: CommunityGetResponse } | undefined
-  if (pf?.handle === handle) {
-    delete w.__orbitPrefetch
-    return pf.data
-  }
-  delete w.__orbitPrefetch
-  return null
-}
-
 export default function CommunityOrbitPage() {
   const router = useRouter()
-  const params = useParams<{ handle: string }>()
-  const rawHandle = String(params?.handle ?? "")
-  const handle = React.useMemo(() => normalizeHandle(rawHandle), [rawHandle])
+  const ctx = useCommunity()
   const { isVisible: navVisible } = useNavigationVisibility()
 
-  const [state, setState] = React.useState<LoadState>(() => {
-    const prefetched = consumePrefetch(handle)
-    if (prefetched) return { status: "ready", data: prefetched }
-    return { status: "idle" }
-  })
-
-  const hasPrefetch = state.status === "ready"
-
+  // Hide the shared layout header — orbit has its own floating pinned header
   React.useEffect(() => {
-    // Skip fetch if we already have data from prefetch
-    if (hasPrefetch) return
-
-    const parsed = validateHandle(handle)
-    if (!parsed.ok) {
-      setState({ status: "not-found" })
-      return
-    }
-
-    const controller = new AbortController()
-    setState({ status: "loading" })
-
-    void (async () => {
-      const result = await apiGet<CommunityGetResponse>(
-        "/api/community/get",
-        { handle },
-        { signal: controller.signal },
-      )
-
-      if (controller.signal.aborted) return
-
-      if (result.ok) {
-        setState({ status: "ready", data: result.value })
-        return
-      }
-
-      if (result.error && typeof result.error === "object" && "status" in result.error) {
-        const parsedErr = parseApiError(result.error)
-        if (parsedErr.status === 404) {
-          setState({ status: "not-found" })
-          return
-        }
-        setState({ status: "error", message: parsedErr.formError || "Something went wrong." })
-        return
-      }
-
-      const parsedErr = parseApiError(result.error)
-      setState({ status: "error", message: parsedErr.formError || "Something went wrong." })
-    })()
-
-    return () => controller.abort()
+    ctx.setHeaderHidden(true)
+    return () => ctx.setHeaderHidden(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [handle])
+  }, [])
 
   const handleMemberClick = React.useCallback(
     (memberIdOrHandle: string) => {
@@ -194,82 +78,42 @@ export default function CommunityOrbitPage() {
     [router],
   )
 
-  // --- NOT FOUND ---
-
-  if (state.status === "not-found") {
-    return (
-      <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
-        <Alert>
-          <AlertDescription>We couldn&apos;t find @{handle}.</AlertDescription>
-        </Alert>
-      </div>
-    )
-  }
-
-  // --- ERROR ---
-
-  if (state.status === "error") {
-    return (
-      <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
-        <Alert variant="destructive">
-          <AlertDescription>{state.message}</AlertDescription>
-        </Alert>
-        <div>
-          <Button type="button" variant="secondary" onClick={() => setState({ status: "idle" })}>
-            Retry
-          </Button>
-        </div>
-      </div>
-    )
-  }
-
-  // --- LOADING / READY ---
-  // Full-screen immersive layout: canvas fills viewport
-  // Center avatar is the entry point — clicking it opens the community popover
-
-  const isReady = state.status === "ready"
-  const data = isReady ? state.data : null
-  const community = data?.community
-  const handleLabel = community?.handle ?? handle
-  const avatarSrc = community?.avatarUrl ?? ""
+  const isReady = ctx.status === "ready"
+  const data = ctx.data
+  const community = ctx.community
+  const handleLabel = community?.handle ?? ctx.handle
+  const displayName = community?.name ?? ""
+  const avatarUrl = community?.avatarUrl ?? ""
   const members = data ? toOrbitMembers(data.orbitMembers) : []
-  const canViewDirectory = data?.canViewDirectory ?? false
+  const canViewDirectory = ctx.canViewDirectory
   const communityData = data ? toCommunityData(data) : undefined
-  const isAdmin = data?.isAdmin ?? false
+  const isOrbitLoading = ctx.status === "loading"
 
   return (
     <>
       {/* Page header — pinned overlay, hidden when nav is toggled off */}
-      {isReady && navVisible && (
+      {navVisible && (
         <div className="pointer-events-none fixed inset-x-0 top-0 z-30 flex justify-center px-4 pt-1">
-          <div className="pointer-events-auto w-full max-w-3xl">
+          <div className="pointer-events-auto w-full max-w-4xl">
             <PageHeader
               leading={
-                <ProfileAvatar
-                  type="community"
-                  src={avatarSrc}
-                  name={community?.name ?? ""}
-                  className="h-12 w-12"
-                />
+                avatarUrl
+                  ? <ProfileAvatar
+                      type="community"
+                      src={avatarUrl}
+                      name={displayName}
+                      className="h-12 w-12"
+                    />
+                  : <Skeleton className="size-12 rounded-full" />
               }
-              title={community?.name ?? ""}
+              title={displayName}
               description={`@${handleLabel}`}
               sticky
               pinned
               actions={
                 <PageToolbar
-                  nav={[
-                    { label: "Profile", href: communityPath(handleLabel) },
-                    { label: "Orbit", href: communityOrbitPath(handleLabel) },
-                    { label: "Members", href: communityMembersPath(handleLabel) },
-                    { label: "Activity", href: communityActivityPath(handleLabel) },
-                  ]}
-                  overflow={isAdmin ? [
-                    { label: "Applications", href: communityApplicationsPath(handleLabel) },
-                    { label: "Bans", href: communityBansPath(handleLabel) },
-                    { label: "Permissions", href: communityPermissionsPath(handleLabel) },
-                    { label: "Settings", href: communitySettingsPath(handleLabel) },
-                  ] : undefined}
+                  nav={communityNav(handleLabel)}
+                  overflow={ctx.isAdmin ? communityAdminNav(handleLabel) : undefined}
                 />
               }
               actionsAsFormActions={false}
@@ -282,7 +126,7 @@ export default function CommunityOrbitPage() {
       {isReady && canViewDirectory && members.length > 0 ? (
         <OrbitView
           members={members}
-          centerLogoUrl={avatarSrc}
+          centerLogoUrl={avatarUrl}
           centerName={community?.name}
           isMembershipOpen={community?.isMembershipOpen ?? false}
           isPublicDirectory={community?.isPublicDirectory ?? false}
@@ -293,7 +137,7 @@ export default function CommunityOrbitPage() {
       ) : null}
 
       {/* Loading skeleton — only for direct navigation */}
-      {state.status === "loading" ? (
+      {isOrbitLoading ? (
         <OrbitSkeleton className="pointer-events-none absolute inset-0" />
       ) : null}
 

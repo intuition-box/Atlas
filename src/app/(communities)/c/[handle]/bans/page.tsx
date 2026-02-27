@@ -2,31 +2,19 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { useParams, useRouter } from "next/navigation"
+import { useRouter } from "next/navigation"
 
 import { apiGet, apiPost } from "@/lib/api/client"
-import { parseApiError } from "@/lib/api/errors"
-import {
-  ROUTES,
-  userPath,
-  communityPath,
-  communityActivityPath,
-  communityMembersPath,
-  communityOrbitPath,
-  communityApplicationsPath,
-  communityBansPath,
-  communityPermissionsPath,
-  communitySettingsPath,
-} from "@/lib/routes"
+import { communityPath, userPath } from "@/lib/routes"
 
 import { ListFeed, ListFeedSkeleton } from "@/components/common/list-feed"
-import { PageHeader } from "@/components/common/page-header"
-import { PageToolbar } from "@/components/common/page-toolbar"
 import { ProfileAvatar } from "@/components/common/profile-avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
+
+import { useCommunity } from "../community-provider"
 
 // === TYPES ===
 
@@ -44,13 +32,6 @@ type BannedMember = {
   updatedAt?: string | null
   bannedByHandle?: string | null
   user: MemberProfile
-}
-
-type CommunityInfo = {
-  id: string
-  handle: string
-  name: string
-  avatarUrl?: string | null
 }
 
 type ApiMemberItem = {
@@ -94,37 +75,6 @@ function normalizeBannedPayload(raw: unknown): BannedMember[] {
       image: item.user.image,
     },
   }))
-}
-
-// === SKELETON ===
-
-function BansSkeleton() {
-  return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
-      <div className="w-full p-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex min-w-0 items-start gap-3">
-          <Skeleton className="size-12 rounded-full shrink-0" />
-          <div className="flex flex-col gap-1.5">
-            <Skeleton className="h-7 w-48" />
-            <Skeleton className="h-3 w-24" />
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Skeleton className="h-9 w-64 rounded-4xl" />
-        </div>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <Skeleton className="h-5 w-40" />
-          <Skeleton className="h-4 w-72" />
-        </CardHeader>
-        <CardContent>
-          <ListFeedSkeleton rows={4} />
-        </CardContent>
-      </Card>
-    </div>
-  )
 }
 
 // === SUB-COMPONENTS ===
@@ -178,47 +128,27 @@ function BannedMemberRow({
 
 export default function CommunityBansPage() {
   const router = useRouter()
-  const params = useParams<{ handle: string }>()
-  const handle = String(params?.handle || "")
+  const ctx = useCommunity()
+  const handle = ctx.handle
 
-  const [community, setCommunity] = React.useState<CommunityInfo | null>(null)
   const [members, setMembers] = React.useState<BannedMember[]>([])
   const [loading, setLoading] = React.useState(true)
   const [unbanningId, setUnbanningId] = React.useState<string | null>(null)
 
+  // Admin gate
   React.useEffect(() => {
-    if (!handle) return
+    if (ctx.status === "ready" && !ctx.isAdmin) {
+      router.replace(communityPath(handle))
+    }
+  }, [ctx.status, ctx.isAdmin, handle, router])
+
+  // Fetch banned members once community data is ready
+  React.useEffect(() => {
+    if (ctx.status !== "ready" || !ctx.isAdmin) return
 
     const ac = new AbortController()
 
     void (async () => {
-      // First: check admin access via community/get
-      const communityRes = await apiGet<{
-        community: CommunityInfo
-        isAdmin: boolean
-      }>("/api/community/get", { handle }, { signal: ac.signal })
-
-      if (ac.signal.aborted) return
-
-      if (!communityRes.ok) {
-        const parsed = parseApiError(communityRes.error)
-        if (parsed.status === 401) {
-          router.replace(ROUTES.signIn)
-          return
-        }
-        router.replace(communityPath(handle))
-        return
-      }
-
-      // Gate: redirect non-admins
-      if (!communityRes.value.isAdmin) {
-        router.replace(communityPath(handle))
-        return
-      }
-
-      setCommunity(communityRes.value.community)
-
-      // Then: fetch banned members
       const res = await apiGet<unknown>("/api/membership/list", {
         handle,
         status: "BANNED",
@@ -227,17 +157,14 @@ export default function CommunityBansPage() {
 
       if (ac.signal.aborted) return
 
-      if (!res.ok) {
-        setLoading(false)
-        return
+      if (res.ok) {
+        setMembers(normalizeBannedPayload(res.value))
       }
-
-      setMembers(normalizeBannedPayload(res.value))
       setLoading(false)
     })()
 
     return () => { ac.abort() }
-  }, [handle, router])
+  }, [ctx.status, ctx.isAdmin, handle])
 
   async function handleUnban(membershipId: string) {
     setUnbanningId(membershipId)
@@ -254,65 +181,43 @@ export default function CommunityBansPage() {
     }
   }
 
-  if (!handle) return null
+  const isPageLoading = ctx.status === "loading" || loading
 
-  if (loading) {
-    return <BansSkeleton />
+  if (isPageLoading) {
+    return (
+      <Card>
+        <CardHeader>
+          <Skeleton className="h-5 w-40" />
+          <Skeleton className="h-4 w-72" />
+        </CardHeader>
+        <CardContent>
+          <ListFeedSkeleton rows={4} />
+        </CardContent>
+      </Card>
+    )
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
-      <PageHeader
-        leading={
-          <ProfileAvatar
-            type="community"
-            src={community?.avatarUrl}
-            name={community?.name || handle}
-            className="h-12 w-12"
-          />
-        }
-        title="Bans"
-        description={`@${handle}`}
-        actionsAsFormActions={false}
-        actions={
-          <PageToolbar
-            nav={[
-              { label: "Profile", href: communityPath(handle) },
-              { label: "Orbit", href: communityOrbitPath(handle) },
-              { label: "Members", href: communityMembersPath(handle) },
-              { label: "Activity", href: communityActivityPath(handle) },
-            ]}
-            overflow={[
-              { label: "Applications", href: communityApplicationsPath(handle) },
-              { label: "Bans", href: communityBansPath(handle) },
-              { label: "Permissions", href: communityPermissionsPath(handle) },
-              { label: "Settings", href: communitySettingsPath(handle) },
-            ]}
-          />
-        }
-      />
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Banned members</CardTitle>
-          <CardDescription>Members who have been banned from this community.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <ListFeed<BannedMember>
-            items={members}
-            keyExtractor={(m) => m.membershipId}
-            renderItem={(m) => (
-              <BannedMemberRow
-                member={m}
-                onUnban={handleUnban}
-                unbanning={unbanningId === m.membershipId}
-              />
-            )}
-            loading={false}
-            emptyMessage="No banned members."
-          />
-        </CardContent>
-      </Card>
-    </div>
+    <Card>
+      <CardHeader>
+        <CardTitle>Banned members</CardTitle>
+        <CardDescription>Members who have been banned from this community.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <ListFeed<BannedMember>
+          items={members}
+          keyExtractor={(m) => m.membershipId}
+          renderItem={(m) => (
+            <BannedMemberRow
+              member={m}
+              onUnban={handleUnban}
+              unbanning={unbanningId === m.membershipId}
+            />
+          )}
+          loading={false}
+          emptyMessage="No banned members."
+        />
+      </CardContent>
+    </Card>
   )
 }

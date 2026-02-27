@@ -2,24 +2,14 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { useParams, useRouter } from "next/navigation"
-import { LayoutGrid, List, Lock, MoreVertical } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { LayoutGrid, List, Lock, MoreVertical, Search } from "lucide-react"
 import { useSession } from "next-auth/react"
 
 import { cn } from "@/lib/utils"
 import { apiGet, apiPost } from "@/lib/api/client"
-import { parseApiError } from "@/lib/api/errors"
-import { normalizeHandle, validateHandle } from "@/lib/handle"
 import {
   communityJoinPath,
-  communityActivityPath,
-  communityMembersPath,
-  communityOrbitPath,
-  communityApplicationsPath,
-  communityBansPath,
-  communityPermissionsPath,
-  communitySettingsPath,
-  communityPath,
   userPath,
   ROUTES,
 } from "@/lib/routes"
@@ -28,10 +18,7 @@ import { LANGUAGE_LIST as LANGUAGES } from "@/config/languages"
 import { SKILL_LIST as SKILLS, TOOL_LIST as TOOLS } from "@/lib/attestations/definitions"
 
 import { ListFeed } from "@/components/common/list-feed"
-import { PageHeader } from "@/components/common/page-header"
-import { PageToolbar } from "@/components/common/page-toolbar"
 import { ProfileAvatar } from "@/components/common/profile-avatar"
-import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import {
   AlertDialog,
@@ -71,53 +58,14 @@ import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 
+import { useCommunity } from "../community-provider"
+
 // === CONSTANTS ===
 
 const PAGE_SIZE = 50
 const DEBOUNCE_DELAY = 300
 
 // === TYPES ===
-
-type CommunityGetResponse = {
-  mode: "full" | "splash"
-  community: {
-    id: string
-    handle: string
-    name: string
-    description: string | null
-    avatarUrl: string | null
-    createdAt: string
-    isMembershipOpen: boolean
-    isPublicDirectory: boolean
-    discordUrl: string | null
-    xUrl: string | null
-    telegramUrl: string | null
-    githubUrl: string | null
-    websiteUrl: string | null
-  }
-  memberCount: number
-  canViewDirectory: boolean
-  isAdmin: boolean
-  viewerMembership: {
-    status: string
-    role: string
-  } | null
-  orbitMembers: Array<{
-    id: string
-    handle: string | null
-    name: string | null
-    avatarUrl: string | null
-    image: string | null
-    orbitLevel: string
-    headline: string | null
-  }>
-}
-
-type CommunityLoadState =
-  | { status: "idle" | "loading" }
-  | { status: "error"; message: string }
-  | { status: "not-found" }
-  | { status: "ready"; data: CommunityGetResponse }
 
 type MemberRole = "OWNER" | "ADMIN" | "MODERATOR" | "MEMBER"
 
@@ -1272,7 +1220,7 @@ function JoinBanner({ name, handle, pending }: { name: string; handle: string; p
       >
         <div
           className={cn(
-            "mx-auto flex w-full max-w-3xl items-center justify-center",
+            "mx-auto flex w-full max-w-4xl items-center justify-center",
             "rounded-b-2xl border-x border-b border-border/60",
             "bg-gradient-to-br from-card/95 via-card/90 to-primary/10",
             "backdrop-blur-md shadow-md",
@@ -1291,56 +1239,10 @@ function JoinBanner({ name, handle, pending }: { name: string; handle: string; p
 // === PAGE ===
 
 export default function CommunityMembersPage() {
-  const router = useRouter()
   const { data: session } = useSession()
   const viewerUserId = session?.user?.id ?? null
-  const params = useParams<{ handle: string }>()
-  const rawHandle = String(params?.handle ?? "")
-  const handle = React.useMemo(() => normalizeHandle(rawHandle), [rawHandle])
-
-  // --- Community data ---
-  const [state, setState] = React.useState<CommunityLoadState>({ status: "idle" })
-
-  React.useEffect(() => {
-    const parsed = validateHandle(handle)
-    if (!parsed.ok) {
-      setState({ status: "not-found" })
-      return
-    }
-
-    const controller = new AbortController()
-    setState({ status: "loading" })
-
-    void (async () => {
-      const result = await apiGet<CommunityGetResponse>(
-        "/api/community/get",
-        { handle },
-        { signal: controller.signal },
-      )
-
-      if (controller.signal.aborted) return
-
-      if (result.ok) {
-        setState({ status: "ready", data: result.value })
-        return
-      }
-
-      if (result.error && typeof result.error === "object" && "status" in result.error) {
-        const parsedErr = parseApiError(result.error)
-        if (parsedErr.status === 404) {
-          setState({ status: "not-found" })
-          return
-        }
-        setState({ status: "error", message: parsedErr.formError || "Something went wrong." })
-        return
-      }
-
-      const parsedErr = parseApiError(result.error)
-      setState({ status: "error", message: parsedErr.formError || "Something went wrong." })
-    })()
-
-    return () => controller.abort()
-  }, [handle])
+  const ctx = useCommunity()
+  const handle = ctx.handle
 
   // --- Members data ---
   const [view, setView] = React.useState<"cards" | "list">(() => {
@@ -1383,7 +1285,7 @@ export default function CommunityMembersPage() {
     q: "", role: "", country: "", skills: [], tools: [], orbitLevel: "", orbitLevelType: "", language: "",
   })
 
-  const canViewDirectory = state.status === "ready" && state.data.canViewDirectory
+  const canViewDirectory = ctx.status === "ready" && ctx.canViewDirectory
   const { data: membersData, items: memberItems, loading: membersLoading, loadingMore, error: membersError } =
     useMembersData(canViewDirectory ? handle : "", filters, cursor)
 
@@ -1468,117 +1370,46 @@ export default function CommunityMembersPage() {
     })
   }, [memberItems, orbitOverrides, roleOverrides, bannedMemberIds])
 
-  // --- SKELETON ---
+  // Inject toolbar slot — Filters + ViewSwitch
+  React.useEffect(() => {
+    if (!canViewDirectory) {
+      ctx.setToolbarSlot(null)
+      return
+    }
+    ctx.setToolbarSlot({
+      actions: [
+        { label: "Filters", icon: Search, active: isFiltersOpen, onClick: () => setIsFiltersOpen((v) => !v) },
+      ],
+      viewSwitch: {
+        value: view,
+        onChange: (v) => setView(v as "cards" | "list"),
+        options: [
+          { value: "cards", icon: LayoutGrid, label: "Cards" },
+          { value: "list", icon: List, label: "List" },
+        ],
+      },
+    })
+    return () => ctx.setToolbarSlot(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canViewDirectory, isFiltersOpen, view])
 
-  if (state.status === "loading" || state.status === "idle") {
-    return (
-      <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
-        {/* PageHeader skeleton */}
-        <div className="w-full p-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex min-w-0 items-start gap-3">
-            <Skeleton className="size-12 rounded-full shrink-0" />
-            <div className="flex flex-col gap-1.5">
-              <Skeleton className="h-6 w-40" />
-              <Skeleton className="h-3.5 w-20" />
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Skeleton className="h-9 w-64 rounded-4xl" />
-          </div>
-        </div>
+  // --- LOADING / READY ---
 
-        {/* Member cards skeleton grid */}
-        <MembersLoadingState />
-      </div>
-    )
+  const isPageLoading = ctx.status === "loading"
+  const community = ctx.community
+  const isAdmin = ctx.isAdmin
+  const viewerMembership = ctx.viewerMembership
+
+  const handleLabel = community?.handle ?? handle
+
+  if (isPageLoading) {
+    return <MembersLoadingState />
   }
-
-  // --- NOT FOUND ---
-
-  if (state.status === "not-found") {
-    return (
-      <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
-        <Alert>
-          <AlertDescription>We couldn&apos;t find @{handle}.</AlertDescription>
-        </Alert>
-      </div>
-    )
-  }
-
-  // --- ERROR ---
-
-  if (state.status === "error") {
-    return (
-      <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
-        <Alert variant="destructive">
-          <AlertDescription>{state.message}</AlertDescription>
-        </Alert>
-        <div>
-          <Button type="button" variant="secondary" onClick={() => setState({ status: "idle" })}>
-            Retry
-          </Button>
-        </div>
-      </div>
-    )
-  }
-
-  if (state.status !== "ready") return null
-
-  // --- READY ---
-
-  const { community, isAdmin, viewerMembership } = state.data
-
-  const handleLabel = community.handle ?? handle
-  const avatarSrc = community.avatarUrl ?? ""
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
-      <PageHeader
-        leading={
-          <ProfileAvatar
-            type="community"
-            src={avatarSrc}
-            name={community.name}
-            className="h-12 w-12"
-          />
-        }
-        title="Members"
-        description={`@${handleLabel}`}
-        sticky
-        actions={
-          <PageToolbar
-            actions={[
-              ...(canViewDirectory
-                ? [{ label: "Filters", active: isFiltersOpen, onClick: () => setIsFiltersOpen((v) => !v) }]
-                : []),
-            ]}
-            viewSwitch={canViewDirectory ? {
-              value: view,
-              onChange: (v) => setView(v as "cards" | "list"),
-              options: [
-                { value: "cards", icon: LayoutGrid, label: "Cards" },
-                { value: "list", icon: List, label: "List" },
-              ],
-            } : undefined}
-            nav={[
-              { label: "Profile", href: communityPath(handleLabel) },
-              { label: "Orbit", href: communityOrbitPath(handleLabel) },
-              { label: "Members", href: communityMembersPath(handleLabel) },
-              { label: "Activity", href: communityActivityPath(handleLabel) },
-            ]}
-            overflow={isAdmin ? [
-              { label: "Applications", href: communityApplicationsPath(handleLabel) },
-              { label: "Bans", href: communityBansPath(handleLabel) },
-              { label: "Permissions", href: communityPermissionsPath(handleLabel) },
-              { label: "Settings", href: communitySettingsPath(handleLabel) },
-            ] : undefined}
-          />
-        }
-        actionsAsFormActions={false}
-      />
-
+    <>
       {/* Join banner for non-members when membership is open */}
-      {viewerMembership?.status !== "APPROVED" && community.isMembershipOpen ? (
+      {viewerMembership?.status !== "APPROVED" && community?.isMembershipOpen ? (
         <JoinBanner name={community.name} handle={handleLabel} pending={viewerMembership?.status === "PENDING"} />
       ) : null}
 
@@ -1646,6 +1477,6 @@ export default function CommunityMembersPage() {
           </CardContent>
         </Card>
       )}
-    </div>
+    </>
   )
 }

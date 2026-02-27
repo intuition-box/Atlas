@@ -3,13 +3,12 @@
 import * as React from "react"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
+import { Search } from "lucide-react"
 import { apiGet, apiPost } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
-import { ROUTES, userPath, communityPath, communityActivityPath, communityMembersPath, communityOrbitPath, communityApplicationsPath, communityBansPath, communityPermissionsPath, communitySettingsPath } from "@/lib/routes"
+import { ROUTES, communityPath, userPath } from "@/lib/routes"
 
 import { ListFeed, ListFeedSkeleton } from "@/components/common/list-feed"
-import { PageHeader } from "@/components/common/page-header"
-import { PageToolbar } from "@/components/common/page-toolbar"
 import { ProfileAvatar } from "@/components/common/profile-avatar"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -26,6 +25,8 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
+
+import { useCommunity } from "../community-provider"
 
 // === TYPES ===
 
@@ -300,39 +301,6 @@ function useApplicationDialog() {
     closeDialog,
     mountedRef,
   }
-}
-
-// === SKELETON ===
-
-function ApplicationsSkeleton() {
-  return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
-      {/* PageHeader skeleton */}
-      <div className="w-full p-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex min-w-0 items-start gap-3">
-          <Skeleton className="size-12 rounded-full shrink-0" />
-          <div className="flex flex-col gap-1.5">
-            <Skeleton className="h-7 w-48" />
-            <Skeleton className="h-3 w-24" />
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Skeleton className="h-9 w-64 rounded-4xl" />
-        </div>
-      </div>
-
-      {/* Applications list skeleton */}
-      <Card>
-        <CardHeader>
-          <Skeleton className="h-5 w-40" />
-          <Skeleton className="h-4 w-72" />
-        </CardHeader>
-        <CardContent>
-          <ListFeedSkeleton rows={6} />
-        </CardContent>
-      </Card>
-    </div>
-  )
 }
 
 // === SUB-COMPONENTS ===
@@ -743,47 +711,42 @@ export default function CommunityApplicationsPage() {
     setDialogError(parsed.formError || "Couldn't update application.")
   }
 
+  const ctx = useCommunity()
+
+  // Inject toolbar slot — Filters button
+  const isReady = !loading && !!data
+  React.useEffect(() => {
+    if (!isReady) {
+      ctx.setToolbarSlot(null)
+      return
+    }
+    ctx.setToolbarSlot({
+      actions: [
+        { label: "Filters", icon: Search, active: isFiltersOpen, onClick: () => setIsFiltersOpen((v) => !v) },
+      ],
+    })
+    return () => ctx.setToolbarSlot(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isReady, isFiltersOpen])
+
   if (!handle) return null
 
-  if (loading || !data) {
-    return <ApplicationsSkeleton />
+  if (!isReady) {
+    return (
+      <Card>
+        <CardHeader>
+          <Skeleton className="h-5 w-40" />
+          <Skeleton className="h-4 w-72" />
+        </CardHeader>
+        <CardContent>
+          <ListFeedSkeleton rows={6} />
+        </CardContent>
+      </Card>
+    )
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
-      <PageHeader
-        leading={
-          <ProfileAvatar
-            type="community"
-            src={data?.community?.avatarUrl}
-            name={data?.community?.name}
-            className="h-12 w-12"
-          />
-        }
-        title="Applications"
-        description={`@${handle}`}
-        actionsAsFormActions={false}
-        actions={
-          <PageToolbar
-            actions={[
-              { label: "Filters", active: isFiltersOpen, onClick: () => setIsFiltersOpen((v) => !v) },
-            ]}
-            nav={[
-              { label: "Profile", href: communityPath(handle) },
-              { label: "Orbit", href: communityOrbitPath(handle) },
-              { label: "Members", href: communityMembersPath(handle) },
-              { label: "Activity", href: communityActivityPath(handle) },
-            ]}
-            overflow={[
-              { label: "Applications", href: communityApplicationsPath(handle) },
-              { label: "Bans", href: communityBansPath(handle) },
-              { label: "Permissions", href: communityPermissionsPath(handle) },
-              { label: "Settings", href: communitySettingsPath(handle) },
-            ]}
-          />
-        }
-      />
-
+    <>
       {isFiltersOpen && (
         <FiltersPanel
           filters={filters}
@@ -827,6 +790,6 @@ export default function CommunityApplicationsPage() {
         onClose={closeDialog}
         onDecide={handleDecide}
       />
-    </div>
+    </>
   )
 }

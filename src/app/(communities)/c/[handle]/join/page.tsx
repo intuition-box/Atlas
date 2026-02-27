@@ -581,7 +581,7 @@ export default function CommunityJoinPage() {
   // Don't render while checking session
   if (sessionStatus === "loading" || sessionStatus === "unauthenticated") {
     return (
-      <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
+      <>
         <div className="w-full flex flex-wrap items-center gap-3 p-5">
           <Skeleton className="size-12 rounded-full shrink-0" />
           <div className="flex flex-col gap-1.5">
@@ -599,113 +599,118 @@ export default function CommunityJoinPage() {
             <Skeleton className="h-10 w-full" />
           </CardContent>
         </Card>
-      </div>
+      </>
+    )
+  }
+
+  if (loading) {
+    return (
+      <>
+        <div className="w-full flex flex-wrap items-center gap-3 p-5">
+          <Skeleton className="size-12 rounded-full shrink-0" />
+          <div className="flex flex-col gap-1.5">
+            <Skeleton className="h-6 w-40" />
+            <Skeleton className="h-3.5 w-20" />
+          </div>
+        </div>
+        <Card>
+          <CardContent className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1">
+              <Skeleton className="h-4 w-32" />
+              <Skeleton className="h-3 w-56" />
+            </div>
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+          </CardContent>
+        </Card>
+      </>
+    )
+  }
+
+  if (!community) {
+    return (
+      <>
+        <PageHeader title="Join" description={`@${communityHandle}`} />
+        <Alert>
+          <AlertDescription>This community doesn't exist or is not available.</AlertDescription>
+        </Alert>
+      </>
+    )
+  }
+
+  if (!community.isPublicDirectory) {
+    return (
+      <>
+        <PageHeader
+          leading={<ProfileAvatar type="community" src={community.avatarUrl} name={communityName} className="h-12 w-12" />}
+          title="Join"
+          description={`@${communityHandle}`}
+        />
+        <Alert>
+          <AlertDescription>Join requests are only available for communities listed publicly.</AlertDescription>
+        </Alert>
+      </>
+    )
+  }
+
+  if (!community.isMembershipOpen) {
+    return (
+      <>
+        <PageHeader
+          leading={<ProfileAvatar type="community" src={community.avatarUrl} name={communityName} className="h-12 w-12" />}
+          title="Join"
+          description={`@${communityHandle}`}
+        />
+        <Alert>
+          <AlertDescription>This community is not accepting new members right now.</AlertDescription>
+        </Alert>
+      </>
+    )
+  }
+
+  if (!canJoin && statusBanner) {
+    return (
+      <>
+        <PageHeader
+          leading={<ProfileAvatar type="community" src={community.avatarUrl} name={communityName} className="h-12 w-12" />}
+          title="Join"
+          description={`@${communityHandle}`}
+        />
+        <StatusBannerAlert banner={statusBanner} />
+      </>
     )
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
-      {loading ? (
-        <>
-          <div className="w-full flex flex-wrap items-center gap-3 p-5">
-            <Skeleton className="size-12 rounded-full shrink-0" />
-            <div className="flex flex-col gap-1.5">
-              <Skeleton className="h-6 w-40" />
-              <Skeleton className="h-3.5 w-20" />
-            </div>
-          </div>
-          <Card>
-            <CardContent className="flex flex-col gap-4">
-              <div className="flex flex-col gap-1">
-                <Skeleton className="h-4 w-32" />
-                <Skeleton className="h-3 w-56" />
-              </div>
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-            </CardContent>
-          </Card>
-        </>
-      ) : !community ? (
-        <>
-          <PageHeader
-            title="Join"
-            description={`@${communityHandle}`}
-          />
-          <Alert>
-            <AlertDescription>This community doesn't exist or is not available.</AlertDescription>
-          </Alert>
-        </>
-      ) : !community.isPublicDirectory ? (
-        <>
-          <PageHeader
-            leading={
-              <ProfileAvatar type="community" src={community.avatarUrl} name={communityName} className="h-12 w-12" />
-            }
-            title="Join"
-            description={`@${communityHandle}`}
-          />
-          <Alert>
-            <AlertDescription>Join requests are only available for communities listed publicly.</AlertDescription>
-          </Alert>
-        </>
-      ) : !community.isMembershipOpen ? (
-        <>
-          <PageHeader
-            leading={
-              <ProfileAvatar type="community" src={community.avatarUrl} name={communityName} className="h-12 w-12" />
-            }
-            title="Join"
-            description={`@${communityHandle}`}
-          />
-          <Alert>
-            <AlertDescription>This community is not accepting new members right now.</AlertDescription>
-          </Alert>
-        </>
-      ) : !canJoin && statusBanner ? (
-        <>
-          <PageHeader
-            leading={
-              <ProfileAvatar type="community" src={community.avatarUrl} name={communityName} className="h-12 w-12" />
-            }
-            title="Join"
-            description={`@${communityHandle}`}
-          />
-          <StatusBannerAlert banner={statusBanner} />
-        </>
-      ) : (
-        <Form form={form} onSubmit={handleSubmit} className="gap-10">
-          <PageHeader
-            leading={
-              <ProfileAvatar type="community" src={community.avatarUrl} name={communityName} className="h-12 w-12" />
-            }
-            title="Join"
-            description={`@${communityHandle}`}
-            sticky
-            actions={
-              <FormActions className="flex items-center gap-3">
-                <Button type="submit" variant="solid" disabled={!canJoin || form.formState.isSubmitting}>
-                  {submitLabel}
-                </Button>
-              </FormActions>
-            }
-          />
+    <Form form={form} onSubmit={handleSubmit} className="gap-10">
+      <PageHeader
+        leading={<ProfileAvatar type="community" src={community.avatarUrl} name={communityName} className="h-12 w-12" />}
+        title="Join"
+        description={`@${communityHandle}`}
+        sticky
+        actions={
+          <FormActions className="flex items-center gap-3">
+            <Button type="submit" variant="solid" disabled={!canJoin || form.formState.isSubmitting}>
+              {submitLabel}
+            </Button>
+          </FormActions>
+        }
+      />
 
-          {statusBanner && <StatusBannerAlert banner={statusBanner} />}
+      {statusBanner && <StatusBannerAlert banner={statusBanner} />}
 
-          {rootError && (
-            <Alert variant="destructive">
-              <AlertDescription>{rootError}</AlertDescription>
-            </Alert>
-          )}
-
-          <Card>
-            <CardContent className="flex flex-col gap-8">
-              <JoinQuestions questions={questions} canJoin={canJoin} form={form} />
-              <OptionalNoteField canJoin={canJoin} form={form} />
-            </CardContent>
-          </Card>
-        </Form>
+      {rootError && (
+        <Alert variant="destructive">
+          <AlertDescription>{rootError}</AlertDescription>
+        </Alert>
       )}
-    </div>
+
+      <Card>
+        <CardContent className="flex flex-col gap-8">
+          <JoinQuestions questions={questions} canJoin={canJoin} form={form} />
+          <OptionalNoteField canJoin={canJoin} form={form} />
+        </CardContent>
+      </Card>
+    </Form>
   )
 }

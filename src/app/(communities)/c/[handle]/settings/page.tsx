@@ -5,14 +5,12 @@ import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useParams, useRouter } from "next/navigation"
 import { getSession } from "next-auth/react"
-import { apiGet, apiPost } from "@/lib/api/client"
+import { apiPost } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
-import { communityPath, communityActivityPath, communityMembersPath, communitySettingsPath, communityOrbitPath, communityApplicationsPath, communityBansPath, communityPermissionsPath } from "@/lib/routes"
+import { communityPath, communitySettingsPath } from "@/lib/routes"
 
 import { AvatarDropzone } from "@/components/common/avatar-dropzone"
 import { HandleField } from "@/components/common/handle-field"
-import { PageHeader } from "@/components/common/page-header"
-import { PageToolbar } from "@/components/common/page-toolbar"
 import { ProfileAvatar } from "@/components/common/profile-avatar"
 import { UnsavedChangesBar } from "@/components/common/unsaved-changes-bar"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -27,6 +25,8 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
 import { useFieldArray } from "react-hook-form"
+
+import { useCommunity, type CommunityData } from "../community-provider"
 
 // === SCHEMAS ===
 
@@ -57,26 +57,6 @@ const CommunitySettingsSchema = z.object({
 type CommunitySettingsValues = z.infer<typeof CommunitySettingsSchema>
 
 // === API TYPES ===
-
-type CommunityGetResponse = {
-  community: {
-    id: string
-    handle: string
-    name: string
-    description?: string | null
-    avatarUrl?: string | null
-    isPublicDirectory?: boolean | null
-    isMembershipOpen?: boolean | null
-    ownerId?: string | null
-    owner?: { handle?: string | null } | null
-    membershipConfig?: unknown
-    discordUrl?: string | null
-    xUrl?: string | null
-    telegramUrl?: string | null
-    githubUrl?: string | null
-    websiteUrl?: string | null
-  }
-}
 
 type CommunityUpdateResponse = {
   community: {
@@ -199,67 +179,12 @@ function useSessionUser() {
   return { user, loading }
 }
 
-function useCommunityData(handle: string) {
-  const [community, setCommunity] = React.useState<CommunityGetResponse["community"] | null>(null)
-  const [loading, setLoading] = React.useState(true)
-  const [error, setError] = React.useState<string | null>(null)
 
-  React.useEffect(() => {
-    let cancelled = false
+// === CONTENT SKELETON ===
 
-    if (!handle) {
-      setLoading(false)
-      return
-    }
-
-    apiGet<CommunityGetResponse>("/api/community/get", { handle })
-      .then((res) => {
-        if (cancelled) return
-
-        if (!res.ok) {
-          const err = res.error
-          const parsed = parseApiError(err)
-          setError(parsed.formError || "We couldn't load this community. Try again.")
-          setLoading(false)
-          return
-        }
-
-        setCommunity(res.value.community)
-        setLoading(false)
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setError("An unexpected error occurred while loading the community.")
-          setLoading(false)
-        }
-      })
-
-    return () => { cancelled = true }
-  }, [handle])
-
-  return { community, loading, error }
-}
-
-// === LOADING SKELETON ===
-
-function SettingsSkeleton() {
+function SettingsContentSkeleton() {
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
-      {/* PageHeader */}
-      <div className="w-full p-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex min-w-0 items-start gap-3">
-          <Skeleton className="size-12 rounded-full shrink-0" />
-          <div className="flex flex-col gap-1.5">
-            <Skeleton className="h-7 w-48" />
-            <Skeleton className="h-3 w-24" />
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Skeleton className="h-9 w-64 rounded-4xl" />
-        </div>
-      </div>
-
-      {/* Profile */}
+    <>
       <Card>
         <CardHeader>
           <Skeleton className="h-5 w-20" />
@@ -273,7 +198,6 @@ function SettingsSkeleton() {
         </CardContent>
       </Card>
 
-      {/* Privacy & access */}
       <Card>
         <CardHeader>
           <Skeleton className="h-5 w-32" />
@@ -285,7 +209,6 @@ function SettingsSkeleton() {
         </CardContent>
       </Card>
 
-      {/* Application questions */}
       <Card>
         <CardHeader>
           <Skeleton className="h-5 w-40" />
@@ -297,7 +220,6 @@ function SettingsSkeleton() {
         </CardContent>
       </Card>
 
-      {/* Danger zone */}
       <Card>
         <CardHeader>
           <Skeleton className="h-5 w-24" />
@@ -307,7 +229,7 @@ function SettingsSkeleton() {
           <Skeleton className="h-28 w-full rounded-2xl" />
         </CardContent>
       </Card>
-    </div>
+    </>
   )
 }
 
@@ -317,9 +239,10 @@ export default function CommunitySettingsPage() {
   const router = useRouter()
   const params = useParams<{ handle: string }>()
   const communityHandle = String(params?.handle || "")
+  const ctx = useCommunity()
+  const community = ctx.community
 
   const { user: sessionUser, loading: sessionLoading } = useSessionUser()
-  const { community, loading: communityLoading, error: communityError } = useCommunityData(communityHandle)
 
   const form = useForm<CommunitySettingsValues>({
     resolver: zodResolver(CommunitySettingsSchema),
@@ -348,7 +271,7 @@ export default function CommunitySettingsPage() {
     name: "applicationQuestions"
   })
 
-  const isLoading = sessionLoading || communityLoading
+  const isLoading = sessionLoading || ctx.status === "loading"
 
   // Check ownership
   const isOwner = React.useMemo(() => {
@@ -401,10 +324,17 @@ export default function CommunitySettingsPage() {
 
   // Set community error if there is one
   React.useEffect(() => {
-    if (communityError) {
-      form.setError("root", { type: "server", message: communityError })
+    if (ctx.status === "error" && ctx.errorMessage) {
+      form.setError("root", { type: "server", message: ctx.errorMessage })
     }
-  }, [communityError, form])
+  }, [ctx.status, ctx.errorMessage, form])
+
+  // Admin gate — redirect non-admins
+  React.useEffect(() => {
+    if (ctx.status === "ready" && !ctx.isAdmin) {
+      router.replace(communityPath(communityHandle))
+    }
+  }, [ctx.status, ctx.isAdmin, communityHandle, router])
 
   async function handleSubmit(values: CommunitySettingsValues) {
     form.clearErrors("root")
@@ -471,6 +401,7 @@ export default function CommunitySettingsPage() {
       if (newHandle && newHandle !== communityHandle) {
         router.replace(communitySettingsPath(newHandle))
       }
+      ctx.refetch()
       router.refresh()
       return
     }
@@ -545,45 +476,30 @@ export default function CommunitySettingsPage() {
 
   const rootError = form.formState.errors.root?.message
   const communityName = community?.name || "Community"
+  const watchedAvatarUrl = form.watch("avatarUrl")
+
+  // Override the layout header avatar with the form-watched value
+  React.useEffect(() => {
+    const avatarSrc = watchedAvatarUrl || community?.avatarUrl
+    if (avatarSrc) {
+      ctx.setLeadingOverride(
+        <ProfileAvatar type="community" src={avatarSrc} name={communityName} className="h-12 w-12" />
+      )
+    } else {
+      ctx.setLeadingOverride(null)
+    }
+    return () => ctx.setLeadingOverride(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchedAvatarUrl, community?.avatarUrl, communityName])
 
   if (!communityHandle) return null
 
   if (isLoading) {
-    return <SettingsSkeleton />
+    return <SettingsContentSkeleton />
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
-      <PageHeader
-        leading={
-          <ProfileAvatar
-            type="community"
-            src={form.watch("avatarUrl") || community?.avatarUrl}
-            name={communityName}
-            className="h-12 w-12"
-          />
-        }
-        title="Settings"
-        description={`@${communityHandle}`}
-        actionsAsFormActions={false}
-        actions={
-          <PageToolbar
-            nav={[
-              { label: "Profile", href: communityPath(communityHandle) },
-              { label: "Orbit", href: communityOrbitPath(communityHandle) },
-              { label: "Members", href: communityMembersPath(communityHandle) },
-              { label: "Activity", href: communityActivityPath(communityHandle) },
-            ]}
-            overflow={[
-              { label: "Applications", href: communityApplicationsPath(communityHandle) },
-              { label: "Bans", href: communityBansPath(communityHandle) },
-              { label: "Permissions", href: communityPermissionsPath(communityHandle) },
-              { label: "Settings", href: communitySettingsPath(communityHandle) },
-            ]}
-          />
-        }
-      />
-
+    <>
       <Form form={form} onSubmit={handleSubmit}>
         {rootError ? (
           <Alert variant="destructive">
@@ -624,7 +540,7 @@ export default function CommunitySettingsPage() {
         onSave={() => form.handleSubmit(handleSubmit)()}
         onReset={() => form.reset()}
       />
-    </div>
+    </>
   )
 }
 
@@ -639,7 +555,7 @@ function ProfileSection({
   onAvatarError,
 }: {
   form: ReturnType<typeof useForm<CommunitySettingsValues>>
-  community: CommunityGetResponse["community"] | null
+  community: CommunityData["community"] | null
   communityName: string
   currentHandle: string
   onAvatarUpload: (file: File) => Promise<{ publicUrl: string }>

@@ -73,19 +73,14 @@ function PageHeader({
   }, [sticky]);
 
   return (
-    <motion.div
+    <div
       ref={headerRef}
       data-slot="page-header"
       data-stuck={isSticky || pinned || undefined}
-      initial={{ opacity: 0, y: -12 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -12 }}
-      transition={{ duration: 0.3, ease: "easeOut" }}
       className={cn(
         "w-full transition-colors duration-200",
         sticky ? "sticky top-0 z-40 rounded-2xl border border-transparent" : null,
         sticky && (isSticky || pinned) ? "border-border bg-card/80 backdrop-blur-md shadow-lg" : null,
-        pinned ? "max-w-3xl p-1 absolute top-3 left-1/2 -translate-x-1/2 pointer-events-auto opacity-60 hover:opacity-100" : null,
         className,
       )}
     >
@@ -132,7 +127,7 @@ function PageHeader({
           </ActionsWrap>
         ) : null}
       </div>
-    </motion.div>
+    </div>
   );
 }
 
