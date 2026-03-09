@@ -30,6 +30,7 @@ export type CommunityData = {
     ownerId?: string | null
     owner?: { handle?: string | null } | null
     membershipConfig?: unknown
+    permissions?: unknown
   }
   memberCount: number
   canViewDirectory: boolean
