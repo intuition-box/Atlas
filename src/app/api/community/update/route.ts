@@ -1,7 +1,6 @@
 import {
   CommunityConfigType,
   HandleOwnerType,
-  MembershipRole,
   MembershipStatus,
   Prisma,
   EventType,
@@ -13,6 +12,7 @@ import { errJson, okJson } from "@/lib/api/server";
 import { db } from "@/lib/db/client";
 import { claimHandle, resolveHandleNameForOwner } from "@/lib/handle-registry";
 import type { HandleProblem } from "@/lib/handle-registry";
+import { hasPermission } from "@/lib/permissions";
 import { deleteR2Object, extractR2Key } from "@/lib/r2";
 import { requireCsrf } from "@/lib/security/csrf";
 import { CommunityUpdateSchema } from "@/lib/validations";
@@ -111,6 +111,12 @@ export async function POST(req: NextRequest) {
         ? (await db.community.findUnique({ where: { id: input.communityId }, select: { avatarUrl: true } }))?.avatarUrl ?? null
         : null;
 
+    // Fetch community permissions for the hasPermission() check
+    const communityPerms = await db.community.findUnique({
+      where: { id: input.communityId },
+      select: { permissions: true },
+    });
+
     const txResult = await db.$transaction(async (tx) => {
       const membership = await tx.membership.findUnique({
         where: { userId_communityId: { userId, communityId: input.communityId } },
@@ -121,11 +127,7 @@ export async function POST(req: NextRequest) {
         return { kind: "not_found" } as const;
       }
 
-      if (
-        membership.role !== MembershipRole.OWNER &&
-        membership.role !== MembershipRole.ADMIN &&
-        membership.role !== MembershipRole.MODERATOR
-      ) {
+      if (!hasPermission(membership.role, "community.update", communityPerms?.permissions)) {
         return { kind: "forbidden" } as const;
       }
 

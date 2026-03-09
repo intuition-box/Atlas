@@ -12,6 +12,7 @@ import { auth } from "@/lib/auth/session";
 import { errJson, okJson } from "@/lib/api/server";
 import { db } from "@/lib/db/client";
 import { resolveCommunityIdFromHandle, resolveUserIdFromHandle } from "@/lib/handle-registry";
+import { hasPermission } from "@/lib/permissions";
 import { requireCsrf } from "@/lib/security/csrf";
 
 export const runtime = "nodejs";
@@ -103,7 +104,7 @@ export async function POST(req: NextRequest) {
     }
 
     const result = await db.$transaction(async (tx) => {
-      // Actor must be an approved owner/admin of the community.
+      // Actor must be an approved member with "membership.orbit" permission.
       const actorMembership = await tx.membership.findUnique({
         where: { userId_communityId: { userId: actorId, communityId } },
         select: { status: true, role: true },
@@ -113,10 +114,12 @@ export async function POST(req: NextRequest) {
         return { kind: "forbidden" } as const;
       }
 
-      if (
-        actorMembership.role !== MembershipRole.OWNER &&
-        actorMembership.role !== MembershipRole.ADMIN
-      ) {
+      const community = await tx.community.findUnique({
+        where: { id: communityId },
+        select: { permissions: true },
+      });
+
+      if (!hasPermission(actorMembership.role, "membership.orbit", community?.permissions)) {
         return { kind: "forbidden" } as const;
       }
 

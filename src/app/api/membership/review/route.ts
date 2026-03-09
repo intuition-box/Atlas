@@ -7,6 +7,7 @@ import { auth } from "@/lib/auth/session";
 import { errJson, okJson } from "@/lib/api/server";
 import { db } from "@/lib/db/client";
 import { resolveCommunityIdFromHandle, resolveUserIdFromHandle } from "@/lib/handle-registry";
+import { hasPermission } from "@/lib/permissions";
 import { requireCsrf } from "@/lib/security/csrf";
 import { recomputeMemberScores } from "@/lib/scoring";
 
@@ -49,12 +50,6 @@ type ReviewOk = {
   alreadyReviewed: boolean;
 };
 
-
-const REVIEW_ROLES: MembershipRole[] = [
-  MembershipRole.OWNER,
-  MembershipRole.ADMIN,
-  MembershipRole.MODERATOR,
-];
 
 const QuerySchema = z
   .object({
@@ -175,15 +170,15 @@ export async function GET(req: NextRequest) {
       select: { id: true, role: true },
     })
 
-    if (!reviewer || !REVIEW_ROLES.includes(reviewer.role)) {
-      return errJson({ code: "FORBIDDEN", message: "Not allowed", status: 403 })
-    }
-
-    // Fetch community info for the page header.
+    // Fetch community info for the page header + permission check.
     const community = await db.community.findUnique({
       where: { id: communityId },
-      select: { id: true, name: true, avatarUrl: true, membershipConfig: true },
+      select: { id: true, name: true, avatarUrl: true, membershipConfig: true, permissions: true },
     })
+
+    if (!reviewer || !hasPermission(reviewer.role, "membership.review", community?.permissions)) {
+      return errJson({ code: "FORBIDDEN", message: "Not allowed", status: 403 })
+    }
 
     if (!community) {
       return errJson({ code: "NOT_FOUND", message: "Community not found", status: 404 })
@@ -381,7 +376,12 @@ export async function POST(req: NextRequest) {
       select: { id: true, role: true },
     });
 
-    if (!reviewer || !REVIEW_ROLES.includes(reviewer.role)) {
+    const reviewCommunity = await db.community.findUnique({
+      where: { id: app.communityId },
+      select: { permissions: true },
+    });
+
+    if (!reviewer || !hasPermission(reviewer.role, "membership.review", reviewCommunity?.permissions)) {
       return errJson({ code: "FORBIDDEN", message: "Not allowed", status: 403 });
     }
 

@@ -358,6 +358,7 @@ export default function UserProfilePage() {
               toAvatarUrl={avatarSrc}
               isSelf={isSelf}
               showTooltip
+              source="profile"
             />
           </CardContent>
         </Card>
@@ -379,6 +380,7 @@ export default function UserProfilePage() {
               toAvatarUrl={avatarSrc}
               isSelf={isSelf}
               showTooltip
+              source="profile"
             />
           </CardContent>
         </Card>
@@ -399,6 +401,7 @@ export default function UserProfilePage() {
               toAvatarUrl={avatarSrc}
               showCounts
               showTooltip
+              source="profile"
             />
           </CardContent>
         </Card>

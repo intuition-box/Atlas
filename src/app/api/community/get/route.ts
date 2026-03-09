@@ -25,6 +25,7 @@ type CommunityGetOk = {
     isPublicDirectory: boolean;
     membershipConfig: unknown | null;
     orbitConfig: unknown | null;
+    permissions: unknown | null;
     discordUrl: string | null;
     xUrl: string | null;
     telegramUrl: string | null;
@@ -100,6 +101,7 @@ export async function GET(req: NextRequest) {
         isPublicDirectory: true,
         membershipConfig: true,
         orbitConfig: true,
+        permissions: true,
         discordUrl: true,
         xUrl: true,
         telegramUrl: true,
@@ -177,6 +179,7 @@ export async function GET(req: NextRequest) {
           isPublicDirectory: row.isPublicDirectory,
           membershipConfig: null,
           orbitConfig: null,
+          permissions: null,
           discordUrl: row.discordUrl,
           xUrl: row.xUrl,
           telegramUrl: row.telegramUrl,
@@ -261,6 +264,7 @@ export async function GET(req: NextRequest) {
         isPublicDirectory: row.isPublicDirectory,
         membershipConfig: (row.membershipConfig as unknown) ?? null,
         orbitConfig: (row.orbitConfig as unknown) ?? null,
+        permissions: (row.permissions as unknown) ?? null,
         discordUrl: row.discordUrl,
         xUrl: row.xUrl,
         telegramUrl: row.telegramUrl,

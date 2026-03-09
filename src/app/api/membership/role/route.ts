@@ -11,6 +11,7 @@ import { auth } from "@/lib/auth/session";
 import { errJson, okJson } from "@/lib/api/server";
 import { db } from "@/lib/db/client";
 import { resolveCommunityIdFromHandle, resolveUserIdFromHandle } from "@/lib/handle-registry";
+import { hasPermission } from "@/lib/permissions";
 import { requireCsrf } from "@/lib/security/csrf";
 
 export const runtime = "nodejs";
@@ -162,8 +163,7 @@ export async function POST(req: NextRequest) {
         return { kind: "not_found" } as const;
       }
 
-      // Actor must be an approved OWNER of the community.
-      // (Admins can be added later if you want; OWNER-only is safest by default.)
+      // Actor must be an approved member with "membership.role" permission.
       const actorMembership = await tx.membership.findUnique({
         where: {
           userId_communityId: {
@@ -178,7 +178,12 @@ export async function POST(req: NextRequest) {
         return { kind: "forbidden" } as const;
       }
 
-      if (actorMembership.role !== MembershipRole.OWNER) {
+      const community = await tx.community.findUnique({
+        where: { id: membership.communityId },
+        select: { permissions: true },
+      });
+
+      if (!hasPermission(actorMembership.role, "membership.role", community?.permissions)) {
         return { kind: "forbidden" } as const;
       }
 

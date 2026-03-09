@@ -150,6 +150,18 @@ export default function UserActivityPage() {
             eventTypeConfig={EVENT_TYPE_CONFIG}
             renderExtra={(event) => {
               const e = event as UserActivityEvent;
+              const source = (e.metadata?.source as string) ?? null;
+
+              // Profile-sourced attestations: show "on profile" instead of community
+              if (source === "profile") {
+                return (
+                  <span className="text-xs text-muted-foreground shrink-0">
+                    on profile
+                  </span>
+                );
+              }
+
+              // Orbit-sourced or others: show community context
               if (!e.community?.handle) return null;
               return (
                 <span className="text-xs text-muted-foreground shrink-0">
