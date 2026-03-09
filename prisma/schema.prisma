@@ -374,6 +374,7 @@ model Community {
   // JSON settings so you can evolve without migrations every week
   membershipConfig Json?
   orbitConfig       Json? // thresholds, weights, etc.
+  permissions       Json? /// Role-based permission overrides (validated by PermissionsSchema)
 
   configRevisions CommunityConfigRevision[]
   memberships Membership[]
@@ -491,6 +492,14 @@ model Attestation {
   /// References an AttributeId from src/lib/attestations/definitions.ts.
   /// Null for non-endorsement attestation types (FOLLOW, TRUST, etc.).
   attributeId String?
+
+  /// Where the attestation was initiated (e.g. "profile", "orbit").
+  /// Used for activity feed context display.
+  source      String?
+
+  /// Whether the attestation is "for" (support) or "against" (oppose).
+  /// Defaults to "for" when not specified. Stored for display + future on-chain integration.
+  stance      String?   // "for" | "against"
 
   /// Soft-delete (retract) support.
   /// When revokedAt is set, this attestation should be treated as inactive.
