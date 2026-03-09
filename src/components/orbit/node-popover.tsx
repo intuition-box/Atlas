@@ -265,6 +265,7 @@ export function MemberPopoverContent({
         toHandle={node.handle ?? undefined}
         toAvatarUrl={node.avatarUrl}
         className="justify-center"
+        source="orbit"
       />
 
       {/* View Profile */}

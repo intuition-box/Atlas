@@ -560,15 +560,15 @@ export function UniverseView({
       const elapsed = now - s.startTime;
 
       const bubbleFadeDuration = 600;
-      const bridgeGrowDelay = bubbleFadeDuration + 400;
-      const bridgeGrowDuration = 1800;
+      const bridgeFadeDelay = bubbleFadeDuration + 200;
+      const bridgeFadeDuration = 800;
 
       if (s.initialized && s.fadeIn < 1) {
         s.fadeIn = Math.min(1, elapsed / bubbleFadeDuration);
       }
 
       const bridgeProgress = s.initialized
-        ? Math.max(0, Math.min(1, (elapsed - bridgeGrowDelay) / bridgeGrowDuration))
+        ? Math.max(0, Math.min(1, (elapsed - bridgeFadeDelay) / bridgeFadeDuration))
         : 0;
       const easedBridge = easeOutCubic(bridgeProgress);
       const bubbleOpacity = s.fadeIn;
@@ -703,7 +703,7 @@ export function UniverseView({
           const pts: { x: number; y: number }[] = [];
 
           for (let si = 0; si <= samples; si++) {
-            const bt = (si / samples) * easedBridge;
+            const bt = si / samples;
             const bx = bezX(bt);
             const by = bezY(bt);
 
