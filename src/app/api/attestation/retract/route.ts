@@ -28,6 +28,7 @@ export const POST = api(BodySchema, async (ctx) => {
       fromUserId: true,
       toUserId: true,
       type: true,
+      source: true,
       revokedAt: true,
       supersededById: true,
     },
@@ -64,7 +65,7 @@ export const POST = api(BodySchema, async (ctx) => {
     select: { id: true },
   });
 
-  emitEvent({ fromUserId: row.fromUserId, toUserId: row.toUserId, type: EventType.ATTESTATION_RETRACTED, metadata: { attestationType: row.type } });
+  emitEvent({ fromUserId: row.fromUserId, toUserId: row.toUserId, type: EventType.ATTESTATION_RETRACTED, metadata: { attestationType: row.type, source: row.source ?? null } });
   recomputeScoresForAttestationPair({ fromUserId: row.fromUserId, toUserId: row.toUserId });
 
   return okJson<RetractOk>({ attestation: { id: row.id }, alreadyRevoked: false });

@@ -22,6 +22,12 @@ const BodySchema = z.object({
 
   // Required for SKILL_ENDORSE — references AttributeId from definitions.ts
   attributeId: z.string().trim().min(1).optional(),
+
+  // Where this attestation was initiated (e.g. "profile", "orbit")
+  source: z.string().trim().min(1).max(50).optional(),
+
+  // Stance: "for" (support) or "against" (oppose)
+  stance: z.enum(["for", "against"]).optional(),
 }).refine(
   (data) => !isEndorsementType(data.type) || !!data.attributeId,
   { message: "attributeId is required for endorsement attestations", path: ["attributeId"] },
@@ -37,7 +43,7 @@ type CreateAttestationOk = {
 
 export const POST = api(BodySchema, async (ctx) => {
   const { viewerId, json } = ctx;
-  const { toUserId, type, confidence, attributeId } = json;
+  const { toUserId, type, confidence, attributeId, source, stance } = json;
 
   // Can't attest yourself
   if (toUserId === viewerId) {
@@ -131,6 +137,8 @@ export const POST = api(BodySchema, async (ctx) => {
           type,
           confidence: confidence ?? null,
           attributeId: attributeId ?? null,
+          source: source ?? null,
+          stance: stance ?? "for",
         },
         select: { id: true },
       });
@@ -143,7 +151,7 @@ export const POST = api(BodySchema, async (ctx) => {
       return replacement;
     });
 
-    emitEvent({ fromUserId: viewerId!, toUserId, type: EventType.ATTESTED, metadata: { attestationType: type } });
+    emitEvent({ fromUserId: viewerId!, toUserId, type: EventType.ATTESTED, metadata: { attestationType: type, source: source ?? null, stance: stance ?? "for" } });
     recomputeScoresForAttestationPair({ fromUserId: viewerId!, toUserId });
 
     return okJson<CreateAttestationOk>({
@@ -160,11 +168,13 @@ export const POST = api(BodySchema, async (ctx) => {
       type,
       confidence: confidence ?? null,
       attributeId: attributeId ?? null,
+      source: source ?? null,
+      stance: stance ?? "for",
     },
     select: { id: true },
   });
 
-  emitEvent({ fromUserId: viewerId!, toUserId, type: EventType.ATTESTED, metadata: { attestationType: type } });
+  emitEvent({ fromUserId: viewerId!, toUserId, type: EventType.ATTESTED, metadata: { attestationType: type, source: source ?? null, stance: stance ?? "for" } });
   recomputeScoresForAttestationPair({ fromUserId: viewerId!, toUserId });
 
   return okJson<CreateAttestationOk>({

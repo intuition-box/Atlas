@@ -32,6 +32,7 @@ type AttestationListItem = {
   id: string;
   type: AttestationType;
   attributeId: string | null;
+  stance: string | null;
   confidence: number | null;
   createdAt: string;
   mintedAt: string | null;
@@ -109,6 +110,7 @@ export const GET = api(QuerySchema, async (ctx) => {
       toUserId: true,
       type: true,
       attributeId: true,
+      stance: true,
       confidence: true,
       createdAt: true,
       mintedAt: true,
@@ -157,6 +159,7 @@ export const GET = api(QuerySchema, async (ctx) => {
       id: a.id,
       type: a.type as AttestationType,
       attributeId: a.attributeId ?? null,
+      stance: a.stance ?? "for",
       confidence: a.confidence,
       createdAt: a.createdAt.toISOString(),
       mintedAt: a.mintedAt?.toISOString() ?? null,
