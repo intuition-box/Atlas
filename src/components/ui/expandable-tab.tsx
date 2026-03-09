@@ -4,6 +4,12 @@ import * as React from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useOnClickOutside } from "usehooks-ts";
 import { cn } from "@/lib/utils";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -107,69 +113,80 @@ export function ExpandableTabs({
   };
 
   return (
-    <div
-      ref={outsideClickRef}
-      className={cn(
-        "flex flex-wrap items-center gap-1 rounded-full border border-border bg-input/30 bg-clip-padding px-1 py-[3px]",
-        className,
-      )}
-    >
-      {tabs.map((tab, index) => {
-        if (tab.type === "separator") {
-          return (
-            <div
-              key={`separator-${index}`}
-              className="mx-1 h-[24px] w-[1.2px] bg-border"
-              aria-hidden="true"
-            />
-          );
-        }
+    <TooltipProvider delay={200} closeDelay={0}>
+      <div
+        ref={outsideClickRef}
+        className={cn(
+          "flex flex-wrap items-center gap-1 rounded-full border border-border bg-input/30 bg-clip-padding px-1 py-[3px]",
+          className,
+        )}
+      >
+        {tabs.map((tab, index) => {
+          if (tab.type === "separator") {
+            return (
+              <div
+                key={`separator-${index}`}
+                className="mx-1 h-[24px] w-[1.2px] bg-border"
+                aria-hidden="true"
+              />
+            );
+          }
 
-        const Icon = tab.icon;
-        const isActive = selected === index;
-        const color = tab.activeColor ?? activeColor;
-        const bg = tab.activeBg ?? "bg-primary/10";
+          const Icon = tab.icon;
+          const isActive = selected === index;
+          const color = tab.activeColor ?? activeColor;
+          const bg = tab.activeBg ?? "bg-primary/10";
 
-        const inner = (
-          <motion.span
-            key={tab.title}
-            variants={buttonVariants}
-            initial={isControlled ? "animate" : "initial"}
-            animate="animate"
-            custom={isActive}
-            transition={transition}
-            className={cn(
-              "relative flex items-center rounded-full px-4 py-2 text-sm leading-none font-medium transition-colors duration-300",
-              isActive
-                ? cn(bg, color)
-                : "text-muted-foreground hover:bg-input/50 hover:text-foreground",
-            )}
-            onClick={() => handleSelect(index)}
-          >
-            <Icon size={16} />
-            <AnimatePresence initial={false}>
-              {isActive && (
-                <motion.span
-                  variants={spanVariants}
-                  initial="initial"
-                  animate="animate"
-                  exit="exit"
-                  transition={transition}
-                  className="overflow-hidden"
-                >
-                  {tab.title}
-                </motion.span>
+          const inner = (
+            <motion.span
+              key={tab.title}
+              variants={buttonVariants}
+              initial={isControlled ? "animate" : "initial"}
+              animate="animate"
+              custom={isActive}
+              transition={transition}
+              className={cn(
+                "relative flex items-center rounded-full px-4 py-2 text-sm leading-none font-medium transition-colors duration-300",
+                isActive
+                  ? cn(bg, color)
+                  : "text-muted-foreground hover:bg-input/50 hover:text-foreground",
               )}
-            </AnimatePresence>
-          </motion.span>
-        );
+              onClick={() => handleSelect(index)}
+            >
+              <Icon size={16} />
+              <AnimatePresence initial={false}>
+                {isActive && (
+                  <motion.span
+                    variants={spanVariants}
+                    initial="initial"
+                    animate="animate"
+                    exit="exit"
+                    transition={transition}
+                    className="overflow-hidden"
+                  >
+                    {tab.title}
+                  </motion.span>
+                )}
+              </AnimatePresence>
+            </motion.span>
+          );
 
-        if (renderTab) {
-          return renderTab({ children: inner, index, tab });
-        }
+          const wrapped = renderTab
+            ? renderTab({ children: inner, index, tab })
+            : inner;
 
-        return inner;
-      })}
-    </div>
+          return (
+            <Tooltip key={tab.title}>
+              <TooltipTrigger>{wrapped}</TooltipTrigger>
+              {!isActive && (
+                <TooltipContent side="bottom" sideOffset={8}>
+                  {tab.title}
+                </TooltipContent>
+              )}
+            </Tooltip>
+          );
+        })}
+      </div>
+    </TooltipProvider>
   );
 }
