@@ -15,6 +15,7 @@ export type UnmintedAttestation = {
   id: string;
   type: AttestationType;
   attributeId: string | null;
+  stance: "for" | "against";
   createdAt: string;
   toUser: {
     id: string;
@@ -34,6 +35,10 @@ type CreateAttestationParams = {
   type: AttestationType;
   /** Required for SKILL_ENDORSE — references AttributeId from definitions.ts */
   attributeId?: string;
+  /** Where this attestation was initiated (e.g. "profile", "orbit") */
+  source?: string;
+  /** Stance: "for" (support) or "against" (oppose). Defaults to "for". */
+  stance?: "for" | "against";
 };
 
 type AttestationCartContextValue = {
@@ -54,6 +59,8 @@ type AttestationCartContextValue = {
   retractAttestation: (id: string) => Promise<void>;
   /** Retract all unminted attestations */
   retractAll: () => Promise<void>;
+  /** Update the stance of an unminted attestation */
+  updateStance: (id: string, stance: "for" | "against") => Promise<void>;
   /** Remove a minted item from unminted list and notify downstream */
   onItemMinted: (id: string) => void;
 
@@ -70,6 +77,7 @@ type ListResponse = {
     id: string;
     type: string;
     attributeId: string | null;
+    stance: string | null;
     confidence: number | null;
     createdAt: string;
     mintedAt: string | null;
@@ -137,6 +145,7 @@ export function AttestationQueueProvider({ children }: { children: React.ReactNo
             id: a.id,
             type: a.type as AttestationType,
             attributeId: a.attributeId ?? null,
+            stance: (a.stance === "against" ? "against" : "for") as "for" | "against",
             createdAt: a.createdAt,
             toUser: {
               id: a.toUser.id,
@@ -208,6 +217,8 @@ export function AttestationQueueProvider({ children }: { children: React.ReactNo
         toUserId: params.toUserId,
         type: params.type,
         ...(params.attributeId ? { attributeId: params.attributeId } : {}),
+        ...(params.source ? { source: params.source } : {}),
+        ...(params.stance ? { stance: params.stance } : {}),
       });
 
       if (!result.ok) {
@@ -223,6 +234,7 @@ export function AttestationQueueProvider({ children }: { children: React.ReactNo
             id,
             type: params.type,
             attributeId: params.attributeId ?? null,
+            stance: params.stance ?? "for",
             createdAt: new Date().toISOString(),
             toUser: {
               id: params.toUserId,
@@ -292,6 +304,31 @@ export function AttestationQueueProvider({ children }: { children: React.ReactNo
     setLastChangedAt(Date.now());
   }, [unminted]);
 
+  const updateStance = React.useCallback(
+    async (id: string, stance: "for" | "against") => {
+      // Optimistic update
+      const snapshot = unminted;
+      setUnminted((prev) =>
+        prev.map((a) => (a.id === id ? { ...a, stance } : a)),
+      );
+
+      const result = await apiPost<{ attestation: { id: string; stance: string } }>(
+        "/api/attestation/update-stance",
+        { attestationId: id, stance },
+      );
+
+      if (!result.ok) {
+        // Rollback
+        setUnminted(snapshot);
+        sounds.error();
+        return;
+      }
+
+      setLastChangedAt(Date.now());
+    },
+    [unminted],
+  );
+
   const onItemMinted = React.useCallback((id: string) => {
     setUnminted((prev) => prev.filter((a) => a.id !== id));
     setLastChangedAt(Date.now());
@@ -313,11 +350,12 @@ export function AttestationQueueProvider({ children }: { children: React.ReactNo
       createAttestation,
       retractAttestation,
       retractAll,
+      updateStance,
       onItemMinted,
       setIsOpen,
       toggleOpen,
     }),
-    [unminted, isOpen, isFetching, lastChangedAt, createAttestation, retractAttestation, retractAll, onItemMinted, toggleOpen],
+    [unminted, isOpen, isFetching, lastChangedAt, createAttestation, retractAttestation, retractAll, updateStance, onItemMinted, toggleOpen],
   );
 
   return (

@@ -51,6 +51,11 @@ function CartItem({
     )}>
       <ProfileAvatar type="user" src={item.toUser.avatarUrl} name={item.toUser.name ?? ""} className="size-9 shrink-0" />
 
+      {/* Stance indicator */}
+      <span className="text-sm shrink-0" title={item.stance === "against" ? "Oppose" : "Support"}>
+        {item.stance === "against" ? "\ud83d\udc4e" : "\ud83d\udc4d"}
+      </span>
+
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="font-medium text-sm truncate">{item.toUser.name}</span>

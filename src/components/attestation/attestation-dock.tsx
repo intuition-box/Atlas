@@ -1,0 +1,344 @@
+"use client";
+
+import * as React from "react";
+import { useSession } from "next-auth/react";
+import { motion, AnimatePresence } from "motion/react";
+import { ChevronDown, ChevronUp, ShoppingCart } from "lucide-react";
+
+import { cn } from "@/lib/utils";
+import { getAttributeById } from "@/lib/attestations/definitions";
+import type { AttestationType } from "@/lib/attestations/definitions";
+import { Input } from "@/components/ui/input";
+import { ExpandableTabs, type TabItem } from "@/components/ui/expandable-tab";
+import {
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuTrigger,
+} from "@/components/ui/menu";
+import {
+  useAttestationQueue,
+  type UnmintedAttestation,
+} from "./queue-provider";
+
+/* ────────────────────────────
+   Constants
+──────────────────────────── */
+
+/** Default minimum deposit for attestations (Phase 2 — display-only for now). */
+const MIN_DEPOSIT = "0.00042";
+
+/** How long (ms) before the dock auto-hides when not hovered/interacted with. */
+const AUTO_HIDE_DELAY = 4_000;
+
+const CURVE_LABELS: Record<string, string> = {
+  linear: "Linear",
+  exponential: "Exponential",
+};
+
+/** Stance tabs — same shape as PageToolbar nav tabs. */
+const STANCE_TABS: TabItem[] = [
+  {
+    title: "Oppose",
+    icon: ChevronDown,
+    activeColor: "text-destructive",
+    activeBg: "bg-destructive/10",
+  },
+  {
+    title: "Support",
+    icon: ChevronUp,
+    activeColor: "text-primary",
+    activeBg: "bg-primary/10",
+  },
+];
+
+/* ────────────────────────────
+   Helpers
+──────────────────────────── */
+
+/** Build a human-readable verb for the attestation type. */
+function getVerb(type: AttestationType): string {
+  switch (type) {
+    case "FOLLOW":
+      return "follows";
+    case "TRUST":
+      return "trusts";
+    case "KNOW_IRL":
+      return "knows IRL";
+    case "WORK_WITH":
+      return "works with";
+    case "MET":
+      return "met";
+    case "SKILL_ENDORSE":
+      return "is skilled in";
+    case "TOOL_ENDORSE":
+      return "uses";
+    default:
+      return "attests";
+  }
+}
+
+/** Build the attestation label: "@viewer verb @target [object]". */
+function buildLabel(
+  viewerHandle: string | null,
+  item: UnmintedAttestation,
+): string {
+  const viewer = viewerHandle ? `@${viewerHandle}` : "You";
+  const target = item.toUser.handle
+    ? `@${item.toUser.handle}`
+    : item.toUser.name ?? "User";
+  const verb = getVerb(item.type);
+
+  // For endorsements: @target is skilled in Product
+  if (
+    (item.type === "SKILL_ENDORSE" || item.type === "TOOL_ENDORSE") &&
+    item.attributeId
+  ) {
+    const attrLabel =
+      getAttributeById(item.attributeId)?.label ?? item.attributeId;
+    return `${target} ${verb} ${attrLabel}`;
+  }
+
+  return `${viewer} ${verb} ${target}`;
+}
+
+/* ────────────────────────────
+   Hook: auto-hide with hover tracking
+──────────────────────────── */
+
+function useAutoHide(enabled: boolean) {
+  const [visible, setVisible] = React.useState(true);
+  const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hoveredRef = React.useRef(false);
+
+  const stopTimer = React.useCallback(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+
+  const startTimer = React.useCallback(() => {
+    stopTimer();
+    // Never start the countdown while the user is hovering
+    if (hoveredRef.current) return;
+    timerRef.current = setTimeout(() => setVisible(false), AUTO_HIDE_DELAY);
+  }, [stopTimer]);
+
+  const resetTimer = React.useCallback(() => {
+    setVisible(true);
+    startTimer();
+  }, [startTimer]);
+
+  const onMouseEnter = React.useCallback(() => {
+    hoveredRef.current = true;
+    stopTimer();
+    setVisible(true);
+  }, [stopTimer]);
+
+  const onMouseLeave = React.useCallback(() => {
+    hoveredRef.current = false;
+    startTimer();
+  }, [startTimer]);
+
+  // Start/stop when enabled changes
+  React.useEffect(() => {
+    if (!enabled) {
+      stopTimer();
+      setVisible(true);
+      return;
+    }
+    // Only start timer if not hovered
+    if (!hoveredRef.current) {
+      resetTimer();
+    }
+    return stopTimer;
+  }, [enabled, resetTimer, stopTimer]);
+
+  return { visible, resetTimer, onMouseEnter, onMouseLeave };
+}
+
+/* ────────────────────────────
+   Component
+──────────────────────────── */
+
+export function AttestationDock({ className }: { className?: string }) {
+  const { data: session } = useSession();
+  const viewerHandle = session?.user?.handle ?? null;
+  const { unminted, isOpen, setIsOpen, updateStance } = useAttestationQueue();
+
+  // Show the most recent attestation (first in array — we prepend on create)
+  const latest = unminted[0] ?? null;
+  const count = unminted.length;
+  const hasItems = latest !== null;
+
+  // Auto-hide after 4s of no interaction (hover-aware)
+  const { visible: autoVisible, resetTimer, onMouseEnter, onMouseLeave } =
+    useAutoHide(hasItems && !isOpen);
+
+  // Reset visibility whenever the latest item changes (new attestation added)
+  const latestId = latest?.id;
+  React.useEffect(() => {
+    if (latestId) resetTimer();
+  }, [latestId, resetTimer]);
+
+  // Deposit amount (Phase 2 — local UI state for now)
+  const [depositAmount, setDepositAmount] = React.useState(MIN_DEPOSIT);
+  const [curve, setCurve] = React.useState("linear");
+
+  // Show dock only when there are items, panel is not open, and not auto-hidden
+  const show = hasItems && !isOpen && autoVisible;
+
+  const isSupport = latest?.stance !== "against";
+  const label = latest ? buildLabel(viewerHandle, latest) : "";
+
+  // Stance tab index: 0 = Oppose, 1 = Support
+  const stanceIndex = isSupport ? 1 : 0;
+
+  const handleStanceChange = (stance: "for" | "against") => {
+    if (!latest) return;
+    updateStance(latest.id, stance);
+    resetTimer();
+  };
+
+  const handleTabChange = (index: number | null) => {
+    if (index === 0) handleStanceChange("against");
+    else if (index === 1) handleStanceChange("for");
+  };
+
+  // Stance-aware accent class for input / trigger borders
+  const accentBorder = isSupport ? "border-primary" : "border-destructive";
+  const accentRing = isSupport
+    ? "focus-visible:ring-primary/30"
+    : "focus-visible:ring-destructive/30";
+
+  return (
+    <AnimatePresence mode="wait">
+      {show && latest && (
+        <motion.div
+          key={latest.id}
+          initial={{ opacity: 0, y: 24 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 24 }}
+          transition={{ duration: 0.25, ease: "easeOut" }}
+          className={cn(
+            "fixed bottom-6 left-1/2 z-50 -translate-x-1/2 pointer-events-auto",
+            className,
+          )}
+          onMouseEnter={onMouseEnter}
+          onMouseLeave={onMouseLeave}
+        >
+          <div
+            className={cn(
+              "w-[360px] rounded-2xl border border-border/60",
+              "bg-card p-4 shadow-lg backdrop-blur-sm",
+              "ring-1 ring-black/5",
+            )}
+          >
+            {/* ── Action bar: Oppose | Support | Cart ── */}
+            <div className="mb-3 flex items-center gap-1 rounded-full border border-border bg-input/30 bg-clip-padding px-1 py-[3px] w-full">
+              {/* Stance tabs */}
+              <ExpandableTabs
+                tabs={STANCE_TABS}
+                activeIndex={stanceIndex}
+                onChange={handleTabChange}
+                className="border-0 bg-transparent p-0 rounded-none flex-1 [&>span]:flex-1 [&>span]:justify-center"
+              />
+
+              {/* Separator */}
+              <div
+                className="mx-0.5 h-6 w-px bg-border shrink-0"
+                aria-hidden="true"
+              />
+
+              {/* Cart button — always visible, fixed icon + badge */}
+              <button
+                type="button"
+                onClick={() => setIsOpen(true)}
+                className={cn(
+                  "relative flex items-center justify-center rounded-full px-2.5 py-2",
+                  "text-sm leading-none font-medium transition-colors duration-300",
+                  "text-muted-foreground hover:bg-input/50 hover:text-foreground",
+                  "shrink-0",
+                )}
+                aria-label={`${count} attestation${count !== 1 ? "s" : ""} in queue`}
+              >
+                <ShoppingCart size={16} />
+                {count > 0 && (
+                  <span className="absolute -top-1 -right-0.5 flex items-center justify-center min-w-4 h-4 px-1 text-[9px] font-bold rounded-full bg-primary text-primary-foreground">
+                    {count > 99 ? "99+" : count}
+                  </span>
+                )}
+              </button>
+            </div>
+
+            {/* ── Attestation label ── */}
+            <p className="text-sm leading-snug mb-3 truncate" title={label}>
+              {label}
+            </p>
+
+            {/* ── Deposit input + curve menu ── */}
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <Input
+                  type="text"
+                  inputMode="decimal"
+                  value={depositAmount}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (/^\d*\.?\d*$/.test(val)) {
+                      setDepositAmount(val);
+                      resetTimer();
+                    }
+                  }}
+                  className={cn(
+                    "h-8 pr-12 text-sm font-mono",
+                    accentBorder,
+                    accentRing,
+                  )}
+                  aria-label="Deposit amount in ETH"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground font-medium pointer-events-none">
+                  ETH
+                </span>
+              </div>
+
+              <Menu>
+                <MenuTrigger
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5",
+                    "text-xs font-medium whitespace-nowrap",
+                    "transition-colors duration-150",
+                    "hover:bg-muted/50",
+                    accentBorder,
+                  )}
+                >
+                  {CURVE_LABELS[curve] ?? "Linear"}
+                  <ChevronDown className="size-3 text-muted-foreground" />
+                </MenuTrigger>
+                <MenuContent side="top" sideOffset={4} align="end">
+                  <MenuItem
+                    onClick={() => {
+                      setCurve("linear");
+                      resetTimer();
+                    }}
+                  >
+                    Linear
+                  </MenuItem>
+                  <MenuItem
+                    onClick={() => {
+                      setCurve("exponential");
+                      resetTimer();
+                    }}
+                  >
+                    Exponential
+                  </MenuItem>
+                </MenuContent>
+              </Menu>
+            </div>
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}

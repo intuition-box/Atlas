@@ -40,8 +40,9 @@ import {
   useNavigationContext,
   useNavigationVisibility,
 } from "./navigation-provider";
-import { AttestationQueueButton } from "@/components/attestation/queue-button";
 import { AttestationQueuePanel } from "@/components/attestation/queue-panel";
+import { AttestationQueueButton } from "@/components/attestation/queue-button";
+import { AttestationDock } from "@/components/attestation/attestation-dock";
 
 /* ────────────────────────────
    Types
@@ -159,7 +160,7 @@ export function NavigationController({
         className="absolute top-4 right-4 sm:top-6 sm:right-6 pointer-events-auto"
       >
         <div className="flex items-center gap-1">
-          {/* Attestation Queue (authed only) */}
+          {/* Attestation Cart (authed only) */}
           {showControls && isAuthed && <AttestationQueueButton />}
 
           {/* Sound Toggle */}
@@ -224,6 +225,9 @@ export function NavigationController({
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Attestation Bottom Dock (authed only) */}
+      {isAuthed && <AttestationDock />}
 
       {/* Attestation Queue Panel (authed only) */}
       {isAuthed && <AttestationQueuePanel />}

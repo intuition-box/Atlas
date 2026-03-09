@@ -53,6 +53,8 @@ type AttestationButtonsProps = {
   endorsementType?: "SKILL_ENDORSE" | "TOOL_ENDORSE";
   /** Whether this is the viewer's own profile (endorsement mode: read-only) */
   isSelf?: boolean;
+  /** Where this attestation is being issued from (e.g. "profile", "orbit") */
+  source?: string;
 };
 
 type AttestorInfo = {
@@ -90,6 +92,7 @@ export function AttestationButtons({
   items,
   endorsementType,
   isSelf = false,
+  source,
 }: AttestationButtonsProps) {
   const router = useRouter();
   const { data: session, status: sessionStatus } = useSession();
@@ -111,7 +114,7 @@ export function AttestationButtons({
   const [viewerEndorsed, setViewerEndorsed] = useState<Set<string>>(new Set());
   const [savingAttributes, setSavingAttributes] = useState<Set<string>>(new Set());
 
-  // ID maps for retraction (type/attributeId → attestation record ID)
+  // ID maps for retraction (type/attributeId -> attestation record ID)
   const [attestationIdsByType, setAttestationIdsByType] = useState<Record<string, string>>({});
   const [endorsementIdsByAttribute, setEndorsementIdsByAttribute] = useState<Record<string, string>>({});
 
@@ -193,7 +196,7 @@ export function AttestationButtons({
     setSavingTypes((prev) => { const next = new Set(prev); next.add(type); return next; });
     sounds.select({ spatial: rect.left + rect.width / 2 });
 
-    const result = await createAttestation({ toUserId, toName, toHandle, toAvatarUrl, type });
+    const result = await createAttestation({ toUserId, toName, toHandle, toAvatarUrl, type, source });
 
     if (result.ok) {
       setActiveTypes((prev) => { const next = new Set(prev); next.add(type); return next; });
@@ -266,6 +269,7 @@ export function AttestationButtons({
       toAvatarUrl,
       type,
       attributeId,
+      source,
     });
 
     if (result.ok) {
@@ -278,7 +282,7 @@ export function AttestationButtons({
     }
 
     setSavingAttributes((prev) => { const next = new Set(prev); next.delete(attributeId); return next; });
-  }, [currentUserId, savingAttributes, toUserId, toName, toHandle, toAvatarUrl, createAttestation, router]);
+  }, [currentUserId, savingAttributes, toUserId, toName, toHandle, toAvatarUrl, createAttestation, router, source]);
 
   /* ── Endorsement retract handler ── */
 
