@@ -1,10 +1,13 @@
 /**
- * Intuition SDK Configuration
+ * Intuition SDK – Infrastructure Configuration
  *
- * Configuration for connecting to the Intuition chain using the official SDK.
+ * Responsible for:
+ *  - Environment detection
+ *  - Chain selection
+ *  - Deterministic contract address resolution
  *
- * Domain config (attestation types, attributes) lives in @/lib/attestations/definitions.ts
- * This file contains SDK-specific config: chain, contracts, environment detection.
+ * Domain config (attestation types, attributes) lives in @/lib/attestations/definitions.ts.
+ * This file MUST NOT contain business logic, wallet logic, or attestation logic.
  *
  * @see https://docs.intuition.systems/docs/intuition-sdk/installation-and-setup
  */
@@ -16,52 +19,58 @@ import {
 } from "@0xintuition/sdk";
 
 /* ────────────────────────────
-   Environment Detection
+   Environment Flags
 ──────────────────────────── */
 
-/**
- * Check if we're in development mode
- * Set NODE_ENV=development to enable
- */
 export const IS_DEV = process.env.NODE_ENV === "development";
 
-/**
- * Check if Intuition integration is enabled
- * Set NEXT_PUBLIC_INTUITION_ENABLED=true to enable
- */
 export const INTUITION_ENABLED =
   process.env.NEXT_PUBLIC_INTUITION_ENABLED === "true";
 
 /**
- * Check if we should use testnet
- * Defaults to true in development
+ * Chain selection strategy:
+ *
+ * Priority order:
+ * 1. Explicit NEXT_PUBLIC_INTUITION_TESTNET flag
+ * 2. Development fallback
  */
 export const USE_TESTNET =
   process.env.NEXT_PUBLIC_INTUITION_TESTNET === "true" || IS_DEV;
 
 /* ────────────────────────────
-   Chain Configuration
+   Chain Resolution
 ──────────────────────────── */
 
 /**
- * Intuition chain configuration from the SDK
+ * Returns the active Intuition chain configuration.
  *
- * - Testnet: Chain ID 13579 (for development)
- * - Mainnet: Chain ID 1155 (for production)
+ * Never reference intuitionMainnet / intuitionTestnet
+ * directly outside this file. Always go through this accessor.
  */
-export const INTUITION_CHAIN = USE_TESTNET ? intuitionTestnet : intuitionMainnet;
+export function getIntuitionChain() {
+  return USE_TESTNET ? intuitionTestnet : intuitionMainnet;
+}
 
 /**
- * MultiVault contract address for the current chain
- * This is the main entry point for creating atoms and triples
+ * Deterministically resolves the MultiVault deployment
+ * for the active chain.
  */
-export const MULTIVAULT_ADDRESS = getMultiVaultAddressFromChainId(
-  INTUITION_CHAIN.id
-);
+export function getMultiVaultAddress() {
+  return getMultiVaultAddressFromChainId(getIntuitionChain().id);
+}
 
 /**
- * Native currency symbol for the current chain (e.g., "tTRUST" on testnet, "TRUST" on mainnet).
- * Derived from the SDK chain config.
+ * Returns the native currency symbol (TRUST / tTRUST)
+ * from the active chain configuration.
  */
-export const NATIVE_CURRENCY_SYMBOL = INTUITION_CHAIN.nativeCurrency.symbol;
+export function getNativeCurrencySymbol() {
+  return getIntuitionChain().nativeCurrency.symbol;
+}
 
+/* ────────────────────────────
+   Convenience Constants
+──────────────────────────── */
+
+export const INTUITION_CHAIN = getIntuitionChain();
+export const MULTIVAULT_ADDRESS = getMultiVaultAddress();
+export const NATIVE_CURRENCY_SYMBOL = getNativeCurrencySymbol();

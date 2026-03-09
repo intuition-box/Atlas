@@ -10,6 +10,15 @@ import type { Address } from "viem";
 import type { AttestationType } from "@/lib/attestations/definitions";
 
 /* ────────────────────────────
+   Ethereum Provider
+──────────────────────────── */
+
+/** Typed injected provider — avoids `(window as any).ethereum` casts. */
+export type EthereumProvider = {
+  request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
+};
+
+/* ────────────────────────────
    Batch Mint
 ──────────────────────────── */
 
