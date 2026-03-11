@@ -107,8 +107,14 @@ function buildLabel(
    Hook: auto-hide with hover tracking
 ──────────────────────────── */
 
-function useAutoHide(enabled: boolean) {
-  const [visible, setVisible] = React.useState(true);
+/**
+ * Auto-hide hook that starts **hidden** by default.
+ * Call `trigger()` to show the dock and start the countdown.
+ * If the user hovers, the timer pauses until they leave.
+ * Once the timer fires, the dock hides and stays hidden until the next `trigger()`.
+ */
+function useAutoHide() {
+  const [visible, setVisible] = React.useState(false);
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const hoveredRef = React.useRef(false);
 
@@ -121,42 +127,39 @@ function useAutoHide(enabled: boolean) {
 
   const startTimer = React.useCallback(() => {
     stopTimer();
-    // Never start the countdown while the user is hovering
     if (hoveredRef.current) return;
     timerRef.current = setTimeout(() => setVisible(false), AUTO_HIDE_DELAY);
   }, [stopTimer]);
 
-  const resetTimer = React.useCallback(() => {
+  /** Show the dock and start the auto-hide countdown. */
+  const trigger = React.useCallback(() => {
     setVisible(true);
+    stopTimer();
+    if (!hoveredRef.current) {
+      startTimer();
+    }
+  }, [stopTimer, startTimer]);
+
+  /** Reset the countdown (e.g. on user interaction while dock is visible). */
+  const resetTimer = React.useCallback(() => {
+    if (!visible) return;
     startTimer();
-  }, [startTimer]);
+  }, [visible, startTimer]);
 
   const onMouseEnter = React.useCallback(() => {
     hoveredRef.current = true;
     stopTimer();
-    setVisible(true);
   }, [stopTimer]);
 
   const onMouseLeave = React.useCallback(() => {
     hoveredRef.current = false;
-    startTimer();
-  }, [startTimer]);
+    if (visible) startTimer();
+  }, [visible, startTimer]);
 
-  // Start/stop when enabled changes
-  React.useEffect(() => {
-    if (!enabled) {
-      stopTimer();
-      setVisible(true);
-      return;
-    }
-    // Only start timer if not hovered
-    if (!hoveredRef.current) {
-      resetTimer();
-    }
-    return stopTimer;
-  }, [enabled, resetTimer, stopTimer]);
+  // Cleanup on unmount
+  React.useEffect(() => stopTimer, [stopTimer]);
 
-  return { visible, resetTimer, onMouseEnter, onMouseLeave };
+  return { visible, trigger, resetTimer, onMouseEnter, onMouseLeave };
 }
 
 /* ────────────────────────────
@@ -166,22 +169,22 @@ function useAutoHide(enabled: boolean) {
 export function AttestationDock({ className }: { className?: string }) {
   const { data: session } = useSession();
   const viewerHandle = session?.user?.handle ?? null;
-  const { unminted, isOpen, setIsOpen, updateStance } = useAttestationQueue();
+  const { unminted, isOpen, setIsOpen, updateStance, lastCreatedAt } =
+    useAttestationQueue();
 
   // Show the most recent attestation (first in array — we prepend on create)
   const latest = unminted[0] ?? null;
   const count = unminted.length;
   const hasItems = latest !== null;
 
-  // Auto-hide after 4s of no interaction (hover-aware)
-  const { visible: autoVisible, resetTimer, onMouseEnter, onMouseLeave } =
-    useAutoHide(hasItems && !isOpen);
+  // Auto-hide: starts hidden, only triggered by new attestation creation
+  const { visible: autoVisible, trigger, resetTimer, onMouseEnter, onMouseLeave } =
+    useAutoHide();
 
-  // Reset visibility whenever the latest item changes (new attestation added)
-  const latestId = latest?.id;
+  // Trigger dock visibility only when a new attestation is created
   React.useEffect(() => {
-    if (latestId) resetTimer();
-  }, [latestId, resetTimer]);
+    if (lastCreatedAt > 0) trigger();
+  }, [lastCreatedAt, trigger]);
 
   // Deposit amount (Phase 2 — local UI state for now)
   const [depositAmount, setDepositAmount] = React.useState(MIN_DEPOSIT);

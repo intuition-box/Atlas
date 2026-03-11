@@ -50,6 +50,8 @@ type AttestationCartContextValue = {
   isFetching: boolean;
   /** Timestamp of last change — use to trigger refetches downstream */
   lastChangedAt: number;
+  /** Timestamp of last attestation creation — triggers dock visibility */
+  lastCreatedAt: number;
   /** Ref to the cart button for flying animation target */
   buttonRef: React.RefObject<HTMLButtonElement | null>;
 
@@ -123,6 +125,7 @@ export function AttestationQueueProvider({ children }: { children: React.ReactNo
   const [isFetching, setIsFetching] = React.useState(false);
   const [isOpen, setIsOpen] = React.useState(false);
   const [lastChangedAt, setLastChangedAt] = React.useState(0);
+  const [lastCreatedAt, setLastCreatedAt] = React.useState(0);
   const buttonRef = React.useRef<HTMLButtonElement | null>(null);
 
   // Track previous isOpen to detect open transitions
@@ -248,7 +251,9 @@ export function AttestationQueueProvider({ children }: { children: React.ReactNo
         ]);
       }
 
-      setLastChangedAt(Date.now());
+      const now = Date.now();
+      setLastChangedAt(now);
+      setLastCreatedAt(now);
       return { ok: true, id };
     },
     [],
@@ -346,6 +351,7 @@ export function AttestationQueueProvider({ children }: { children: React.ReactNo
       isOpen,
       isFetching,
       lastChangedAt,
+      lastCreatedAt,
       buttonRef,
       createAttestation,
       retractAttestation,
@@ -355,7 +361,7 @@ export function AttestationQueueProvider({ children }: { children: React.ReactNo
       setIsOpen,
       toggleOpen,
     }),
-    [unminted, isOpen, isFetching, lastChangedAt, createAttestation, retractAttestation, retractAll, updateStance, onItemMinted, toggleOpen],
+    [unminted, isOpen, isFetching, lastChangedAt, lastCreatedAt, createAttestation, retractAttestation, retractAll, updateStance, onItemMinted, toggleOpen],
   );
 
   return (
