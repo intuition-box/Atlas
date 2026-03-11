@@ -418,7 +418,10 @@ type FilterComboboxProps<T> = {
   onValueChange: (value: T | null) => void
   inputValue?: string
   onInputValueChange?: (value: string) => void
+  /** Controls how items render in the dropdown list. */
   renderItem?: (item: T) => React.ReactNode
+  /** Controls how the selected value displays in the input field. */
+  itemToStringLabel?: (value: T) => string
   emptyMessage?: string
   showClear?: boolean
   showTrigger?: boolean
@@ -434,6 +437,7 @@ function FilterCombobox<T extends string>({
   inputValue,
   onInputValueChange,
   renderItem,
+  itemToStringLabel,
   emptyMessage = "No items found.",
   showClear = true,
   showTrigger = true,
@@ -448,6 +452,7 @@ function FilterCombobox<T extends string>({
         onValueChange={(v) => onValueChange(v as T | null)}
         inputValue={inputValue}
         onInputValueChange={onInputValueChange}
+        itemToStringLabel={itemToStringLabel as ((value: unknown) => string) | undefined}
       >
         <ComboboxInput
           placeholder={placeholder}
@@ -977,7 +982,8 @@ function FiltersPanel({
           items={roleItems}
           value={filters.role || null}
           onValueChange={(v) => onFiltersChange({ role: (v as MemberRole) || "" })}
-          renderItem={(item) => (item ? item.charAt(0) + item.slice(1).toLowerCase() : "Any")}
+          renderItem={(item) => (item ? ROLE_LABELS[item as MemberRole] ?? item : "Any")}
+          itemToStringLabel={(item) => (item ? ROLE_LABELS[item as MemberRole] ?? item : "Any")}
         />
 
         {/* Row 2: Country + Language */}
@@ -1005,6 +1011,7 @@ function FiltersPanel({
           value={filters.orbitLevel || null}
           onValueChange={(v) => onFiltersChange({ orbitLevel: v || "" })}
           renderItem={(item) => (item ? item.charAt(0) + item.slice(1).toLowerCase() : "Any")}
+          itemToStringLabel={(item) => (item ? item.charAt(0) + item.slice(1).toLowerCase() : "Any")}
         />
 
         <FilterCombobox
@@ -1014,6 +1021,7 @@ function FiltersPanel({
           value={filters.orbitLevelType || null}
           onValueChange={(v) => onFiltersChange({ orbitLevelType: v || "" })}
           renderItem={(item) => (item === "auto" ? "Auto" : item === "manual" ? "Manual" : "Any")}
+          itemToStringLabel={(item) => (item === "auto" ? "Auto" : item === "manual" ? "Manual" : "Any")}
         />
 
         {/* Row 4: Skills + Tools */}
@@ -1347,8 +1355,6 @@ export default function CommunityMembersPage() {
       {canViewDirectory ? (
         <>
           {isFiltersOpen && (
-            <>
-            <Separator />
             <FiltersPanel
               filters={filters}
               onFiltersChange={handleFiltersChange}
@@ -1358,7 +1364,6 @@ export default function CommunityMembersPage() {
               memberCount={memberItems.length}
               hasMorePages={!!membersData?.page?.nextCursor}
             />
-            </>
           )}
 
           {membersError && (

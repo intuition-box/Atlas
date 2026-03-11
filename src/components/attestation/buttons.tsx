@@ -125,6 +125,7 @@ export function AttestationButtons({
   const currentUserId = session?.user?.id;
   const isSessionLoading = sessionStatus === "loading";
   const isEndorsementMode = !!items;
+  const targetLabel = toHandle ? `@${toHandle}` : toName;
 
   // Fetch status on mount and when attestations change
   useEffect(() => {
@@ -310,6 +311,14 @@ export function AttestationButtons({
     setRetractingAttributes((prev) => { const next = new Set(prev); next.delete(attributeId); return next; });
   }, [endorsementIdsByAttribute, retractingAttributes, endorsementCounts, retractAttestation]);
 
+  /* ── Shared button styles ── */
+
+  const COUNT_BASE = "flex items-center justify-center size-5 ml-1 -mr-1 rounded-full text-[10px] leading-none";
+  const COUNT_DEFAULT = "bg-background/40";
+  const COUNT_ACTIVE = "bg-primary/10 text-primary";
+  const COUNT_HOVER = "group-hover/button:bg-destructive/10 group-hover/button:text-destructive";
+  const ACTIVE_BUTTON = "bg-secondary/50 text-primary hover:bg-destructive/10 hover:text-destructive";
+
   /* ── Endorsement mode render ── */
 
   if (isEndorsementMode && endorsementType) {
@@ -355,16 +364,21 @@ export function AttestationButtons({
               <>
                 {label}
                 {count > 0 && (
-                  <span className="text-xs">+{count}</span>
+                  <span className={cn(COUNT_BASE, isSelf || endorsed ? COUNT_ACTIVE : COUNT_DEFAULT, endorsed && !isSelf && COUNT_HOVER)}>{count}</span>
                 )}
               </>
             );
 
             const button = (() => {
-              // Self profile — always read-only
+              // Self profile — read-only but hoverable for tooltips
               if (isSelf) {
                 return (
-                  <Button key={attributeId} variant="secondary" size={size} disabled>
+                  <Button
+                    key={attributeId}
+                    variant="outline"
+                    size={size}
+                    className="cursor-default border-border bg-transparent hover:bg-transparent hover:text-current"
+                  >
                     {buttonContent}
                   </Button>
                 );
@@ -379,14 +393,14 @@ export function AttestationButtons({
                 );
               }
 
-              // Already endorsed — secondary, hover shows destructive via CSS
+              // Already endorsed — primary text, secondary bg, hover shows destructive
               if (endorsed) {
                 return (
                   <Button
                     key={attributeId}
                     variant="secondary"
                     size={size}
-                    className="opacity-50 hover:opacity-100 hover:bg-destructive/10 hover:text-destructive"
+                    className={ACTIVE_BUTTON}
                     onClick={(e) => handleRetractEndorsement(e, attributeId)}
                   >
                     {buttonContent}
@@ -416,7 +430,14 @@ export function AttestationButtons({
               );
             })();
 
-            if (!hasTooltipData) return button;
+            // CTA tooltip for non-endorsed, non-self buttons
+            const ctaTooltip = !endorsed && !isSelf && !isSaving && !isRetracting
+              ? (endorsementType === "SKILL_ENDORSE"
+                  ? `Endorse ${targetLabel} is skilled in ${label}`
+                  : `Endorse ${targetLabel} uses ${label}`)
+              : null;
+
+            if (!hasTooltipData && !ctaTooltip) return button;
 
             return (
               <Tooltip key={attributeId}>
@@ -424,7 +445,10 @@ export function AttestationButtons({
                   {button}
                 </TooltipTrigger>
                 <TooltipContent side="top" sideOffset={8}>
-                  <AttestorTooltip attestors={endorsers} totalCount={count} />
+                  {hasTooltipData
+                    ? <AttestorTooltip attestors={endorsers} totalCount={count} />
+                    : ctaTooltip
+                  }
                 </TooltipContent>
               </Tooltip>
             );
@@ -479,7 +503,7 @@ export function AttestationButtons({
             <>
               <AttestationBadge type={attestType.id} bare showEmoji={false} />
               {count > 0 && (
-                <span className="text-xs">+{count}</span>
+                <span className={cn(COUNT_BASE, isActive ? COUNT_ACTIVE : COUNT_DEFAULT, isActive && COUNT_HOVER)}>{count}</span>
               )}
             </>
           );
@@ -494,14 +518,14 @@ export function AttestationButtons({
               );
             }
 
-            // Already attested — secondary, hover shows destructive via CSS
+            // Already attested — primary text, secondary bg, hover shows destructive
             if (isActive) {
               return (
                 <Button
                   key={attestType.id}
                   variant="secondary"
                   size={size}
-                  className="opacity-50 hover:opacity-100 hover:bg-destructive/10 hover:text-destructive"
+                  className={ACTIVE_BUTTON}
                   onClick={(e) => handleRetractClick(e, type)}
                 >
                   {buttonContent}
@@ -531,7 +555,12 @@ export function AttestationButtons({
             );
           })();
 
-          if (!hasTooltip) return button;
+          // CTA tooltip for non-active buttons
+          const ctaTooltip = !isActive && !isSaving && !isRetracting
+            ? `Attest your relations with ${targetLabel}`
+            : null;
+
+          if (!hasTooltip && !ctaTooltip) return button;
 
           return (
             <Tooltip key={attestType.id}>
@@ -539,7 +568,10 @@ export function AttestationButtons({
                 {button}
               </TooltipTrigger>
               <TooltipContent side="top" sideOffset={8}>
-                <AttestorTooltip attestors={attestors} totalCount={totalCount} />
+                {hasTooltip
+                  ? <AttestorTooltip attestors={attestors} totalCount={totalCount} />
+                  : ctaTooltip
+                }
               </TooltipContent>
             </Tooltip>
           );
@@ -564,7 +596,7 @@ function AttestorTooltip({ attestors, totalCount }: { attestors: AttestorInfo[];
   return (
     <div className="flex flex-col gap-3 py-0.5">
       {attestors.map((u) => (
-        <div key={u.id} className="flex items-center justify-between gap-4">
+        <div key={u.id} className="flex items-center gap-2">
           <ProfileAvatar
             type="user"
             src={u.avatarUrl}
@@ -575,7 +607,7 @@ function AttestorTooltip({ attestors, totalCount }: { attestors: AttestorInfo[];
           <span className="text-xs text-white">
             {u.name ?? `@${u.handle}`}
           </span>
-          <span className="text-xs text-muted-foreground">
+          <span className="ml-auto pl-5 text-xs text-muted-foreground">
             {formatRelativeTime(u.createdAt)}
           </span>
         </div>

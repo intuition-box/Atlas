@@ -29,6 +29,7 @@ export const POST = api(BodySchema, async (ctx) => {
       toUserId: true,
       type: true,
       source: true,
+      mintedAt: true,
       revokedAt: true,
       supersededById: true,
     },
@@ -45,7 +46,7 @@ export const POST = api(BodySchema, async (ctx) => {
   if (row.supersededById) {
     return errJson({
       code: "CONFLICT",
-      message: "Attestation can't be retracted (superseded)",
+      message: "Attestation can't be removed (superseded)",
       status: 409,
     });
   }
@@ -65,7 +66,7 @@ export const POST = api(BodySchema, async (ctx) => {
     select: { id: true },
   });
 
-  emitEvent({ fromUserId: row.fromUserId, toUserId: row.toUserId, type: EventType.ATTESTATION_RETRACTED, metadata: { attestationType: row.type, source: row.source ?? null } });
+  emitEvent({ fromUserId: row.fromUserId, toUserId: row.toUserId, type: EventType.ATTESTATION_RETRACTED, metadata: { attestationType: row.type, source: row.source ?? null, minted: !!row.mintedAt } });
   recomputeScoresForAttestationPair({ fromUserId: row.fromUserId, toUserId: row.toUserId });
 
   return okJson<RetractOk>({ attestation: { id: row.id }, alreadyRevoked: false });

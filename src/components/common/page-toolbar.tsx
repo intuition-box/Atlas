@@ -115,54 +115,13 @@ function PageToolbar({
 
   // Determine rendering mode: expandable tabs (icons) vs legacy ButtonGroup
   const navHasIcons = nav ? allHaveIcons(nav) : false
+  const viewSwitchHasIcons = hasViewSwitch && viewSwitch.options.every((o) => o.icon)
   const overflowLinks = overflow?.filter((o): o is OverflowLink => !!o.href) ?? []
   const overflowHasIcons = overflowLinks.length > 0 && overflowLinks.every((o) => o.icon)
 
   return (
     <div className={cn("flex flex-wrap items-center gap-2", className)}>
-      {/* View switch group */}
-      <AnimatePresence>
-        {hasViewSwitch && (
-          <motion.div
-            key="view-switch"
-            initial={{ opacity: 0, filter: "blur(4px)" }}
-            animate={{ opacity: 1, filter: "blur(0px)" }}
-            exit={{ opacity: 0, filter: "blur(4px)" }}
-            transition={{ duration: 0.2 }}
-          >
-            <ButtonGroup>
-              {viewSwitch.options.map((opt, i) => {
-                const isActive = viewSwitch.value === opt.value
-                const Icon = opt.icon
-                const isFirst = i === 0
-                const isLast = i === viewSwitch.options.length - 1
-                return (
-                  <Button
-                    key={opt.value}
-                    type="button"
-                    variant="outline"
-                    aria-label={Icon ? opt.label : undefined}
-                    aria-pressed={isActive}
-                    className={cn(
-                      Icon && "px-2.5",
-                      Icon && isFirst && "pl-3.5",
-                      Icon && isLast && "pr-3.5",
-                      isActive
-                        ? "bg-primary/10 text-primary hover:bg-primary/15"
-                        : "text-muted-foreground",
-                    )}
-                    onClick={() => viewSwitch.onChange(opt.value)}
-                  >
-                    {Icon ? <Icon className="size-4" /> : opt.label}
-                  </Button>
-                )
-              })}
-            </ButtonGroup>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Standalone action buttons */}
+      {/* Standalone action buttons (left-most) */}
       <AnimatePresence>
         {hasActions &&
           actions.map((action) => {
@@ -194,6 +153,52 @@ function PageToolbar({
           })}
       </AnimatePresence>
 
+      {/* View switch group — expandable icon tabs when icons are present */}
+      <AnimatePresence>
+        {hasViewSwitch && (
+          <motion.div
+            key="view-switch"
+            initial={{ opacity: 0, filter: "blur(4px)" }}
+            animate={{ opacity: 1, filter: "blur(0px)" }}
+            exit={{ opacity: 0, filter: "blur(4px)" }}
+            transition={{ duration: 0.2 }}
+          >
+            {viewSwitchHasIcons ? (
+              <ExpandableViewSwitch viewSwitch={viewSwitch} />
+            ) : (
+              <ButtonGroup>
+                {viewSwitch.options.map((opt, i) => {
+                  const isActive = viewSwitch.value === opt.value
+                  const Icon = opt.icon
+                  const isFirst = i === 0
+                  const isLast = i === viewSwitch.options.length - 1
+                  return (
+                    <Button
+                      key={opt.value}
+                      type="button"
+                      variant="outline"
+                      aria-label={Icon ? opt.label : undefined}
+                      aria-pressed={isActive}
+                      className={cn(
+                        Icon && "px-2.5",
+                        Icon && isFirst && "pl-3.5",
+                        Icon && isLast && "pr-3.5",
+                        isActive
+                          ? "bg-primary/10 text-primary hover:bg-primary/15"
+                          : "text-muted-foreground",
+                      )}
+                      onClick={() => viewSwitch.onChange(opt.value)}
+                    >
+                      {Icon ? <Icon className="size-4" /> : opt.label}
+                    </Button>
+                  )
+                })}
+              </ButtonGroup>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* ── Expandable icon tabs (new path) ── */}
       {hasNav && navHasIcons && (
         <ExpandableIconNav
@@ -212,6 +217,30 @@ function PageToolbar({
         />
       )}
     </div>
+  )
+}
+
+// === EXPANDABLE VIEW SWITCH ===
+
+/** Renders a ViewSwitch as expandable icon tabs (when all options have icons). */
+function ExpandableViewSwitch({ viewSwitch }: { viewSwitch: ViewSwitch<string> }) {
+  const activeIndex = viewSwitch.options.findIndex((o) => o.value === viewSwitch.value)
+
+  const tabs: TabItem[] = viewSwitch.options.map((opt) => ({
+    title: opt.label,
+    icon: opt.icon!,
+  }))
+
+  return (
+    <ExpandableTabs
+      tabs={tabs}
+      activeIndex={activeIndex >= 0 ? activeIndex : null}
+      onChange={(index) => {
+        if (index !== null && viewSwitch.options[index]) {
+          viewSwitch.onChange(viewSwitch.options[index].value)
+        }
+      }}
+    />
   )
 }
 

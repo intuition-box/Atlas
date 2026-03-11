@@ -232,9 +232,9 @@ export function AttestationDock({ className }: { className?: string }) {
             )}
           >
             {/* ── Action bar: Oppose | Support + Cart ── */}
-            <div className="mb-3 flex items-center gap-2">
+            <div className="mb-3 flex items-center gap-1.5">
               {/* Stance toggle */}
-              <div className="flex items-center gap-1 rounded-full border border-border bg-input/30 bg-clip-padding px-1 py-[3px] flex-1">
+              <div className="flex items-center gap-0.5 rounded-full border border-border bg-input/30 bg-clip-padding px-0.5 py-[2px] flex-1">
                 {STANCES.map((stance) => {
                   const Icon = stance.icon;
                   const isActive = isSupport
@@ -246,14 +246,14 @@ export function AttestationDock({ className }: { className?: string }) {
                       type="button"
                       onClick={() => handleStanceChange(stance.key)}
                       className={cn(
-                        "flex flex-1 items-center justify-center gap-1.5 rounded-full px-3 py-2",
-                        "text-sm leading-none font-medium transition-colors duration-200",
+                        "flex flex-1 items-center justify-center gap-1 rounded-full px-2.5 py-1",
+                        "text-xs leading-none font-medium transition-colors duration-200",
                         isActive
                           ? cn(stance.activeBg, stance.activeColor)
                           : "text-muted-foreground hover:bg-input/50 hover:text-foreground",
                       )}
                     >
-                      <Icon size={16} />
+                      <Icon size={14} />
                       {stance.label}
                     </button>
                   );
@@ -267,15 +267,15 @@ export function AttestationDock({ className }: { className?: string }) {
                 className={cn(
                   "relative flex items-center justify-center rounded-full",
                   "border border-border bg-input/30",
-                  "size-9 shrink-0",
+                  "size-7 shrink-0",
                   "text-muted-foreground hover:bg-input/50 hover:text-foreground",
                   "transition-colors duration-200",
                 )}
                 aria-label={`${count} attestation${count !== 1 ? "s" : ""} in queue`}
               >
-                <ShoppingCart size={16} />
+                <ShoppingCart size={13} />
                 {count > 0 && (
-                  <span className="absolute -top-1 -right-0.5 flex items-center justify-center min-w-4 h-4 px-1 text-[9px] font-bold rounded-full bg-primary text-primary-foreground">
+                  <span className="absolute -top-1 -right-0.5 flex items-center justify-center min-w-3.5 h-3.5 px-0.5 text-[8px] font-bold rounded-full bg-primary text-primary-foreground">
                     {count > 99 ? "99+" : count}
                   </span>
                 )}
@@ -302,14 +302,14 @@ export function AttestationDock({ className }: { className?: string }) {
                     }
                   }}
                   className={cn(
-                    "h-8 pr-12 text-sm font-mono",
+                    "h-8 pr-14 text-sm font-mono",
                     accentBorder,
                     accentRing,
                   )}
-                  aria-label="Deposit amount in ETH"
+                  aria-label="Deposit amount in TRUST"
                 />
                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground font-medium pointer-events-none">
-                  ETH
+                  TRUST
                 </span>
               </div>
 

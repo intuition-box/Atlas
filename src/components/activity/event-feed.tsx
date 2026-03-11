@@ -42,7 +42,7 @@ export type EventTypeConfig = {
 const DEFAULT_EVENT_TYPE_CONFIG: Record<string, EventTypeConfig> = {
   JOINED: { label: "Joined", variant: "positive" },
   ATTESTED: { label: "Attestation", variant: "default" },
-  ATTESTATION_RETRACTED: { label: "Retracted", variant: "destructive" },
+  ATTESTATION_RETRACTED: { label: "Removed", variant: "destructive" },
   ATTESTATION_SUPERSEDED: { label: "Attestation Updated", variant: "secondary" },
   ROLE_UPDATED: { label: "Role Change", variant: "info" },
   ORBIT_OVERRIDE: { label: "Orbit Override", variant: "info" },
@@ -138,6 +138,12 @@ function AttestationEventRow({
 }) {
   const attestationType = (event.metadata?.attestationType as string) ?? null;
 
+  // For retraction events, show "Withdrawn" for minted attestations, "Removed" for pending
+  const retractLabel =
+    event.type === "ATTESTATION_RETRACTED" && event.metadata?.minted === true
+      ? "Withdrawn"
+      : null;
+
   return (
     <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 p-3">
       <div className="flex items-center gap-2 min-w-0 text-sm">
@@ -154,7 +160,11 @@ function AttestationEventRow({
         {extra}
       </div>
       <div className="flex items-center gap-2 shrink-0">
-        <EventTypeBadge type={event.type} config={config} />
+        {retractLabel ? (
+          <Badge variant="destructive" className="shrink-0">{retractLabel}</Badge>
+        ) : (
+          <EventTypeBadge type={event.type} config={config} />
+        )}
         <span className="text-xs text-muted-foreground">
           {formatRelativeTime(event.createdAt)}
         </span>

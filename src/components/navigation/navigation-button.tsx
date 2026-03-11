@@ -35,16 +35,16 @@ export function NavigationButton({
   className,
 }: NavigationButtonProps) {
   const buttonClasses = cn(
-    "flex items-center justify-center",
-    "size-10 rounded-full",
-    "text-muted-foreground hover:text-foreground",
+    "flex items-center justify-center cursor-pointer",
+    "size-8 rounded-full",
+    "text-muted-foreground hover:bg-input/50 hover:text-foreground",
     "transition-all duration-200",
     "focus:outline-none focus-visible:ring-2 focus-visible:ring-primary",
     isActive && "text-foreground",
     className
   );
 
-  const content = <Icon className="size-5" />;
+  const content = <Icon className="size-4" />;
 
   if (href) {
     return (

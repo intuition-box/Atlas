@@ -34,7 +34,7 @@ export default function TermsPage() {
       <section className="space-y-3">
         <h2 className="text-xl font-semibold">4. Attestations</h2>
         <p className="text-muted-foreground">
-          Attestations represent verifiable claims between members. Off-chain attestations can be retracted at any time. Once an attestation is minted on-chain, it becomes a permanent, immutable record on the blockchain and cannot be deleted or modified.
+          Attestations represent verifiable claims between members. Off-chain attestations can be removed at any time. Once an attestation is minted on-chain, staking can be withdrawn to revoke support, but the record remains on the blockchain.
         </p>
       </section>
 

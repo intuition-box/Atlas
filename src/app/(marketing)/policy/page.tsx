@@ -34,7 +34,7 @@ export default function PolicyPage() {
       <section className="space-y-3">
         <h2 className="text-xl font-semibold">4. On-Chain Data</h2>
         <p className="text-muted-foreground">
-          Attestations minted on-chain are recorded on a public blockchain and cannot be deleted or modified. Please consider this before minting any attestation. Off-chain attestations can be retracted at any time.
+          Attestations minted on-chain are recorded on a public blockchain. Staking can be withdrawn to revoke support, but the record cannot be deleted or modified. Please consider this before minting any attestation. Off-chain attestations can be removed at any time.
         </p>
       </section>
 

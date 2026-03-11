@@ -10,7 +10,6 @@ import {
 } from "@/components/ui/tooltip";
 import { useAttestationQueue } from "./queue-provider";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 
 /* ────────────────────────────
    Component
@@ -23,20 +22,21 @@ export function AttestationQueueButton({ className }: { className?: string }) {
   return (
     <Tooltip>
       <TooltipTrigger>
-        <Button
+        <button
           ref={buttonRef}
-          variant="ghost"
-          size="icon"
           onClick={toggleOpen}
-
           type="button"
           className={cn(
-            "relative size-10 rounded-full",
+            "relative flex items-center justify-center cursor-pointer",
+            "size-8 rounded-full",
+            "text-muted-foreground hover:bg-input/50 hover:text-foreground",
+            "transition-all duration-200",
+            "focus:outline-none focus-visible:ring-2 focus-visible:ring-primary",
             isOpen && "text-foreground",
             className
           )}
         >
-          <ShoppingCart className="size-5" />
+          <ShoppingCart className="size-4" />
           {count > 0 && (
             <Badge
               variant="solid"
@@ -45,7 +45,7 @@ export function AttestationQueueButton({ className }: { className?: string }) {
               {count > 99 ? "99+" : count}
             </Badge>
           )}
-        </Button>
+        </button>
       </TooltipTrigger>
       <TooltipContent side="bottom" sideOffset={8}>
         <p className="text-xs">

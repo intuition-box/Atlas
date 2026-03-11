@@ -6,6 +6,7 @@ import { signOut, useSession } from "next-auth/react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Activity,
+  Award,
   ChevronDown,
   Eye,
   EyeOff,
@@ -13,6 +14,7 @@ import {
   LogIn,
   LogOut,
   Plus,
+  Settings,
   User,
   Volume2,
   VolumeX,
@@ -20,7 +22,7 @@ import {
 
 import { cn } from "@/lib/utils";
 import { useSounds } from "@/lib/sounds";
-import { ROUTES, userPath, userSettingsPath, activityPath } from "@/lib/routes";
+import { ROUTES, userPath, userSettingsPath, userAttestationsPath, activityPath } from "@/lib/routes";
 import { Logo } from "@/components/brand/logo";
 import {
   Menu,
@@ -81,7 +83,6 @@ export function NavigationController({
     <div
       className={cn(
         "fixed inset-0 z-40 pointer-events-none",
-        "p-4 sm:p-6",
         className
       )}
     >
@@ -93,7 +94,7 @@ export function NavigationController({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -12 }}
             transition={{ duration: 0.3, ease: "easeOut" }}
-            className="absolute top-4 left-4 sm:top-6 sm:left-6 pointer-events-auto"
+            className="absolute top-3 left-3 sm:left-4 pointer-events-auto"
           >
             <Menu>
               <MenuTrigger
@@ -110,24 +111,53 @@ export function NavigationController({
                 <ChevronDown className="size-3 text-muted-foreground" />
               </MenuTrigger>
               <MenuContent side="bottom" align="start" sideOffset={8}>
-                <MenuItem render={<Link href={ROUTES.home} />}>
+                <MenuItem
+                  render={<Link href={ROUTES.home} />}
+                  className={pathname === ROUTES.home ? "text-primary" : undefined}
+                >
                   <Globe className="size-4" />
                   Communities
                 </MenuItem>
-                <MenuItem render={<Link href={activityPath()} />}>
+                <MenuItem
+                  render={<Link href={activityPath()} />}
+                  className={pathname.startsWith("/activity") ? "text-primary" : undefined}
+                >
                   <Activity className="size-4" />
                   Activity
                 </MenuItem>
                 {isAuthed && userHandle && (
-                  <MenuItem render={<Link href={userPath(userHandle)} />}>
-                    <User className="size-4" />
-                    Profile
-                  </MenuItem>
+                  <>
+                    <MenuSeparator />
+                    <MenuItem
+                      render={<Link href={userPath(userHandle)} />}
+                      className={pathname === userPath(userHandle) ? "text-primary" : undefined}
+                    >
+                      <User className="size-4" />
+                      Profile
+                    </MenuItem>
+                    <MenuItem
+                      render={<Link href={userAttestationsPath(userHandle)} />}
+                      className={pathname.startsWith(userAttestationsPath(userHandle)) ? "text-primary" : undefined}
+                    >
+                      <Award className="size-4" />
+                      Attestations
+                    </MenuItem>
+                    <MenuItem
+                      render={<Link href={userSettingsPath(userHandle)} />}
+                      className={pathname.startsWith(userSettingsPath(userHandle)) ? "text-primary" : undefined}
+                    >
+                      <Settings className="size-4" />
+                      Settings
+                    </MenuItem>
+                  </>
                 )}
                 {isAuthed ? (
                   <>
                     <MenuSeparator />
-                    <MenuItem render={<Link href={ROUTES.newCommunity} />}>
+                    <MenuItem
+                      render={<Link href={ROUTES.newCommunity} />}
+                      className={pathname === ROUTES.newCommunity ? "text-primary" : undefined}
+                    >
                       <Plus className="size-4" />
                       New Community
                     </MenuItem>
@@ -157,9 +187,9 @@ export function NavigationController({
         initial={{ opacity: 0, y: -12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, ease: "easeOut", delay: 0.05 }}
-        className="absolute top-4 right-4 sm:top-6 sm:right-6 pointer-events-auto"
+        className="absolute top-3 right-3 sm:right-4 pointer-events-auto"
       >
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 rounded-full border border-border bg-input/30 bg-clip-padding px-1 py-[3px]">
           {/* Attestation Cart (authed only) */}
           {showControls && isAuthed && <AttestationQueueButton />}
 
@@ -183,17 +213,17 @@ export function NavigationController({
               <button
                 onClick={toggle}
                 className={cn(
-                  "flex items-center justify-center",
-                  "size-10 rounded-full",
-                  "text-muted-foreground hover:text-foreground",
+                  "flex items-center justify-center cursor-pointer",
+                  "size-8 rounded-full",
+                  "text-muted-foreground hover:bg-input/50 hover:text-foreground",
                   "transition-all duration-200",
                   "focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 )}
               >
                 {isVisible ? (
-                  <Eye className="size-5" />
+                  <Eye className="size-4" />
                 ) : (
-                  <EyeOff className="size-5" />
+                  <EyeOff className="size-4" />
                 )}
               </button>
             </TooltipTrigger>
@@ -212,9 +242,9 @@ export function NavigationController({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 12 }}
             transition={{ duration: 0.3, ease: "easeOut" }}
-            className="absolute bottom-4 left-4 sm:bottom-6 sm:left-6 pointer-events-auto"
+            className="absolute bottom-3 left-3 sm:left-4 pointer-events-auto"
           >
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 rounded-full border border-border bg-input/30 bg-clip-padding px-1 py-[3px]">
               {controls.bottomLeft?.map((item, idx) => (
                 <NavigationButton key={`bottomLeft-${idx}`} {...item} />
               ))}

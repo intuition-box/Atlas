@@ -80,6 +80,35 @@ const transition = {
   duration: 0.6,
 };
 
+// ── Tab with tooltip ────────────────────────────────────────────────
+
+/** Fully controlled tooltip that suppresses hover when the tab is active. */
+function TabWithTooltip({
+  tab,
+  isActive,
+  children,
+}: {
+  tab: Tab;
+  isActive: boolean;
+  children: React.ReactElement;
+}) {
+  const [hovered, setHovered] = React.useState(false);
+
+  // Force-close when tab becomes active
+  React.useEffect(() => {
+    if (isActive) setHovered(false);
+  }, [isActive]);
+
+  return (
+    <Tooltip open={hovered && !isActive} onOpenChange={setHovered}>
+      <TooltipTrigger>{children}</TooltipTrigger>
+      <TooltipContent side="bottom" sideOffset={8}>
+        {tab.title}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 // ── Component ──────────────────────────────────────────────────────
 
 export function ExpandableTabs({
@@ -176,14 +205,9 @@ export function ExpandableTabs({
             : inner;
 
           return (
-            <Tooltip key={tab.title}>
-              <TooltipTrigger>{wrapped}</TooltipTrigger>
-              {!isActive && (
-                <TooltipContent side="bottom" sideOffset={8}>
-                  {tab.title}
-                </TooltipContent>
-              )}
-            </Tooltip>
+            <TabWithTooltip key={tab.title} tab={tab} isActive={isActive}>
+              {wrapped}
+            </TabWithTooltip>
           );
         })}
       </div>

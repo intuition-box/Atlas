@@ -35,7 +35,7 @@ const EMPTY_FILTERS: FilterState = { q: "", type: "" };
 const EVENT_TYPE_CONFIG: Record<string, EventTypeConfig> = {
   JOINED: { label: "Joined", variant: "positive" },
   ATTESTED: { label: "Attestation", variant: "default" },
-  ATTESTATION_RETRACTED: { label: "Retracted", variant: "destructive" },
+  ATTESTATION_RETRACTED: { label: "Removed", variant: "destructive" },
   ATTESTATION_SUPERSEDED: { label: "Attestation Updated", variant: "secondary" },
 };
 

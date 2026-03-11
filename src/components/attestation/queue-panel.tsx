@@ -252,7 +252,7 @@ export function AttestationQueuePanel() {
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogContent className="sm:max-w-lg" showCloseButton={false}>
+      <DialogContent className="sm:max-w-lg" showCloseButton={false} animation="slide">
         <DialogHeader className="relative">
           <div className="flex items-start justify-between gap-4">
             <div className="flex flex-col gap-1">

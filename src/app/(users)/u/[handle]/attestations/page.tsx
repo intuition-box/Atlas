@@ -214,25 +214,25 @@ function useAttestationsData(
 function AttestationRow({
   attestation,
   viewerId,
-  onRetract,
+  onRemove,
 }: {
   attestation: Attestation
   viewerId: string | null
-  onRetract?: (id: string) => void
+  onRemove?: (id: string) => void
 }) {
-  const [isRetracting, setIsRetracting] = React.useState(false)
+  const [isRemoving, setIsRemoving] = React.useState(false)
   const otherUser = attestation.toUser
-  const canRetract = viewerId === attestation.fromUser.id
+  const canRemove = viewerId === attestation.fromUser.id
   const isMinted = !!attestation.mintedAt
   const displayName = otherUser.name?.trim() || `@${otherUser.handle}`
   const href = userPath(otherUser.handle ?? otherUser.id)
 
-  const handleRetract = async (e: React.MouseEvent) => {
+  const handleRemove = async (e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    if (isRetracting || !canRetract) return
+    if (isRemoving || !canRemove) return
 
-    setIsRetracting(true)
+    setIsRemoving(true)
     try {
       const result = await apiPost<{ alreadyRevoked: boolean }>(
         "/api/attestation/retract",
@@ -240,10 +240,10 @@ function AttestationRow({
       )
 
       if (result.ok) {
-        onRetract?.(attestation.id)
+        onRemove?.(attestation.id)
       }
     } finally {
-      setIsRetracting(false)
+      setIsRemoving(false)
     }
   }
 
@@ -262,16 +262,16 @@ function AttestationRow({
       </div>
 
       <div className="flex items-center gap-2 shrink-0">
-        {canRetract && (
+        {canRemove && (
           <Button
             variant="destructive"
             size="xs"
-            onClick={handleRetract}
-            disabled={isRetracting}
+            onClick={handleRemove}
+            disabled={isRemoving}
             className="gap-1"
           >
             <Undo2 className="size-3" />
-            {isRetracting ? "…" : "Retract"}
+            {isRemoving ? "…" : isMinted ? "Withdraw" : "Remove"}
           </Button>
         )}
         {isMinted ? (
@@ -487,7 +487,7 @@ export default function AttestationsPage() {
     }
   }, [fetchedItems, fetchedIds, localItems.length])
 
-  const handleRetract = React.useCallback((attestationId: string) => {
+  const handleRemove = React.useCallback((attestationId: string) => {
     setLocalItems((prev) => prev.filter((a) => a.id !== attestationId))
   }, [])
 
@@ -648,7 +648,7 @@ export default function AttestationsPage() {
                   <AttestationRow
                     attestation={a}
                     viewerId={viewerId}
-                    onRetract={handleRetract}
+                    onRemove={handleRemove}
                   />
                 )}
                 loading={false}

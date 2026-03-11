@@ -5,10 +5,13 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useSession } from "next-auth/react"
 import {
+  Activity,
   ArrowDownLeft,
   ArrowUpRight,
   CalendarIcon,
   Globe,
+  Search,
+  Trophy,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -468,7 +471,7 @@ function FiltersPanel({
 
 function ActivitySkeleton() {
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-7 pb-40">
+    <div className="mx-auto flex w-full max-w-4xl flex-col mt-24 gap-7 pb-40">
       <div className="w-full p-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 items-start gap-3">
           <Skeleton className="size-12 rounded-full shrink-0" />
@@ -634,7 +637,7 @@ export default function ActivityPage() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
+    <div className="mx-auto flex w-full max-w-4xl flex-col mt-24 gap-6 pb-40">
       <PageHeader
         leading={
           <Avatar className="h-12 w-12 has-[[data-slot=avatar-fallback]]:after:border-primary/15">
@@ -647,14 +650,14 @@ export default function ActivityPage() {
         actions={
           <PageToolbar
             actions={tab === "events" ? [
-              { label: "Filters", active: isFiltersOpen, onClick: () => setIsFiltersOpen((v) => !v) },
+              { label: "Filters", icon: Search, active: isFiltersOpen, onClick: () => setIsFiltersOpen((v) => !v) },
             ] : undefined}
             viewSwitch={{
               value: tab,
               onChange: (v) => setTab(v as "events" | "leaderboard"),
               options: [
-                { value: "leaderboard", label: "Leaderboard" },
-                { value: "events", label: "Events" },
+                { value: "leaderboard", label: "Leaderboard", icon: Trophy },
+                { value: "events", label: "Events", icon: Activity },
               ],
             }}
           />

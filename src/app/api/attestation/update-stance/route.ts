@@ -51,7 +51,7 @@ export const POST = api(BodySchema, async (ctx) => {
   if (attestation.revokedAt) {
     return errJson({
       code: "INVALID_REQUEST",
-      message: "Cannot change stance on a retracted attestation",
+      message: "Cannot change stance on a removed attestation",
       status: 400,
     });
   }

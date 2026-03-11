@@ -408,7 +408,7 @@ export async function retractAttestation(
     if (row.supersededById) {
       return err({
         code: "CONFLICT",
-        message: "Attestation can't be retracted (superseded)",
+        message: "Attestation can't be removed (superseded)",
         status: 409,
       });
     }
