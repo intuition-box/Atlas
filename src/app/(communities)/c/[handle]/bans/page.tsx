@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 
+import { hasPermission } from "@/lib/permissions-shared"
 import { useCommunity } from "../community-provider"
 
 // === TYPES ===
@@ -135,16 +136,21 @@ export default function CommunityBansPage() {
   const [loading, setLoading] = React.useState(true)
   const [unbanningId, setUnbanningId] = React.useState<string | null>(null)
 
-  // Admin gate
+  // Permission gate — redirect users without membership.remove permission
+  const canManageBans = hasPermission(
+    ctx.viewerMembership?.role ?? "MEMBER",
+    "membership.remove",
+    ctx.community?.permissions,
+  )
   React.useEffect(() => {
-    if (ctx.status === "ready" && !ctx.isAdmin) {
+    if (ctx.status === "ready" && !canManageBans) {
       router.replace(communityPath(handle))
     }
-  }, [ctx.status, ctx.isAdmin, handle, router])
+  }, [ctx.status, canManageBans, handle, router])
 
   // Fetch banned members once community data is ready
   React.useEffect(() => {
-    if (ctx.status !== "ready" || !ctx.isAdmin) return
+    if (ctx.status !== "ready" || !canManageBans) return
 
     const ac = new AbortController()
 
@@ -164,7 +170,7 @@ export default function CommunityBansPage() {
     })()
 
     return () => { ac.abort() }
-  }, [ctx.status, ctx.isAdmin, handle])
+  }, [ctx.status, canManageBans, handle])
 
   async function handleUnban(membershipId: string) {
     setUnbanningId(membershipId)

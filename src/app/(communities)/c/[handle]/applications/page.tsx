@@ -26,6 +26,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 
+import { hasPermission } from "@/lib/permissions-shared"
 import { useCommunity } from "../community-provider"
 
 // === TYPES ===
@@ -712,6 +713,18 @@ export default function CommunityApplicationsPage() {
   }
 
   const ctx = useCommunity()
+
+  // Permission gate — redirect users without membership.review permission
+  const canReview = hasPermission(
+    ctx.viewerMembership?.role ?? "MEMBER",
+    "membership.review",
+    ctx.community?.permissions,
+  )
+  React.useEffect(() => {
+    if (ctx.status === "ready" && !canReview) {
+      router.replace(communityPath(handle))
+    }
+  }, [ctx.status, canReview, handle, router])
 
   // Inject toolbar slot — Filters button
   React.useEffect(() => {

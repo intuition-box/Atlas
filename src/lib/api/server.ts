@@ -332,6 +332,11 @@ export function api<S extends z.ZodTypeAny>(
 
       return response;
     } catch (e) {
+      // Structured errors (e.g. PermissionError) — surface status + message
+      const parsed = ErrorWithStatusSchema.safeParse(e);
+      if (parsed.success && parsed.data.status >= 400 && parsed.data.status < 500) {
+        return errJson(withMeta({ code: "FORBIDDEN", message: parsed.data.message, status: parsed.data.status }));
+      }
       // Unexpected error — log and return clean 500
       console.error("[api] Unexpected error:", e);
       return errJson(withMeta({ code: "INTERNAL_ERROR", message: "Internal server error", status: 500 }));

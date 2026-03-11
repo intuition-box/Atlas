@@ -411,7 +411,7 @@ export async function batchCreateAttestations(
     // ── Step 6: Batch-create triples (1 signature) ──
     console.log(LOG, "Step 6 — creating", items.length, "triples");
 
-    let triplesTxHash: string | null = null;
+    let triplesTxHash: `0x${string}` | null = null;
     const skippedIndices = new Set<number>();
 
     try {

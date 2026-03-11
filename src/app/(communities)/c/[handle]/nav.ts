@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 
 import type { NavItem } from "@/components/common/page-toolbar";
+import { hasPermission, type PermissionKey } from "@/lib/permissions-shared";
 import {
   communityActivityPath,
   communityApplicationsPath,
@@ -32,11 +33,32 @@ export function communityNav(handle: string): NavItem[] {
 }
 
 /** Admin navigation tabs (visible to community admins only). */
-export function communityAdminNav(handle: string): NavItem[] {
+function communityAdminNav(handle: string): NavItem[] {
   return [
     { label: "Applications", href: communityApplicationsPath(handle), icon: FileText, activeColor: "text-amber-500", activeBg: "bg-amber-500/10" },
     { label: "Bans", href: communityBansPath(handle), icon: Ban, activeColor: "text-amber-500", activeBg: "bg-amber-500/10" },
     { label: "Permissions", href: communityPermissionsPath(handle), icon: Shield, activeColor: "text-amber-500", activeBg: "bg-amber-500/10" },
     { label: "Settings", href: communitySettingsPath(handle), icon: Settings, activeColor: "text-amber-500", activeBg: "bg-amber-500/10" },
   ];
+}
+
+/** Nav label → required permission. */
+const ADMIN_NAV_PERMISSIONS: Record<string, PermissionKey> = {
+  Applications: "membership.review",
+  Bans: "membership.remove",
+  Settings: "community.update",
+  Permissions: "community.permissions",
+};
+
+/** Admin nav filtered by the viewer's role and community permission config. */
+export function filteredAdminNav(
+  handle: string,
+  role: string,
+  communityPermissions: unknown,
+): NavItem[] {
+  return communityAdminNav(handle).filter((item) => {
+    const perm = ADMIN_NAV_PERMISSIONS[item.label];
+    if (!perm) return true;
+    return hasPermission(role, perm, communityPermissions);
+  });
 }

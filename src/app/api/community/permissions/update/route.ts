@@ -1,8 +1,12 @@
 import { Prisma } from "@prisma/client";
 
-import { api, okJson, errJson } from "@/lib/api/server";
+import { api, okJson } from "@/lib/api/server";
 import { db } from "@/lib/db/client";
-import { requireCommunityRole, RolePermissionsSchema } from "@/lib/permissions";
+import {
+  requirePermission,
+  hasAtLeastRole,
+  RolePermissionsSchema,
+} from "@/lib/permissions";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -15,17 +19,32 @@ const schema = z.object({
 export const POST = api(schema, async (ctx) => {
   const { viewerId, json } = ctx;
 
-  // Only owners can configure role permissions
-  await requireCommunityRole({
+  // Require the community.permissions permission (owners always pass)
+  const membership = await requirePermission({
     userId: viewerId!,
     communityId: json.communityId,
-    minRole: "OWNER",
+    permission: "community.permissions",
   });
+
+  // Non-owners cannot change ADMIN permissions — preserve the saved values.
+  // This prevents the paradox of admins editing their own role's permissions.
+  const isOwner = hasAtLeastRole(membership.role, "OWNER");
+  let finalPermissions = json.permissions;
+
+  if (!isOwner) {
+    const community = await db.community.findUniqueOrThrow({
+      where: { id: json.communityId },
+      select: { permissions: true },
+    });
+    const saved = RolePermissionsSchema.safeParse(community.permissions);
+    const savedAdmin = saved.success ? saved.data.ADMIN : [];
+    finalPermissions = { ...json.permissions, ADMIN: savedAdmin };
+  }
 
   const community = await db.community.update({
     where: { id: json.communityId },
     data: {
-      permissions: json.permissions as unknown as Prisma.InputJsonValue,
+      permissions: finalPermissions as unknown as Prisma.InputJsonValue,
     },
     select: {
       permissions: true,

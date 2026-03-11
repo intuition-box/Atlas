@@ -11,11 +11,12 @@ import { z } from "zod";
 
 /** Every toggleable permission in the system. */
 export const PermissionKeySchema = z.enum([
-  "community.update",    // Edit community settings (name, description, avatar, links)
-  "membership.review",   // Approve/reject/ban applications
-  "membership.role",     // Change member roles (except OWNER)
-  "membership.orbit",    // Override orbit levels
-  "membership.remove",   // Remove/ban members
+  "community.update",       // Edit community settings (name, description, avatar, links)
+  "community.permissions",  // View and manage role permissions
+  "membership.review",      // Approve/reject/ban applications
+  "membership.role",        // Change member roles (except OWNER)
+  "membership.orbit",       // Override orbit levels
+  "membership.remove",      // Remove/ban members
 ]);
 export type PermissionKey = z.infer<typeof PermissionKeySchema>;
 
@@ -35,6 +36,7 @@ export const CONFIGURABLE_ROLES: ConfigurableRole[] = ["ADMIN", "MODERATOR"];
 export const DEFAULT_PERMISSIONS: RolePermissions = {
   ADMIN: [
     "community.update",
+    "community.permissions",
     "membership.review",
     "membership.role",
     "membership.orbit",
@@ -47,11 +49,12 @@ export const DEFAULT_PERMISSIONS: RolePermissions = {
 
 /** Human-readable labels for the permissions page UI. */
 export const PERMISSION_LABELS: Record<PermissionKey, { label: string; description: string }> = {
-  "community.update":   { label: "Edit settings",       description: "Change community name, description, avatar, and links" },
-  "membership.review":  { label: "Review applications",  description: "Approve, reject, or ban membership applications" },
-  "membership.role":    { label: "Manage roles",         description: "Promote or demote members (except owners)" },
-  "membership.orbit":   { label: "Override orbits",      description: "Manually override a member's orbit level" },
-  "membership.remove":  { label: "Remove members",       description: "Remove or ban existing members" },
+  "community.update":      { label: "Edit settings",        description: "Change community name, description, avatar, and links" },
+  "community.permissions": { label: "Manage permissions",   description: "View and edit role permission settings" },
+  "membership.review":     { label: "Review applications",  description: "Approve, reject, or ban membership applications" },
+  "membership.role":       { label: "Manage roles",         description: "Promote or demote members (except owners)" },
+  "membership.orbit":      { label: "Override orbits",      description: "Manually override a member's orbit level" },
+  "membership.remove":     { label: "Remove members",       description: "Remove or ban existing members" },
 };
 
 /**

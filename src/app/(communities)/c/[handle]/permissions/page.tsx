@@ -4,6 +4,7 @@ import * as React from "react"
 import { useRouter } from "next/navigation"
 
 import { apiPost } from "@/lib/api/client"
+import { cn } from "@/lib/utils"
 import { parseApiError } from "@/lib/api/errors"
 import {
   CONFIGURABLE_ROLES,
@@ -11,6 +12,7 @@ import {
   PERMISSION_LABELS,
   PermissionKeySchema,
   RolePermissionsSchema,
+  hasPermission,
   type ConfigurableRole,
   type PermissionKey,
   type RolePermissions,
@@ -56,14 +58,18 @@ export default function CommunityPermissionsPage() {
   const router = useRouter()
   const ctx = useCommunity()
 
-  // Admin gate — only owners should see this page
-  const isOwner = ctx.viewerMembership?.role === "OWNER"
+  // Permission gate — redirect users without community.permissions permission
+  const canManagePermissions = hasPermission(
+    ctx.viewerMembership?.role ?? "MEMBER",
+    "community.permissions",
+    ctx.community?.permissions,
+  )
 
   React.useEffect(() => {
-    if (ctx.status === "ready" && !isOwner) {
+    if (ctx.status === "ready" && !canManagePermissions) {
       router.replace(communityPath(ctx.handle))
     }
-  }, [ctx.status, isOwner, ctx.handle, router])
+  }, [ctx.status, canManagePermissions, ctx.handle, router])
 
   // Parse initial permissions from community data
   const savedPermissions = React.useMemo(
@@ -126,6 +132,9 @@ export default function CommunityPermissionsPage() {
     setError(null)
   }
 
+  const viewerRole = ctx.viewerMembership?.role ?? "MEMBER"
+  const isOwner = viewerRole === "OWNER"
+
   // Loading state
   if (ctx.status === "loading") {
     return (
@@ -163,6 +172,7 @@ export default function CommunityPermissionsPage() {
             <PermissionsTable
               draft={draft}
               onToggle={togglePermission}
+              isOwner={isOwner}
             />
           </div>
 
@@ -171,6 +181,7 @@ export default function CommunityPermissionsPage() {
             <PermissionsCards
               draft={draft}
               onToggle={togglePermission}
+              isOwner={isOwner}
             />
           </div>
         </CardContent>
@@ -188,12 +199,22 @@ export default function CommunityPermissionsPage() {
 
 // ─── Desktop table ────────────────────────────────────────────────────────────
 
+/** All role columns displayed in the table. */
+const TABLE_ROLES = ["OWNER", ...CONFIGURABLE_ROLES] as const
+const ROLE_DISPLAY: Record<string, string> = {
+  OWNER: "Owner",
+  ADMIN: "Admin",
+  MODERATOR: "Moderator",
+}
+
 function PermissionsTable({
   draft,
   onToggle,
+  isOwner,
 }: {
   draft: RolePermissions
   onToggle: (role: ConfigurableRole, permission: PermissionKey) => void
+  isOwner: boolean
 }) {
   return (
     <div className="overflow-x-auto rounded-lg border border-border/60">
@@ -203,14 +224,20 @@ function PermissionsTable({
             <th className="px-4 py-3 text-left font-medium text-muted-foreground">
               Permission
             </th>
-            {CONFIGURABLE_ROLES.map((role) => (
-              <th
-                key={role}
-                className="px-4 py-3 text-center font-medium text-muted-foreground"
-              >
-                {role === "ADMIN" ? "Admin" : "Moderator"}
-              </th>
-            ))}
+            {TABLE_ROLES.map((role) => {
+              const isDisabledCol = role === "OWNER" || (!isOwner && role === "ADMIN")
+              return (
+                <th
+                  key={role}
+                  className={cn(
+                    "px-4 py-3 text-center font-medium text-muted-foreground",
+                    isDisabledCol && "opacity-40",
+                  )}
+                >
+                  {ROLE_DISPLAY[role]}
+                </th>
+              )
+            })}
           </tr>
         </thead>
         <tbody>
@@ -231,18 +258,34 @@ function PermissionsTable({
                     </span>
                   </div>
                 </td>
-                {CONFIGURABLE_ROLES.map((role) => {
-                  const checked = draft[role].includes(permission)
+                {TABLE_ROLES.map((role) => {
+                  const isOwnerCol = role === "OWNER"
+                  const isAdminCol = role === "ADMIN"
+                  const isDisabled = isOwnerCol || (!isOwner && isAdminCol)
+                  const checked = isOwnerCol
+                    ? true
+                    : draft[role as ConfigurableRole].includes(permission)
                   const id = `${role}-${permission}`
 
                   return (
-                    <td key={role} className="px-4 py-3 text-center">
+                    <td
+                      key={role}
+                      className={cn(
+                        "px-4 py-3 text-center",
+                        isDisabled && "opacity-40",
+                      )}
+                    >
                       <div className="flex items-center justify-center">
                         <Checkbox
                           id={id}
                           checked={checked}
-                          onCheckedChange={() => onToggle(role, permission)}
-                          aria-label={`${role === "ADMIN" ? "Admin" : "Moderator"} can ${label.toLowerCase()}`}
+                          disabled={isDisabled}
+                          onCheckedChange={
+                            isDisabled
+                              ? undefined
+                              : () => onToggle(role as ConfigurableRole, permission)
+                          }
+                          aria-label={`${ROLE_DISPLAY[role]} can ${label.toLowerCase()}`}
                         />
                       </div>
                     </td>
@@ -262,9 +305,11 @@ function PermissionsTable({
 function PermissionsCards({
   draft,
   onToggle,
+  isOwner,
 }: {
   draft: RolePermissions
   onToggle: (role: ConfigurableRole, permission: PermissionKey) => void
+  isOwner: boolean
 }) {
   return (
     <>
@@ -282,22 +327,40 @@ function PermissionsCards({
             </div>
 
             <div className="flex flex-col gap-2">
+              {/* Owner row (always enabled, disabled) */}
+              <label className="flex items-center gap-2 text-sm opacity-40">
+                <Checkbox
+                  checked={true}
+                  disabled
+                />
+                <span>Owner</span>
+              </label>
+
               {CONFIGURABLE_ROLES.map((role) => {
+                const isDisabled = !isOwner && role === "ADMIN"
                 const checked = draft[role].includes(permission)
                 const id = `mobile-${role}-${permission}`
 
                 return (
                   <label
                     key={role}
-                    htmlFor={id}
-                    className="flex items-center gap-2 text-sm cursor-pointer"
+                    htmlFor={isDisabled ? undefined : id}
+                    className={cn(
+                      "flex items-center gap-2 text-sm",
+                      isDisabled ? "opacity-40" : "cursor-pointer",
+                    )}
                   >
                     <Checkbox
                       id={id}
                       checked={checked}
-                      onCheckedChange={() => onToggle(role, permission)}
+                      disabled={isDisabled}
+                      onCheckedChange={
+                        isDisabled
+                          ? undefined
+                          : () => onToggle(role, permission)
+                      }
                     />
-                    <span>{role === "ADMIN" ? "Admin" : "Moderator"}</span>
+                    <span>{ROLE_DISPLAY[role]}</span>
                   </label>
                 )
               })}

@@ -56,6 +56,7 @@ import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 
+import { hasPermission } from "@/lib/permissions-shared"
 import { useCommunity } from "../community-provider"
 
 // === CONSTANTS ===
@@ -479,14 +480,16 @@ function FilterCombobox<T extends string>({
 function AdminMemberMenu({
   member,
   communityHandle,
-  isOwner,
+  viewerRole,
+  communityPermissions,
   onOrbitOverride,
   onRoleChange,
   onBanSuccess,
 }: {
   member: CommunityMember
   communityHandle: string
-  isOwner: boolean
+  viewerRole: string
+  communityPermissions: unknown
   onOrbitOverride: (userId: string, newOverride: string | null) => void
   onRoleChange?: (userId: string, newRole: MemberRole) => void
   onBanSuccess?: (membershipId: string) => void
@@ -550,16 +553,18 @@ function AdminMemberMenu({
             <MoreVertical className="size-3.5" />
           </MenuTrigger>
           <MenuContent align="end" sideOffset={4}>
-            <MenuGroup>
-              <MenuLabel>Orbit level</MenuLabel>
-              <MenuRadioGroup value={currentOrbit} onValueChange={handleOrbitChange}>
-                <MenuRadioItem value="auto">Auto</MenuRadioItem>
-                {ORBIT_LEVELS.map((l) => (
-                  <MenuRadioItem key={l.value} value={l.value}>{l.label}</MenuRadioItem>
-                ))}
-              </MenuRadioGroup>
-            </MenuGroup>
-            {isOwner && (
+            {hasPermission(viewerRole, "membership.orbit", communityPermissions) && (
+              <MenuGroup>
+                <MenuLabel>Orbit level</MenuLabel>
+                <MenuRadioGroup value={currentOrbit} onValueChange={handleOrbitChange}>
+                  <MenuRadioItem value="auto">Auto</MenuRadioItem>
+                  {ORBIT_LEVELS.map((l) => (
+                    <MenuRadioItem key={l.value} value={l.value}>{l.label}</MenuRadioItem>
+                  ))}
+                </MenuRadioGroup>
+              </MenuGroup>
+            )}
+            {hasPermission(viewerRole, "membership.role", communityPermissions) && (
               <>
                 <MenuSeparator />
                 <MenuGroup>
@@ -572,13 +577,17 @@ function AdminMemberMenu({
                 </MenuGroup>
               </>
             )}
-            <MenuSeparator />
-            <MenuGroup>
-              <MenuLabel>Moderation</MenuLabel>
-              <MenuItem variant="destructive" onClick={() => setBanDialogOpen(true)}>
-                Ban member
-              </MenuItem>
-            </MenuGroup>
+            {hasPermission(viewerRole, "membership.remove", communityPermissions) && (
+              <>
+                <MenuSeparator />
+                <MenuGroup>
+                  <MenuLabel>Moderation</MenuLabel>
+                  <MenuItem variant="destructive" onClick={() => setBanDialogOpen(true)}>
+                    Ban member
+                  </MenuItem>
+                </MenuGroup>
+              </>
+            )}
           </MenuContent>
         </Menu>
       </div>
@@ -603,10 +612,10 @@ function AdminMemberMenu({
   )
 }
 
-function MemberCard({ member, isAdmin, isOwner: viewerIsOwner, viewerUserId, communityHandle, endorsementCounts, onOrbitOverride, onRoleChange, onBanSuccess }: {
+function MemberCard({ member, viewerRole, communityPermissions, viewerUserId, communityHandle, endorsementCounts, onOrbitOverride, onRoleChange, onBanSuccess }: {
   member: CommunityMember
-  isAdmin?: boolean
-  isOwner?: boolean
+  viewerRole?: string
+  communityPermissions?: unknown
   viewerUserId?: string | null
   communityHandle?: string
   endorsementCounts?: Record<string, number>
@@ -629,7 +638,12 @@ function MemberCard({ member, isAdmin, isOwner: viewerIsOwner, viewerUserId, com
   const orbitLabel = formatOrbitLevel(effectiveOrbit)
   const isSelf = !!viewerUserId && viewerUserId === u.id
   const isMemberOwner = member.role === "OWNER"
-  const showAdminMenu = isAdmin && communityHandle && onOrbitOverride && !isSelf && !isMemberOwner
+  const hasAnyAdminPerm = !!viewerRole && (
+    hasPermission(viewerRole, "membership.orbit", communityPermissions) ||
+    hasPermission(viewerRole, "membership.role", communityPermissions) ||
+    hasPermission(viewerRole, "membership.remove", communityPermissions)
+  )
+  const showAdminMenu = hasAnyAdminPerm && communityHandle && !isSelf && !isMemberOwner
 
   return (
     <Card size="sm" className="transition-colors hover:bg-card/80">
@@ -667,8 +681,9 @@ function MemberCard({ member, isAdmin, isOwner: viewerIsOwner, viewerUserId, com
               <AdminMemberMenu
                 member={member}
                 communityHandle={communityHandle}
-                isOwner={!!viewerIsOwner}
-                onOrbitOverride={onOrbitOverride}
+                viewerRole={viewerRole!}
+                communityPermissions={communityPermissions}
+                onOrbitOverride={onOrbitOverride!}
                 onRoleChange={onRoleChange}
                 onBanSuccess={onBanSuccess}
               />
@@ -749,10 +764,10 @@ function MemberCard({ member, isAdmin, isOwner: viewerIsOwner, viewerUserId, com
   )
 }
 
-function MemberRow({ member, isAdmin, isOwner: viewerIsOwner, viewerUserId, communityHandle, onOrbitOverride, onRoleChange, onBanSuccess }: {
+function MemberRow({ member, viewerRole, communityPermissions, viewerUserId, communityHandle, onOrbitOverride, onRoleChange, onBanSuccess }: {
   member: CommunityMember
-  isAdmin?: boolean
-  isOwner?: boolean
+  viewerRole?: string
+  communityPermissions?: unknown
   viewerUserId?: string | null
   communityHandle?: string
   onOrbitOverride?: (userId: string, newOverride: string | null) => void
@@ -769,7 +784,12 @@ function MemberRow({ member, isAdmin, isOwner: viewerIsOwner, viewerUserId, comm
   const orbitLabel = formatOrbitLevel(effectiveOrbit)
   const isSelf = !!viewerUserId && viewerUserId === u.id
   const isMemberOwner = member.role === "OWNER"
-  const showAdminMenu = isAdmin && communityHandle && onOrbitOverride && !isSelf && !isMemberOwner
+  const hasAnyAdminPerm = !!viewerRole && (
+    hasPermission(viewerRole, "membership.orbit", communityPermissions) ||
+    hasPermission(viewerRole, "membership.role", communityPermissions) ||
+    hasPermission(viewerRole, "membership.remove", communityPermissions)
+  )
+  const showAdminMenu = hasAnyAdminPerm && communityHandle && !isSelf && !isMemberOwner
 
   return (
     <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 p-3 transition-colors hover:bg-card/50">
@@ -820,8 +840,9 @@ function MemberRow({ member, isAdmin, isOwner: viewerIsOwner, viewerUserId, comm
           <AdminMemberMenu
             member={member}
             communityHandle={communityHandle}
-            isOwner={!!viewerIsOwner}
-            onOrbitOverride={onOrbitOverride}
+            viewerRole={viewerRole!}
+            communityPermissions={communityPermissions}
+            onOrbitOverride={onOrbitOverride!}
             onRoleChange={onRoleChange}
             onBanSuccess={onBanSuccess}
           />
@@ -1067,11 +1088,11 @@ function FiltersPanel({
   )
 }
 
-function MembersGrid({ items, view, isAdmin, isOwner, viewerUserId, communityHandle, endorsementCounts, onOrbitOverride, onRoleChange, onBanSuccess }: {
+function MembersGrid({ items, view, viewerRole, communityPermissions, viewerUserId, communityHandle, endorsementCounts, onOrbitOverride, onRoleChange, onBanSuccess }: {
   items: CommunityMember[]
   view: "cards" | "list"
-  isAdmin?: boolean
-  isOwner?: boolean
+  viewerRole?: string
+  communityPermissions?: unknown
   viewerUserId?: string | null
   communityHandle?: string
   endorsementCounts?: Record<string, Record<string, number>>
@@ -1086,8 +1107,8 @@ function MembersGrid({ items, view, isAdmin, isOwner, viewerUserId, communityHan
           <MemberCard
             key={m.membershipId}
             member={m}
-            isAdmin={isAdmin}
-            isOwner={isOwner}
+            viewerRole={viewerRole}
+            communityPermissions={communityPermissions}
             viewerUserId={viewerUserId}
             communityHandle={communityHandle}
             endorsementCounts={endorsementCounts?.[m.user.id]}
@@ -1113,8 +1134,8 @@ function MembersGrid({ items, view, isAdmin, isOwner, viewerUserId, communityHan
           renderItem={(m) => (
             <MemberRow
               member={m}
-              isAdmin={isAdmin}
-              isOwner={isOwner}
+              viewerRole={viewerRole}
+              communityPermissions={communityPermissions}
               viewerUserId={viewerUserId}
               communityHandle={communityHandle}
               onOrbitOverride={onOrbitOverride}
@@ -1312,7 +1333,6 @@ export default function CommunityMembersPage() {
 
   const isPageLoading = ctx.status === "loading"
   const community = ctx.community
-  const isAdmin = ctx.isAdmin
   const viewerMembership = ctx.viewerMembership
 
   const handleLabel = community?.handle ?? handle
@@ -1367,8 +1387,8 @@ export default function CommunityMembersPage() {
               <MembersGrid
                 items={displayItems}
                 view={view}
-                isAdmin={isAdmin}
-                isOwner={viewerMembership?.role === "OWNER"}
+                viewerRole={viewerMembership?.role}
+                communityPermissions={community?.permissions}
                 viewerUserId={viewerUserId}
                 communityHandle={handleLabel}
                 endorsementCounts={endorsementCounts}

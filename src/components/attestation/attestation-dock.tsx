@@ -9,7 +9,6 @@ import { cn } from "@/lib/utils";
 import { getAttributeById } from "@/lib/attestations/definitions";
 import type { AttestationType } from "@/lib/attestations/definitions";
 import { Input } from "@/components/ui/input";
-import { ExpandableTabs, type TabItem } from "@/components/ui/expandable-tab";
 import {
   Menu,
   MenuContent,
@@ -36,21 +35,23 @@ const CURVE_LABELS: Record<string, string> = {
   exponential: "Exponential",
 };
 
-/** Stance tabs — same shape as PageToolbar nav tabs. */
-const STANCE_TABS: TabItem[] = [
+/** Stance options for the toggle buttons. */
+const STANCES = [
   {
-    title: "Oppose",
+    key: "against" as const,
+    label: "Oppose",
     icon: ChevronDown,
     activeColor: "text-destructive",
     activeBg: "bg-destructive/10",
   },
   {
-    title: "Support",
+    key: "for" as const,
+    label: "Support",
     icon: ChevronUp,
     activeColor: "text-primary",
     activeBg: "bg-primary/10",
   },
-];
+] as const;
 
 /* ────────────────────────────
    Helpers
@@ -192,18 +193,10 @@ export function AttestationDock({ className }: { className?: string }) {
   const isSupport = latest?.stance !== "against";
   const label = latest ? buildLabel(viewerHandle, latest) : "";
 
-  // Stance tab index: 0 = Oppose, 1 = Support
-  const stanceIndex = isSupport ? 1 : 0;
-
   const handleStanceChange = (stance: "for" | "against") => {
     if (!latest) return;
     updateStance(latest.id, stance);
     resetTimer();
-  };
-
-  const handleTabChange = (index: number | null) => {
-    if (index === 0) handleStanceChange("against");
-    else if (index === 1) handleStanceChange("for");
   };
 
   // Stance-aware accent class for input / trigger borders
@@ -235,31 +228,45 @@ export function AttestationDock({ className }: { className?: string }) {
               "ring-1 ring-black/5",
             )}
           >
-            {/* ── Action bar: Oppose | Support | Cart ── */}
-            <div className="mb-3 flex items-center gap-1 rounded-full border border-border bg-input/30 bg-clip-padding px-1 py-[3px] w-full">
-              {/* Stance tabs */}
-              <ExpandableTabs
-                tabs={STANCE_TABS}
-                activeIndex={stanceIndex}
-                onChange={handleTabChange}
-                className="border-0 bg-transparent p-0 rounded-none flex-1 [&>span]:flex-1 [&>span]:justify-center"
-              />
+            {/* ── Action bar: Oppose | Support + Cart ── */}
+            <div className="mb-3 flex items-center gap-2">
+              {/* Stance toggle */}
+              <div className="flex items-center gap-1 rounded-full border border-border bg-input/30 bg-clip-padding px-1 py-[3px] flex-1">
+                {STANCES.map((stance) => {
+                  const Icon = stance.icon;
+                  const isActive = isSupport
+                    ? stance.key === "for"
+                    : stance.key === "against";
+                  return (
+                    <button
+                      key={stance.key}
+                      type="button"
+                      onClick={() => handleStanceChange(stance.key)}
+                      className={cn(
+                        "flex flex-1 items-center justify-center gap-1.5 rounded-full px-3 py-2",
+                        "text-sm leading-none font-medium transition-colors duration-200",
+                        isActive
+                          ? cn(stance.activeBg, stance.activeColor)
+                          : "text-muted-foreground hover:bg-input/50 hover:text-foreground",
+                      )}
+                    >
+                      <Icon size={16} />
+                      {stance.label}
+                    </button>
+                  );
+                })}
+              </div>
 
-              {/* Separator */}
-              <div
-                className="mx-0.5 h-6 w-px bg-border shrink-0"
-                aria-hidden="true"
-              />
-
-              {/* Cart button — always visible, fixed icon + badge */}
+              {/* Cart button — independent */}
               <button
                 type="button"
                 onClick={() => setIsOpen(true)}
                 className={cn(
-                  "relative flex items-center justify-center rounded-full px-2.5 py-2",
-                  "text-sm leading-none font-medium transition-colors duration-300",
+                  "relative flex items-center justify-center rounded-full",
+                  "border border-border bg-input/30",
+                  "size-9 shrink-0",
                   "text-muted-foreground hover:bg-input/50 hover:text-foreground",
-                  "shrink-0",
+                  "transition-colors duration-200",
                 )}
                 aria-label={`${count} attestation${count !== 1 ? "s" : ""} in queue`}
               >

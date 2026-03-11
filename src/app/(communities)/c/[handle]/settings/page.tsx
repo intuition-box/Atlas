@@ -27,6 +27,7 @@ import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui
 import { useFieldArray } from "react-hook-form"
 
 import { useCommunity, type CommunityData } from "../community-provider"
+import { hasPermission } from "@/lib/permissions-shared"
 
 // === SCHEMAS ===
 
@@ -329,12 +330,17 @@ export default function CommunitySettingsPage() {
     }
   }, [ctx.status, ctx.errorMessage, form])
 
-  // Admin gate — redirect non-admins
+  // Permission gate — redirect users without community.update permission
+  const canEditSettings = hasPermission(
+    ctx.viewerMembership?.role ?? "MEMBER",
+    "community.update",
+    ctx.community?.permissions,
+  )
   React.useEffect(() => {
-    if (ctx.status === "ready" && !ctx.isAdmin) {
+    if (ctx.status === "ready" && !canEditSettings) {
       router.replace(communityPath(communityHandle))
     }
-  }, [ctx.status, ctx.isAdmin, communityHandle, router])
+  }, [ctx.status, canEditSettings, communityHandle, router])
 
   async function handleSubmit(values: CommunitySettingsValues) {
     form.clearErrors("root")

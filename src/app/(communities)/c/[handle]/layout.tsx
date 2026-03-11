@@ -10,7 +10,7 @@ import { AnimatePresence, motion } from "motion/react"
 
 import { PageHeader } from "@/components/common/page-header"
 import { PageToolbar } from "@/components/common/page-toolbar"
-import { communityNav, communityAdminNav } from "./nav"
+import { communityNav, filteredAdminNav } from "./nav"
 import { ProfileAvatar } from "@/components/common/profile-avatar"
 import { useNavigationVisibility } from "@/components/navigation/navigation-provider"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -114,6 +114,13 @@ function CommunityLayoutShell({ children }: { children: React.ReactNode }) {
     ctx.viewerMembership?.status !== "APPROVED" &&
     ctx.community?.isMembershipOpen === true
 
+  // Permission-filtered admin nav (empty → undefined to hide the separator)
+  const viewerRole = ctx.viewerMembership?.role
+  const adminNav = viewerRole
+    ? filteredAdminNav(handleLabel, viewerRole, ctx.community?.permissions)
+    : []
+  const adminOverflow = adminNav.length > 0 ? adminNav : undefined
+
   // Track when the full header has finished its exit animation
   const [headerFaded, setHeaderFaded] = React.useState(false)
   React.useEffect(() => {
@@ -150,7 +157,7 @@ function CommunityLayoutShell({ children }: { children: React.ReactNode }) {
                   actions={ctx.toolbarSlot?.actions}
                   viewSwitch={ctx.toolbarSlot?.viewSwitch}
                   nav={communityNav(handleLabel)}
-                  overflow={ctx.isAdmin ? communityAdminNav(handleLabel) : undefined}
+                  overflow={adminOverflow}
                 />
               }
               actionsAsFormActions={false}
@@ -173,7 +180,7 @@ function CommunityLayoutShell({ children }: { children: React.ReactNode }) {
             <div className="pointer-events-auto mx-auto max-w-4xl px-4 py-3 flex justify-center">
               <PageToolbar
                 nav={communityNav(handleLabel)}
-                overflow={ctx.isAdmin ? communityAdminNav(handleLabel) : undefined}
+                overflow={adminOverflow}
               />
             </div>
           </motion.div>
