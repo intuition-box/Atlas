@@ -25,8 +25,8 @@ import {
 /** Public navigation tabs (visible to all visitors). */
 export function communityNav(handle: string): NavItem[] {
   return [
-    { label: "Profile", href: communityPath(handle), icon: Info },
     { label: "Orbit", href: communityOrbitPath(handle), icon: Orbit },
+    { label: "Profile", href: communityPath(handle), icon: Info },
     { label: "Members", href: communityMembersPath(handle), icon: Users },
     { label: "Activity", href: communityActivityPath(handle), icon: Activity },
   ];
