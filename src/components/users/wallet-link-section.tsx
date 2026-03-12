@@ -224,7 +224,7 @@ export function WalletLinkSection() {
     : false;
 
   return (
-    <Card>
+    <Card data-tour="settings-wallets">
       <CardHeader>
         <CardTitle>Wallets</CardTitle>
         <CardDescription>Link wallets for attestation minting and identity verification.</CardDescription>

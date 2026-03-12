@@ -19,6 +19,8 @@ import { batchCreateAttestations } from "@/lib/intuition/client"
 import { INTUITION_CHAIN, getExplorerTxUrl } from "@/lib/intuition/config"
 import type { BatchMintItem } from "@/lib/intuition/types"
 import { useDebouncedValue } from "@/hooks/use-debounced-value"
+import { useTourTrigger } from "@/hooks/use-tour-trigger"
+import { createPublishingTour } from "@/components/tour/tour-definitions"
 
 import { AttestationBadge } from "@/components/attestation/badge"
 import { OnchainBanner } from "@/components/attestation/onchain-banner"
@@ -263,7 +265,7 @@ function AttestationRow({
   }
 
   return (
-    <div className={cn(
+    <div data-tour="attestation-row" className={cn(
       "flex items-center justify-between gap-3 rounded-lg border border-border/60 p-3",
       !hasWallet && !isMinted && "opacity-50",
     )}>
@@ -468,6 +470,13 @@ export default function AttestationsPage() {
   const handle = ctx.handle
   const viewerId = session?.user?.id ?? null
   const isSelf = ctx.isSelf
+
+  // Tour: "Publishing Attestations" — triggers on first visit to own attestations page
+  const publishingTour = React.useMemo(
+    () => (isSelf && handle ? createPublishingTour(handle) : null),
+    [isSelf, handle],
+  )
+  useTourTrigger(publishingTour)
 
   // Get lastChangedAt from queue context to trigger refetch when cart saves
   const { lastChangedAt, onItemMinted, retractAll } = useAttestationQueue()
@@ -729,7 +738,7 @@ export default function AttestationsPage() {
         {loading || filtering ? "Loading attestations..." : `${items.length} attestations loaded`}
       </div>
 
-      <Card>
+      <Card data-tour="attestations-card">
         <CardHeader>
           <CardTitle>Attestations</CardTitle>
           <CardDescription>Attestations given by this user.</CardDescription>

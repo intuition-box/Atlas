@@ -53,6 +53,7 @@ function JoinBanner({ name, handle, pending }: { name: string; handle: string; p
 
   return (
     <section
+      data-tour="join-banner"
       className="relative overflow-hidden rounded-2xl border border-border/60 bg-gradient-to-b from-card/80 via-card/60 to-primary/5"
     >
       <div className="flex flex-col items-center gap-4 p-6 text-center">
@@ -137,6 +138,7 @@ function CommunityLayoutShell({ children }: { children: React.ReactNode }) {
         {!isToolbarOnly && (
           <motion.div
             key="full-header"
+            data-tour="community-header"
             initial={{ opacity: 0, filter: "blur(4px)" }}
             animate={{ opacity: 1, filter: "blur(0px)" }}
             exit={{ opacity: 0, filter: "blur(4px)" }}
@@ -153,12 +155,14 @@ function CommunityLayoutShell({ children }: { children: React.ReactNode }) {
               title={displayName}
               description={isLoading ? "" : `@${handleLabel}`}
               actions={
-                <PageToolbar
-                  actions={ctx.toolbarSlot?.actions}
-                  viewSwitch={ctx.toolbarSlot?.viewSwitch}
-                  nav={communityNav(handleLabel)}
-                  overflow={adminOverflow}
-                />
+                <div data-tour="community-nav" className="rounded-full">
+                  <PageToolbar
+                    actions={ctx.toolbarSlot?.actions}
+                    viewSwitch={ctx.toolbarSlot?.viewSwitch}
+                    nav={communityNav(handleLabel)}
+                    overflow={adminOverflow}
+                  />
+                </div>
               }
               actionsAsFormActions={false}
             />

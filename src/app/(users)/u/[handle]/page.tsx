@@ -1,8 +1,12 @@
 "use client"
 
+import { useMemo } from "react"
+import { useSession } from "next-auth/react"
 import { ArrowUpRight, Wallet } from "lucide-react"
 
 import { AttestationButtons } from "@/components/attestation/buttons"
+import { useTourTrigger } from "@/hooks/use-tour-trigger"
+import { createFirstEndorsementTour } from "@/components/tour/tour-definitions"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { EncryptedText } from "@/components/ui/encrypted-text"
@@ -138,7 +142,7 @@ function SocialsCard({ user }: { user: UserData["user"] }) {
   if (!hasSocials) return null
 
   return (
-    <Card>
+    <Card data-tour="socials-card">
       <CardHeader>
         <CardTitle>Socials</CardTitle>
         <CardDescription>Linked accounts and wallets.</CardDescription>
@@ -212,6 +216,15 @@ function SocialsCard({ user }: { user: UserData["user"] }) {
 export default function UserProfilePage() {
   const ctx = useUser()
   const { status, data, user, isSelf, handle } = ctx
+  const { data: session } = useSession()
+  const viewerHandle = session?.user?.handle ?? null
+
+  // Tour: "First Endorsement" — triggers on first visit to another user's profile
+  const endorsementTour = useMemo(
+    () => (!isSelf && status === "ready" ? createFirstEndorsementTour(viewerHandle) : null),
+    [isSelf, status, viewerHandle],
+  )
+  useTourTrigger(endorsementTour)
 
   if (status === "loading") {
     return <ContentSkeleton />
@@ -342,51 +355,55 @@ export default function UserProfilePage() {
         </Card>
       ) : null}
 
-      {skills.length ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Skills</CardTitle>
-            <CardDescription>What they&apos;re good at.{!isSelf && " Click to endorse."}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <AttestationButtons
-              items={skills}
-              endorsementType="SKILL_ENDORSE"
-              toUserId={user.id}
-              toName={displayName}
-              toHandle={handleLabel}
-              toAvatarUrl={avatarSrc}
-              isSelf={isSelf}
-              source="profile"
-            />
-          </CardContent>
-        </Card>
-      ) : null}
+      {(skills.length || tags.length) ? (
+        <div data-tour="skills-tools-section" className="flex flex-col gap-6 rounded-2xl">
+          {skills.length ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Skills</CardTitle>
+                <CardDescription>What they&apos;re good at.{!isSelf && " Click to endorse."}</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <AttestationButtons
+                  items={skills}
+                  endorsementType="SKILL_ENDORSE"
+                  toUserId={user.id}
+                  toName={displayName}
+                  toHandle={handleLabel}
+                  toAvatarUrl={avatarSrc}
+                  isSelf={isSelf}
+                  source="profile"
+                />
+              </CardContent>
+            </Card>
+          ) : null}
 
-      {tags.length ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Tools</CardTitle>
-            <CardDescription>What they work with.{!isSelf && " Click to endorse."}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <AttestationButtons
-              items={tags}
-              endorsementType="TOOL_ENDORSE"
-              toUserId={user.id}
-              toName={displayName}
-              toHandle={handleLabel}
-              toAvatarUrl={avatarSrc}
-              isSelf={isSelf}
-              source="profile"
-            />
-          </CardContent>
-        </Card>
+          {tags.length ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Tools</CardTitle>
+                <CardDescription>What they work with.{!isSelf && " Click to endorse."}</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <AttestationButtons
+                  items={tags}
+                  endorsementType="TOOL_ENDORSE"
+                  toUserId={user.id}
+                  toName={displayName}
+                  toHandle={handleLabel}
+                  toAvatarUrl={avatarSrc}
+                  isSelf={isSelf}
+                  source="profile"
+                />
+              </CardContent>
+            </Card>
+          ) : null}
+        </div>
       ) : null}
 
       {/* Network — only visible to other users */}
       {!isSelf && (
-        <Card>
+        <Card data-tour="network-card">
           <CardHeader>
             <CardTitle>Network</CardTitle>
             <CardDescription>How do you know @{handleLabel}?</CardDescription>

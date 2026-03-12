@@ -105,6 +105,7 @@ function ActionsBar({
           Delete all
         </Button>
         <Button
+          data-tour="publish-button"
           variant="positive"
           size={btnSize}
           onClick={onMintAll}
@@ -173,6 +174,7 @@ export function OnchainBanner({
   return (
     <>
       <section
+        data-tour="onchain-banner"
         className={cn(
           "relative overflow-hidden rounded-2xl border border-border/60",
           "bg-gradient-to-b from-card/80 via-card/60 to-primary/5",

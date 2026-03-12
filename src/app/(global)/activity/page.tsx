@@ -637,7 +637,7 @@ export default function ActivityPage() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col mt-24 gap-6 pb-40">
+    <div data-tour="activity-page" className="mx-auto flex w-full max-w-4xl flex-col mt-24 gap-6 pb-40">
       <PageHeader
         leading={
           <Avatar className="h-12 w-12 has-[[data-slot=avatar-fallback]]:after:border-primary/15">

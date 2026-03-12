@@ -121,7 +121,7 @@ export default async function SignInPage({
 
   return (
     <div className="flex flex-col min-h-screen w-full space-y-8 items-center justify-center">
-      <div className="overflow-hidden w-full max-w-[460px] border rounded-[40px]">
+      <div data-tour="signin-card" className="overflow-hidden w-full max-w-[460px] border rounded-[40px]">
         <div className="-mt-12 relative w-full aspect-square inset-0 flex items-center justify-center overflow-hidden">
           <OrbitAnimation className="" avatarUrls={avatarUrls} attestationPair={attestationPair} followPair={followPair} newestMemberUrl={newestMemberUrl} verifiedMemberUrl={verifiedMemberUrl} />
           <div className="absolute inset-0 flex items-center justify-center">

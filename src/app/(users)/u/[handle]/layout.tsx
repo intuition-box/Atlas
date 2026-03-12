@@ -83,12 +83,14 @@ function UserLayoutShell({ children }: { children: React.ReactNode }) {
         description={isLoading ? "" : `@${handleLabel}`}
         sticky
         actions={
-          <PageToolbar
-            actions={ctx.toolbarSlot?.actions}
-            viewSwitch={ctx.toolbarSlot?.viewSwitch}
-            nav={userNav(handleLabel)}
-            overflow={ctx.isSelf ? userPrivateNav(handleLabel) : undefined}
-          />
+          <div data-tour="profile-nav" className="rounded-full">
+            <PageToolbar
+              actions={ctx.toolbarSlot?.actions}
+              viewSwitch={ctx.toolbarSlot?.viewSwitch}
+              nav={userNav(handleLabel)}
+              overflow={ctx.isSelf ? userPrivateNav(handleLabel) : undefined}
+            />
+          </div>
         }
         actionsAsFormActions={false}
       />

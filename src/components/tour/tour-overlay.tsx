@@ -1,0 +1,564 @@
+"use client";
+
+import * as React from "react";
+import { motion, AnimatePresence } from "motion/react";
+import { ArrowLeft, ArrowRight } from "lucide-react";
+
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { useTour } from "./tour-provider";
+
+/* ────────────────────────────
+   Constants
+──────────────────────────── */
+
+/** Padding around the spotlight cutout (px). */
+const SPOTLIGHT_PADDING = 8;
+
+/** How long to wait for a target element after navigation (ms). */
+const WAIT_TIMEOUT_MS = 5_000;
+
+/** Delay after scrollIntoView before showing the popover (ms). */
+const SCROLL_SETTLE_MS = 350;
+
+/** Popover width in px (matches `w-80` = 20rem = 320px). */
+const POPOVER_WIDTH = 320;
+
+/** Estimated popover height for initial render (px). Refined by ResizeObserver. */
+const POPOVER_ESTIMATED_HEIGHT = 160;
+
+/** Minimum gap between popover and viewport edge (px). */
+const VIEWPORT_MARGIN = 16;
+
+/** Time to wait for the spotlight spring animation to settle before fading in the popover (ms). */
+const SPOTLIGHT_SETTLE_MS = 400;
+
+/* ────────────────────────────
+   Utilities
+──────────────────────────── */
+
+/**
+ * Wait for a DOM element matching `selector` to appear.
+ * Uses MutationObserver with a timeout fallback.
+ */
+function waitForElement(
+  selector: string,
+  timeoutMs = WAIT_TIMEOUT_MS,
+): Promise<HTMLElement | null> {
+  return new Promise((resolve) => {
+    // Check immediately
+    const existing = document.querySelector<HTMLElement>(selector);
+    if (existing) {
+      resolve(existing);
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      observer.disconnect();
+      resolve(null);
+    }, timeoutMs);
+
+    const observer = new MutationObserver(() => {
+      const el = document.querySelector<HTMLElement>(selector);
+      if (el) {
+        clearTimeout(timeout);
+        observer.disconnect();
+        resolve(el);
+      }
+    });
+
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+  });
+}
+
+/** Sleep utility. */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/* ────────────────────────────
+   Types
+──────────────────────────── */
+
+type Rect = {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+  borderRadius: string;
+};
+
+/* ────────────────────────────
+   Component
+──────────────────────────── */
+
+export function TourOverlay() {
+  const {
+    isRunning,
+    activeTour,
+    currentStep,
+    currentStepIndex,
+    totalSteps,
+    nextStep,
+    prevStep,
+    dismissTour,
+  } = useTour();
+
+  const [targetEl, setTargetEl] = React.useState<HTMLElement | null>(null);
+  const [rect, setRect] = React.useState<Rect | null>(null);
+  const [isWaiting, setIsWaiting] = React.useState(false);
+  const [popoverSide, setPopoverSide] = React.useState<"top" | "bottom" | "left" | "right">("bottom");
+  const [popoverAlign, setPopoverAlign] = React.useState<"start" | "center" | "end">("center");
+
+  /**
+   * Controls popover visibility independently from the spotlight.
+   * true = popover hidden (spotlight animating to new position).
+   * false = popover visible.
+   */
+  const [isTransitioning, setIsTransitioning] = React.useState(false);
+
+  /** Whether the spotlight has been shown at least once (used to fade-in first, slide subsequent). */
+  const hasShownRef = React.useRef(false);
+  const prevRouteRef = React.useRef<string | undefined>(undefined);
+  const [isFirstSpotlight, setIsFirstSpotlight] = React.useState(true);
+
+  /** Tracks step indices that were auto-skipped (element not found). */
+  const [skippedSteps, setSkippedSteps] = React.useState<Set<number>>(new Set());
+
+  // Resolve target element when step changes
+  React.useEffect(() => {
+    if (!isRunning || !currentStep) {
+      setTargetEl(null);
+      setRect(null);
+      hasShownRef.current = false;
+      prevRouteRef.current = undefined;
+      setIsFirstSpotlight(true);
+      setSkippedSteps(new Set());
+      return;
+    }
+
+    let cancelled = false;
+    const isFirstStep = !hasShownRef.current;
+    const isNewPage = currentStep.route !== prevRouteRef.current;
+
+    // Hide popover immediately and freeze spotlight at current position
+    setIsTransitioning(true);
+    setIsWaiting(true);
+
+    // Detach from old element so the rAF loop stops — spotlight freezes in place
+    setTargetEl(null);
+
+    // If navigating to a new page, also clear the rect so the spotlight
+    // fades in at the new position instead of sliding from a stale one
+    if (isNewPage && !isFirstStep) {
+      setRect(null);
+      setIsFirstSpotlight(true);
+    }
+
+    async function resolve() {
+      // Same-page elements should already be in the DOM — use a shorter timeout
+      // so missing steps (e.g. user has no skills/tools) are skipped quickly
+      const timeout = isNewPage ? WAIT_TIMEOUT_MS : 1_000;
+      let el = await waitForElement(currentStep!.target, timeout);
+
+      // Try fallback selector if primary target is missing (e.g. no attestation rows → highlight the card)
+      if (!el && currentStep!.fallbackTarget) {
+        el = document.querySelector<HTMLElement>(currentStep!.fallbackTarget);
+      }
+      if (cancelled) return;
+
+      if (el) {
+        // Pre-scan: once we're on a page, check all future steps on the same
+        // route and mark missing ones as skipped so the counter is correct
+        // from the very first step (e.g. "1 of 3" instead of "1 of 4").
+        if (activeTour) {
+          const currentRoute = currentStep!.route;
+          const missing = new Set<number>();
+          for (let i = currentStepIndex + 1; i < activeTour.steps.length; i++) {
+            const s = activeTour.steps[i]!;
+            if (s.route !== currentRoute) break; // stop at page boundary
+            const hasTarget = document.querySelector(s.target) || (s.fallbackTarget && document.querySelector(s.fallbackTarget));
+            if (!hasTarget) {
+              missing.add(i);
+            }
+          }
+          if (missing.size > 0) {
+            setSkippedSteps((prev) => {
+              const next = new Set(prev);
+              missing.forEach((i) => next.add(i));
+              return next;
+            });
+          }
+        }
+
+        // Scroll element into view
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        await sleep(SCROLL_SETTLE_MS);
+        if (cancelled) return;
+
+        // Update target — rAF loop will pick up new rect, spotlight spring-animates
+        setTargetEl(el);
+        setPopoverSide(currentStep!.side);
+        setPopoverAlign(currentStep!.align ?? "center");
+        hasShownRef.current = true;
+        prevRouteRef.current = currentStep!.route;
+
+        // Fade in on first step or after a page change; spring-slide on same-page steps
+        const shouldFadeIn = isFirstStep || isNewPage;
+
+        // Wait for animation to settle before showing popover
+        await sleep(SPOTLIGHT_SETTLE_MS);
+        if (cancelled) return;
+
+        if (shouldFadeIn) {
+          // Switch to spring transitions for subsequent same-page steps
+          setIsFirstSpotlight(false);
+        }
+
+        // Reveal popover at the new position
+        setIsTransitioning(false);
+      } else if (currentStepIndex < totalSteps - 1) {
+        // Element not found on a middle step — mark as skipped and advance
+        setSkippedSteps((prev) => new Set(prev).add(currentStepIndex));
+        nextStep();
+      } else {
+        // Element not found on the last step — dismiss without completing
+        dismissTour();
+      }
+
+      setIsWaiting(false);
+    }
+
+    void resolve();
+    return () => {
+      cancelled = true;
+    };
+  }, [isRunning, currentStep, currentStepIndex, nextStep]);
+
+  // Track target element position with rAF
+  React.useEffect(() => {
+    if (!targetEl) return;
+
+    let raf: number;
+    const computed = getComputedStyle(targetEl);
+    const track = () => {
+      const r = targetEl.getBoundingClientRect();
+      setRect({
+        top: r.top,
+        left: r.left,
+        width: r.width,
+        height: r.height,
+        borderRadius: computed.borderRadius,
+      });
+      raf = requestAnimationFrame(track);
+    };
+    track();
+    return () => cancelAnimationFrame(raf);
+  }, [targetEl]);
+
+  // Measure popover dimensions for viewport clamping
+  const popoverRef = React.useRef<HTMLDivElement>(null);
+  const [popoverSize, setPopoverSize] = React.useState({ width: POPOVER_WIDTH, height: POPOVER_ESTIMATED_HEIGHT });
+
+  React.useEffect(() => {
+    const el = popoverRef.current;
+    if (!el) return;
+
+    const ro = new ResizeObserver(([entry]) => {
+      if (!entry) return;
+      const { width, height } = entry.borderBoxSize[0]
+        ? { width: entry.borderBoxSize[0].inlineSize, height: entry.borderBoxSize[0].blockSize }
+        : entry.contentRect;
+      setPopoverSize((prev) =>
+        prev.width === width && prev.height === height ? prev : { width, height },
+      );
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [currentStepIndex]);
+
+  // Compute popover position with viewport-aware clamping + auto-flip
+  const popoverPosition = currentStep?.popoverPosition;
+  const { style: popoverStyle, resolvedSide, needsCenterX, needsCenterY } = React.useMemo<{
+    style: React.CSSProperties;
+    resolvedSide: "top" | "bottom" | "left" | "right";
+    needsCenterX: boolean;
+    needsCenterY: boolean;
+  }>(() => {
+    if (!rect) return { style: { display: "none" }, resolvedSide: popoverSide, needsCenterX: false, needsCenterY: false };
+
+    // Fixed viewport corner — overrides all side/align logic
+    if (popoverPosition) {
+      const cornerStyle: React.CSSProperties = {};
+      if (popoverPosition.startsWith("top")) cornerStyle.top = VIEWPORT_MARGIN;
+      else cornerStyle.bottom = VIEWPORT_MARGIN;
+      if (popoverPosition.endsWith("left")) cornerStyle.left = VIEWPORT_MARGIN;
+      else cornerStyle.right = VIEWPORT_MARGIN;
+      return { style: cornerStyle, resolvedSide: popoverSide, needsCenterX: false, needsCenterY: false };
+    }
+
+    const pad = SPOTLIGHT_PADDING;
+    const gap = 12;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const pw = popoverSize.width;
+    const ph = popoverSize.height;
+
+    // Available space on each side
+    const spaceBottom = vh - (rect.top + rect.height + pad + gap);
+    const spaceTop = rect.top - pad - gap;
+    const spaceRight = vw - (rect.left + rect.width + pad + gap);
+    const spaceLeft = rect.left - pad - gap;
+
+    // Auto-flip if preferred side doesn't have enough room
+    let side = popoverSide;
+    if (side === "bottom" && spaceBottom < ph + VIEWPORT_MARGIN && spaceTop > spaceBottom) {
+      side = "top";
+    } else if (side === "top" && spaceTop < ph + VIEWPORT_MARGIN && spaceBottom > spaceTop) {
+      side = "bottom";
+    } else if (side === "right" && spaceRight < pw + VIEWPORT_MARGIN && spaceLeft > spaceRight) {
+      side = "left";
+    } else if (side === "left" && spaceLeft < pw + VIEWPORT_MARGIN && spaceRight > spaceLeft) {
+      side = "right";
+    }
+
+    // Alias for narrowed rect (guaranteed non-null by the guard above)
+    const r = rect;
+
+    // Cross-axis helpers — always center on the highlight
+    function horizontalStyle(): React.CSSProperties {
+      if (popoverAlign === "end") {
+        const idealRight = vw - (r.left + r.width);
+        return { right: Math.max(VIEWPORT_MARGIN, idealRight) };
+      }
+      if (popoverAlign === "center") {
+        // Set left to target's horizontal center — motion x="-50%" handles the offset
+        return { left: r.left + r.width / 2 };
+      }
+      return { left: Math.max(VIEWPORT_MARGIN, r.left) };
+    }
+
+    function verticalStyle(): React.CSSProperties {
+      if (popoverAlign === "end") {
+        const idealBottom = vh - (r.top + r.height);
+        return { bottom: Math.max(VIEWPORT_MARGIN, idealBottom) };
+      }
+      if (popoverAlign === "center") {
+        // Set top to target's vertical center — motion y="-50%" handles the offset
+        const centerY = r.top + r.height / 2;
+        return { top: centerY };
+      }
+      return { top: Math.max(VIEWPORT_MARGIN, Math.min(r.top, vh - ph - VIEWPORT_MARGIN)) };
+    }
+
+    // Whether the popover needs CSS-precise centering via motion x/y="-50%"
+    const centerX = (side === "top" || side === "bottom") && popoverAlign === "center";
+    const centerY = (side === "right" || side === "left") && popoverAlign === "center";
+
+    // Compute position with cross-axis alignment + clamping
+    switch (side) {
+      case "bottom":
+        return {
+          style: { top: r.top + r.height + pad + gap, ...horizontalStyle() },
+          resolvedSide: side,
+          needsCenterX: centerX,
+          needsCenterY: false,
+        };
+      case "top":
+        return {
+          style: { bottom: vh - r.top + pad + gap, ...horizontalStyle() },
+          resolvedSide: side,
+          needsCenterX: centerX,
+          needsCenterY: false,
+        };
+      case "right":
+        return {
+          style: { left: r.left + r.width + pad + gap, ...verticalStyle() },
+          resolvedSide: side,
+          needsCenterX: false,
+          needsCenterY: centerY,
+        };
+      case "left":
+        return {
+          style: { right: vw - r.left + pad + gap, ...verticalStyle() },
+          resolvedSide: side,
+          needsCenterX: false,
+          needsCenterY: centerY,
+        };
+    }
+  }, [rect, popoverSide, popoverAlign, popoverSize, popoverPosition]);
+
+  // Compute display counter that excludes skipped steps
+  const displayTotal = totalSteps - skippedSteps.size;
+  const skippedBefore = [...skippedSteps].filter((i) => i < currentStepIndex).length;
+  const displayIndex = currentStepIndex + 1 - skippedBefore;
+
+  // Whether the current step is the last *visible* step
+  const isLastVisibleStep = (() => {
+    for (let i = currentStepIndex + 1; i < totalSteps; i++) {
+      if (!skippedSteps.has(i)) return false;
+    }
+    return true;
+  })();
+
+  // Find the previous non-skipped step index (for Back button)
+  const prevVisibleStepIndex = (() => {
+    for (let i = currentStepIndex - 1; i >= 0; i--) {
+      if (!skippedSteps.has(i)) return i;
+    }
+    return -1;
+  })();
+
+  if (!isRunning) return null;
+
+  return (
+    <>
+      {/* Click catcher — dismisses tour when clicking outside spotlight */}
+      <AnimatePresence>
+        {rect && (
+          <motion.div
+            key="backdrop"
+            className="fixed inset-0 z-[54]"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            onClick={dismissTour}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Spotlight cutout — transparent hole with dark overlay around it */}
+      <AnimatePresence>
+        {rect && (
+          <motion.div
+            key="spotlight"
+            className="fixed z-[55] pointer-events-none"
+            initial={
+              isFirstSpotlight
+                ? {
+                    opacity: 0,
+                    top: rect.top - SPOTLIGHT_PADDING,
+                    left: rect.left - SPOTLIGHT_PADDING,
+                    width: rect.width + SPOTLIGHT_PADDING * 2,
+                    height: rect.height + SPOTLIGHT_PADDING * 2,
+                  }
+                : { opacity: 0 }
+            }
+            animate={{
+              opacity: 1,
+              top: rect.top - SPOTLIGHT_PADDING,
+              left: rect.left - SPOTLIGHT_PADDING,
+              width: rect.width + SPOTLIGHT_PADDING * 2,
+              height: rect.height + SPOTLIGHT_PADDING * 2,
+            }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3, ease: "linear" }}
+            style={{
+              borderRadius: rect.borderRadius,
+              boxShadow: "0 0 0 9999px rgba(0, 0, 0, 0.6)",
+            }}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Step card popover — hidden during spotlight transition */}
+      <AnimatePresence mode="wait">
+        {rect && currentStep && !isTransitioning && (
+          <motion.div
+            ref={popoverRef}
+            key={`step-${currentStepIndex}`}
+            className={cn(
+              "fixed z-[60] w-80 max-w-[calc(100vw-2rem)]",
+              "bg-popover text-popover-foreground",
+              "rounded-2xl p-4 shadow-2xl ring-1 ring-foreground/5",
+              "flex flex-col gap-3",
+            )}
+            style={popoverStyle}
+            initial={{
+              opacity: 0,
+              scale: 0.95,
+              x: needsCenterX ? "-50%" : 0,
+              y: needsCenterY ? "-50%" : resolvedSide === "bottom" ? -8 : resolvedSide === "top" ? 8 : 0,
+            }}
+            animate={{
+              opacity: 1,
+              scale: 1,
+              x: needsCenterX ? "-50%" : 0,
+              y: needsCenterY ? "-50%" : 0,
+            }}
+            exit={{
+              opacity: 0,
+              scale: 0.95,
+              x: needsCenterX ? "-50%" : 0,
+              y: needsCenterY ? "-50%" : 0,
+            }}
+            transition={{ duration: 0.15, ease: "easeOut" }}
+          >
+            {/* Title + step counter */}
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-medium">{currentStep.title}</h3>
+              <span className="text-xs text-muted-foreground">
+                {displayIndex} of {displayTotal}
+              </span>
+            </div>
+
+            {/* Description */}
+            {currentStep.description.split("\n\n").map((paragraph, i) => (
+              <p key={i} className="text-sm text-muted-foreground">{paragraph}</p>
+            ))}
+
+            {/* Navigation */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                {prevVisibleStepIndex >= 0 && (
+                  <Button
+                    variant="secondary"
+                    size="xs"
+                    onClick={prevStep}
+                  >
+                    <ArrowLeft className="size-3" />
+                    Back
+                  </Button>
+                )}
+                <Button
+                  variant="solid"
+                  size="xs"
+                  onClick={nextStep}
+                >
+                  {isLastVisibleStep ? "Done" : "Next"}
+                  {!isLastVisibleStep && <ArrowRight className="size-3" />}
+                </Button>
+              </div>
+              <Button
+                variant="ghost"
+                size="xs"
+                className="text-destructive hover:text-destructive"
+                onClick={dismissTour}
+              >
+                Skip
+              </Button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Loading state — subtle backdrop while waiting for element */}
+      <AnimatePresence>
+        {isWaiting && !rect && (
+          <motion.div
+            key="waiting"
+            className="fixed inset-0 z-[54] bg-black/30"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+          />
+        )}
+      </AnimatePresence>
+    </>
+  );
+}

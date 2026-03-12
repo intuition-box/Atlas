@@ -11,6 +11,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { NavigationProvider } from "@/components/navigation/navigation-provider";
 import { AttestationQueueProvider } from "@/components/attestation/queue-provider";
 import { WalletProvider } from "@/components/wallet-provider";
+import { TourProvider } from "@/components/tour/tour-provider";
 import { useGlobalSound } from "@/hooks/use-global-sound";
 
 /**
@@ -187,6 +188,8 @@ function OnboardingGuard({ children }: { children: React.ReactNode }) {
     try {
       if (sessionStorage.getItem("atlas-onboarded") === "1") {
         sessionStorage.removeItem("atlas-onboarded");
+        // Flag to trigger welcome tour on the settings page
+        sessionStorage.setItem("atlas-trigger-welcome-tour", "1");
         // Small delay to let the page render before playing
         const t = setTimeout(() => { void sounds.onboarding(); }, 400);
         return () => clearTimeout(t);
@@ -221,9 +224,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
             <TooltipProvider delay={300}>
               <NavigationProvider>
                 <AttestationQueueProvider>
-                  <Suspense>
-                    <OnboardingGuard>{children}</OnboardingGuard>
-                  </Suspense>
+                  <TourProvider>
+                    <Suspense>
+                      <OnboardingGuard>{children}</OnboardingGuard>
+                    </Suspense>
+                  </TourProvider>
                 </AttestationQueueProvider>
               </NavigationProvider>
             </TooltipProvider>

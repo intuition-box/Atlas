@@ -11,6 +11,8 @@ import { Loader2, X } from "lucide-react"
 import { apiPost } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
 import { userPath, userSettingsPath } from "@/lib/routes"
+import { useTourTrigger } from "@/hooks/use-tour-trigger"
+import { createWelcomeTour, createProfileSetupTour } from "@/components/tour/tour-definitions"
 import { COUNTRIES } from "@/config/countries"
 import { LANGUAGE_LIST as LANGUAGES } from "@/config/languages"
 import { SKILL_LIST as SKILLS, TOOL_LIST as TOOLS } from "@/lib/attestations/definitions"
@@ -268,7 +270,7 @@ function ProfileSection({
   const showOverlay = avatarStatus.type !== "idle"
 
   return (
-    <Card>
+    <Card data-tour="settings-profile">
       <CardHeader>
         <CardTitle>Profile</CardTitle>
         <CardDescription>Your public identity across communities.</CardDescription>
@@ -366,7 +368,7 @@ function AboutSection({
   form: ReturnType<typeof useForm<SettingsValues>>
 }) {
   return (
-    <Card>
+    <Card data-tour="settings-about">
       <CardHeader>
         <CardTitle>About</CardTitle>
         <CardDescription>Tell people a bit about yourself.</CardDescription>
@@ -644,7 +646,7 @@ function SkillsAndToolsSection({
   onAddTool: (tool: string) => void
 }) {
   return (
-    <Card>
+    <Card data-tour="settings-skills-tools">
       <CardHeader>
         <CardTitle>Skills & tools</CardTitle>
         <CardDescription>What you&apos;re good at and what you work with.</CardDescription>
@@ -1033,7 +1035,7 @@ function ConnectedAccountsSection({ linkedProviders }: { linkedProviders: string
   const { data: session } = useSession()
 
   return (
-    <Card>
+    <Card data-tour="settings-socials">
       <CardHeader>
         <CardTitle>Social accounts</CardTitle>
         <CardDescription>Manage your linked social accounts.</CardDescription>
@@ -1110,6 +1112,25 @@ export default function UserSettingsPage() {
   const router = useRouter()
   const ctx = useUser()
   const { handle } = ctx
+
+  // Tour: "Welcome to Atlas" — triggers after first onboarding via sessionStorage flag
+  const welcomeTour = React.useMemo(() => {
+    try {
+      if (typeof window !== "undefined" && sessionStorage.getItem("atlas-trigger-welcome-tour") === "1") {
+        sessionStorage.removeItem("atlas-trigger-welcome-tour")
+        return createWelcomeTour(true)
+      }
+    } catch { /* SSR / private browsing */ }
+    return null
+  }, [])
+  useTourTrigger(welcomeTour)
+
+  // Tour: "Set Up Your Profile" — triggers on own settings page
+  const profileSetupTour = React.useMemo(
+    () => (ctx.isSelf && handle ? createProfileSetupTour(handle) : null),
+    [ctx.isSelf, handle],
+  )
+  useTourTrigger(profileSetupTour)
 
   // Auth gate: redirect non-owners once context is ready
   React.useEffect(() => {

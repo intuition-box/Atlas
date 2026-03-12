@@ -164,6 +164,9 @@ export interface UniverseViewProps {
   links?: OrbitLink[];
   /** Called when zoom-in animation completes on a community. Parent does router.push. */
   onCommunityClick?: (handle: string) => void;
+  /** When set, renders an invisible DOM anchor positioned over this community node.
+   *  Useful for guided-tour spotlights that need a real element to target. */
+  highlightHandle?: string;
   className?: string;
   style?: React.CSSProperties;
 }
@@ -176,11 +179,15 @@ export function UniverseView({
   communities,
   links = [],
   onCommunityClick,
+  highlightHandle,
   className,
   style,
 }: UniverseViewProps) {
   const containerRef = React.useRef<HTMLDivElement>(null);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
+  const highlightAnchorRef = React.useRef<HTMLDivElement>(null);
+  const highlightHandleRef = React.useRef(highlightHandle);
+  highlightHandleRef.current = highlightHandle;
 
   const stateRef = React.useRef({
     // Canvas dimensions
@@ -845,6 +852,25 @@ export function UniverseView({
 
       ctx.restore();
 
+      // ── Highlight anchor — position a DOM element over a specific node ──
+      const anchorEl = highlightAnchorRef.current;
+      const anchorHandle = highlightHandleRef.current;
+      if (anchorEl && anchorHandle) {
+        const node = s.nodes.find((n) => n.handle === anchorHandle);
+        if (node && node.x !== undefined && node.y !== undefined) {
+          const screenR = node.radius * t.k;
+          const cx = node.x * t.k + t.x;
+          const cy = node.y * t.k + t.y;
+          anchorEl.style.left = `${cx - screenR}px`;
+          anchorEl.style.top = `${cy - screenR}px`;
+          anchorEl.style.width = `${screenR * 2}px`;
+          anchorEl.style.height = `${screenR * 2}px`;
+          anchorEl.style.display = "block";
+        } else {
+          anchorEl.style.display = "none";
+        }
+      }
+
       // Keep scheduling: during intro animations, and continuously
       // once links are visible (energy flow needs ongoing frames)
       if (s.fadeIn < 1 || bridgeProgress < 1) {
@@ -1089,6 +1115,20 @@ export function UniverseView({
         aria-label="Community universe"
         role="img"
       />
+
+      {/* Invisible DOM anchor positioned over a highlighted community node (for guided tours) */}
+      {highlightHandle && (
+        <div
+          ref={highlightAnchorRef}
+          data-tour={`community-${highlightHandle}`}
+          style={{
+            position: "absolute",
+            display: "none",
+            borderRadius: "9999px",
+            pointerEvents: "none",
+          }}
+        />
+      )}
 
       {communityTooltip && stateRef.current.mode === "idle" && (
         <NodeTooltip

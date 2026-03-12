@@ -10,6 +10,8 @@ import {
   communityMembersPath,
   userPath,
 } from "@/lib/routes"
+import { useTourTrigger } from "@/hooks/use-tour-trigger"
+import { createJoiningCommunityTour } from "@/components/tour/tour-definitions"
 
 import { ProfileAvatar } from "@/components/common/profile-avatar"
 import { Badge } from "@/components/ui/badge"
@@ -187,6 +189,14 @@ export default function CommunityProfilePage() {
   const { community, data } = ctx
   const isLoading = ctx.status === "loading"
 
+  // Tour: "Joining a Community" — triggers when viewing a community as non-member
+  const isNonMember = ctx.viewerMembership?.status !== "APPROVED"
+  const joiningTour = React.useMemo(
+    () => (isNonMember && !isLoading ? createJoiningCommunityTour() : null),
+    [isNonMember, isLoading],
+  )
+  useTourTrigger(joiningTour)
+
   const handleLabel = community?.handle ?? ctx.handle
   const memberCount = data?.memberCount ?? 0
 
@@ -214,7 +224,7 @@ export default function CommunityProfilePage() {
     <>
       {/* Social accounts */}
       {socials.length > 0 && (
-        <Card>
+        <Card data-tour="community-socials">
           <CardHeader>
             <CardTitle>Social accounts</CardTitle>
             <CardDescription>Where to find this community online.</CardDescription>

@@ -59,11 +59,14 @@ export default function Home() {
 
   return (
     <>
-      <UniverseView
-        communities={communities}
-        links={links}
-        onCommunityClick={(handle) => router.push(communityOrbitPath(handle))}
-      />
+      <div data-tour="universe-orbit" className="contents">
+        <UniverseView
+          communities={communities}
+          links={links}
+          onCommunityClick={(handle) => router.push(communityOrbitPath(handle))}
+          highlightHandle="intuition"
+        />
+      </div>
 
       {/* Status */}
       {error ? (

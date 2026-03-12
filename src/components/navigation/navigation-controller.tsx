@@ -45,6 +45,7 @@ import {
 import { AttestationQueuePanel } from "@/components/attestation/queue-panel";
 import { AttestationQueueButton } from "@/components/attestation/queue-button";
 import { AttestationDock } from "@/components/attestation/attestation-dock";
+import { TourHelpButton } from "@/components/tour/tour-help-button";
 
 /* ────────────────────────────
    Types
@@ -98,6 +99,7 @@ export function NavigationController({
           >
             <Menu>
               <MenuTrigger
+                data-tour="nav-menu"
                 className={cn(
                   "flex items-center gap-1",
                   "pl-1 pr-0.5 py-1 rounded-full",
@@ -189,9 +191,12 @@ export function NavigationController({
         transition={{ duration: 0.3, ease: "easeOut", delay: 0.05 }}
         className="absolute top-3 right-3 sm:right-4 pointer-events-auto"
       >
-        <div className="flex items-center gap-1 rounded-full border border-border bg-input/30 bg-clip-padding px-1 py-[3px]">
-          {/* Attestation Cart (authed only) */}
-          {showControls && isAuthed && <AttestationQueueButton />}
+        <div data-tour="top-right-controls" className="flex items-center gap-1 rounded-full border border-border bg-input/30 bg-clip-padding px-1 py-[3px]">
+          {/* Attestation Cart — visible to all, disabled when logged out */}
+          {showControls && <AttestationQueueButton disabled={!isAuthed} />}
+
+          {/* Guided Tours */}
+          {showControls && <TourHelpButton />}
 
           {/* Sound Toggle */}
           {showControls && (

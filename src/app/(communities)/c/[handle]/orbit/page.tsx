@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation"
 import { communityPath, userPath } from "@/lib/routes"
 import { sounds } from "@/lib/sounds"
 
+import { RING_RADII, PERSPECTIVE_RATIO } from "@/components/orbit/constants"
 import { OrbitView } from "@/components/orbit/view"
 import type { OrbitMember, OrbitCommunityData } from "@/components/orbit/types"
 
@@ -102,6 +103,17 @@ export default function CommunityOrbitPage() {
 
   return (
     <div className="fixed inset-0">
+      {/* Invisible tour target — sized to match the outermost EXPLORER ring (canvas-drawn ellipse) */}
+      <div
+        data-tour="orbit-rings"
+        className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
+        style={{
+          width: RING_RADII.EXPLORER * 2,
+          height: RING_RADII.EXPLORER * PERSPECTIVE_RATIO * 2,
+          borderRadius: "50%",
+        }}
+      />
+
       {/* Full-screen orbit canvas */}
       {isReady && canViewDirectory && members.length > 0 ? (
         <OrbitView
