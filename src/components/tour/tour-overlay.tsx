@@ -425,7 +425,7 @@ export function TourOverlay() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
+            transition={{ duration: 0.2, ease: "linear" }}
             onClick={dismissTour}
           />
         )}
@@ -496,7 +496,7 @@ export function TourOverlay() {
               x: needsCenterX ? "-50%" : 0,
               y: needsCenterY ? "-50%" : 0,
             }}
-            transition={{ duration: 0.15, ease: "easeOut" }}
+            transition={{ duration: 0.15, ease: "linear" }}
           >
             {/* Title + step counter */}
             <div className="flex items-center justify-between">
@@ -555,7 +555,7 @@ export function TourOverlay() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
+            transition={{ duration: 0.2, ease: "linear" }}
           />
         )}
       </AnimatePresence>

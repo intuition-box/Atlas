@@ -322,41 +322,44 @@ function ProfileSection({
           )}
         </Field>
 
-        <FormField<SettingsValues, "handle">
-          name="handle"
-          label="Handle"
-          required
-          description="The old URL will return 404 immediately after a rename. The old handle may be reclaimable for a limited time."
-          render={({ id, field, fieldState }) => (
-            <HandleField
-              id={id}
-              field={field}
-              fieldState={fieldState}
-              nameValue={watchedName}
-              currentHandle={currentHandle}
-              ownerType="USER"
-            />
-          )}
-        />
+        {/* -mt/pt extend bounding rect up to avatar bottom; -mb/pb extend it down to card bottom */}
+        <div data-tour="settings-profile-fields" className="-mt-5 pt-5 -mb-5 pb-5 -ml-5 pl-5 -mr-5 pr-5 flex flex-col gap-6 rounded-2xl">
+          <FormField<SettingsValues, "handle">
+            name="handle"
+            label="Handle"
+            required
+            description="The old URL will return 404 immediately after a rename. The old handle may be reclaimable for a limited time."
+            render={({ id, field, fieldState }) => (
+              <HandleField
+                id={id}
+                field={field}
+                fieldState={fieldState}
+                nameValue={watchedName}
+                currentHandle={currentHandle}
+                ownerType="USER"
+              />
+            )}
+          />
 
-        <FormField<SettingsValues, "name">
-          name="name"
-          label="Name"
-          required
-          description="The name people know you by."
-          render={({ id, field, fieldState }) => (
-            <Input {...fieldControlProps(field, { id, invalid: fieldState.invalid })} value={field.value ?? ""} />
-          )}
-        />
+          <FormField<SettingsValues, "name">
+            name="name"
+            label="Name"
+            required
+            description="The name people know you by."
+            render={({ id, field, fieldState }) => (
+              <Input {...fieldControlProps(field, { id, invalid: fieldState.invalid })} value={field.value ?? ""} />
+            )}
+          />
 
-        <FormField<SettingsValues, "headline">
-          name="headline"
-          label="Headline"
-          description="Short description shown under your name."
-          render={({ id, field, fieldState }) => (
-            <Input {...fieldControlProps(field, { id, invalid: fieldState.invalid })} value={field.value ?? ""} />
-          )}
-        />
+          <FormField<SettingsValues, "headline">
+            name="headline"
+            label="Headline"
+            description="Short description shown under your name."
+            render={({ id, field, fieldState }) => (
+              <Input {...fieldControlProps(field, { id, invalid: fieldState.invalid })} value={field.value ?? ""} />
+            )}
+          />
+        </div>
       </CardContent>
     </Card>
   )

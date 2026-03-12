@@ -151,12 +151,12 @@ export function createProfileSetupTour(handle: string): TourDefinition {
 
       },
       {
-        target: '[data-tour="settings-profile"]',
+        target: '[data-tour="settings-profile-fields"]',
         route: settingsRoute,
         title: "Your Identity",
         description:
           "Set your name, handle, and other personal information — this is how others will recognize you across Atlas.",
-        side: "right",
+        side: "bottom",
         align: "center",
       },
       {
