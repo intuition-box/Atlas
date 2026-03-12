@@ -357,7 +357,6 @@ export default function UserProfilePage() {
               toHandle={handleLabel}
               toAvatarUrl={avatarSrc}
               isSelf={isSelf}
-              showTooltip
               source="profile"
             />
           </CardContent>
@@ -379,7 +378,6 @@ export default function UserProfilePage() {
               toHandle={handleLabel}
               toAvatarUrl={avatarSrc}
               isSelf={isSelf}
-              showTooltip
               source="profile"
             />
           </CardContent>
@@ -399,8 +397,6 @@ export default function UserProfilePage() {
               toName={displayName}
               toHandle={handleLabel}
               toAvatarUrl={avatarSrc}
-              showCounts
-              showTooltip
               source="profile"
             />
           </CardContent>

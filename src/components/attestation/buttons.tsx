@@ -40,10 +40,6 @@ type AttestationButtonsProps = {
   className?: string;
   /** Size variant (network mode only) */
   size?: "xs" | "sm";
-  /** Show "+N" count badges on each button (fetched automatically) */
-  showCounts?: boolean;
-  /** Show tooltip with attestor names on hover */
-  showTooltip?: boolean;
   /**
    * Endorsement mode — pass skill/tool labels to render endorsable badges
    * instead of network attestation buttons.
@@ -87,8 +83,6 @@ export function AttestationButtons({
   toAvatarUrl,
   className,
   size = "sm",
-  showCounts = false,
-  showTooltip = false,
   items,
   endorsementType,
   isSelf = false,
@@ -317,7 +311,7 @@ export function AttestationButtons({
   const COUNT_DEFAULT = "bg-background/40";
   const COUNT_ACTIVE = "bg-primary/10 text-primary";
   const COUNT_HOVER = "group-hover/button:bg-destructive/10 group-hover/button:text-destructive";
-  const ACTIVE_BUTTON = "bg-secondary/50 text-primary hover:bg-destructive/10 hover:text-destructive";
+  const ACTIVE_BUTTON = "bg-secondary/50 text-muted-foreground hover:bg-destructive/10 hover:text-destructive";
 
   /* ── Endorsement mode render ── */
 
@@ -358,7 +352,7 @@ export function AttestationButtons({
             const endorsers = endorsementUsers[attributeId] ?? [];
             const isSaving = savingAttributes.has(attributeId);
             const isRetracting = retractingAttributes.has(attributeId);
-            const hasTooltipData = showTooltip && endorsers.length > 0;
+            const hasTooltipData = endorsers.length > 0;
 
             const buttonContent = (
               <>
@@ -475,10 +469,10 @@ export function AttestationButtons({
           const isSaving = savingTypes.has(type);
           const isActive = activeTypes.has(type);
           const isRetracting = retractingTypes.has(type);
-          const count = showCounts ? (receivedCounts[type] ?? 0) : 0;
+          const count = receivedCounts[type] ?? 0;
           const attestors = receivedUsers[type] ?? [];
           const totalCount = receivedCounts[type] ?? 0;
-          const hasTooltip = showTooltip && attestors.length > 0;
+          const hasTooltip = attestors.length > 0;
 
           if (isLoading) {
             return (

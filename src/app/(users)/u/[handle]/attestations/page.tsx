@@ -4,13 +4,20 @@ import * as React from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useSession } from "next-auth/react"
-import { ArrowUpRight, Link2, Search, Undo2 } from "lucide-react"
+import { useAccount, useSwitchChain, useChainId } from "wagmi"
+import { useConnectModal } from "@rainbow-me/rainbowkit"
+import { ArrowUpRight, Link2, Search, Undo2, Wallet } from "lucide-react"
+import type { Address } from "viem"
 
+import { cn } from "@/lib/utils"
 import { apiGet, apiPost } from "@/lib/api/client"
 import { formatRelativeTime } from "@/lib/format"
-import { sounds } from "@/lib/sounds"
 import { ROUTES, userPath } from "@/lib/routes"
-import { ATTESTATION_TYPES, ATTESTATION_TYPE_LIST, type AttestationType } from "@/lib/attestations/definitions"
+import { ATTESTATION_TYPES, ATTESTATION_TYPE_LIST, isEndorsementType, getAttributeById, type AttestationType } from "@/lib/attestations/definitions"
+import { sounds } from "@/lib/sounds"
+import { batchCreateAttestations } from "@/lib/intuition/client"
+import { INTUITION_CHAIN, getExplorerTxUrl } from "@/lib/intuition/config"
+import type { BatchMintItem } from "@/lib/intuition/types"
 import { useDebouncedValue } from "@/hooks/use-debounced-value"
 
 import { AttestationBadge } from "@/components/attestation/badge"
@@ -42,14 +49,17 @@ type AttestationUser = {
   name: string | null
   avatarUrl: string | null
   headline: string | null
+  walletAddress: string | null
 }
 
 type Attestation = {
   id: string
   type: AttestationType
+  attributeId: string | null
   confidence: number | null
   createdAt: string
   mintedAt: string | null
+  mintTxHash: string | null
   fromUser: AttestationUser
   toUser: AttestationUser
 }
@@ -201,8 +211,9 @@ function useAttestationsData(
       const toName = a.toUser.name?.toLowerCase() ?? ""
       const toHandle = a.toUser.handle?.toLowerCase() ?? ""
       const typeLabel = ATTESTATION_TYPES[a.type].label.toLowerCase()
+      const attrLabel = a.attributeId ? (getAttributeById(a.attributeId)?.label.toLowerCase() ?? "") : ""
 
-      return toName.includes(q) || toHandle.includes(q) || typeLabel.includes(q)
+      return toName.includes(q) || toHandle.includes(q) || typeLabel.includes(q) || attrLabel.includes(q)
     })
   }, [items, debouncedQ])
 
@@ -224,8 +235,12 @@ function AttestationRow({
   const otherUser = attestation.toUser
   const canRemove = viewerId === attestation.fromUser.id
   const isMinted = !!attestation.mintedAt
+  const hasWallet = Boolean(otherUser.walletAddress)
+  const explorerUrl = getExplorerTxUrl(attestation.mintTxHash)
   const displayName = otherUser.name?.trim() || `@${otherUser.handle}`
   const href = userPath(otherUser.handle ?? otherUser.id)
+  const isEndorsement = isEndorsementType(attestation.type)
+  const attribute = attestation.attributeId ? getAttributeById(attestation.attributeId) : undefined
 
   const handleRemove = async (e: React.MouseEvent) => {
     e.preventDefault()
@@ -248,7 +263,10 @@ function AttestationRow({
   }
 
   return (
-    <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 p-3">
+    <div className={cn(
+      "flex items-center justify-between gap-3 rounded-lg border border-border/60 p-3",
+      !hasWallet && !isMinted && "opacity-50",
+    )}>
       <div className="flex items-center gap-2 min-w-0 text-sm">
         <Link href={href} className="flex items-center gap-2 min-w-0 hover:opacity-80 transition-opacity">
           <ProfileAvatar type="user" src={otherUser.avatarUrl} name={displayName} size="sm" />
@@ -259,9 +277,18 @@ function AttestationRow({
         </Link>
         <ArrowUpRight className="size-3 shrink-0 text-amber-500" />
         <AttestationBadge type={attestation.type} />
+        {isEndorsement && attribute && (
+          <span className="truncate text-xs text-muted-foreground">{attribute.label}</span>
+        )}
       </div>
 
       <div className="flex items-center gap-2 shrink-0">
+        {!hasWallet && !isMinted && (
+          <span className="inline-flex items-center gap-1 text-xs text-warning-foreground/70">
+            <Wallet className="size-3" />
+            No wallet
+          </span>
+        )}
         {canRemove && (
           <Button
             variant="destructive"
@@ -275,10 +302,21 @@ function AttestationRow({
           </Button>
         )}
         {isMinted ? (
-          <Badge variant="positive" className="gap-1">
-            <Link2 className="size-3" />
-            Published
-          </Badge>
+          explorerUrl ? (
+            <Badge
+              variant="positive"
+              className="gap-1 cursor-pointer hover:bg-emerald-500/10"
+              render={<a href={explorerUrl} target="_blank" rel="noopener noreferrer" />}
+            >
+              <Link2 className="size-3" />
+              Published
+            </Badge>
+          ) : (
+            <Badge variant="positive" className="gap-1">
+              <Link2 className="size-3" />
+              Published
+            </Badge>
+          )
         ) : (
           <Badge variant="secondary">Pending</Badge>
         )}
@@ -432,13 +470,23 @@ export default function AttestationsPage() {
   const isSelf = ctx.isSelf
 
   // Get lastChangedAt from queue context to trigger refetch when cart saves
-  const { lastChangedAt } = useAttestationQueue()
+  const { lastChangedAt, onItemMinted, retractAll } = useAttestationQueue()
 
   const [cursor, setCursor] = React.useState<string | null>(null)
   const [isFiltersOpen, setIsFiltersOpen] = React.useState(false)
   const [localItems, setLocalItems] = React.useState<Attestation[]>([])
 
-  const [mintingIds, setMintingIds] = React.useState<Set<string>>(new Set())
+  // Minting state
+  const [isMinting, setIsMinting] = React.useState(false)
+  const [mintError, setMintError] = React.useState<string | null>(null)
+  const [refreshKey, setRefreshKey] = React.useState(0)
+
+  // Wallet state
+  const viewerWallet = session?.user?.walletAddress ?? null
+  const { address: connectedAddress } = useAccount()
+  const chainId = useChainId()
+  const { switchChainAsync } = useSwitchChain()
+  const { openConnectModal } = useConnectModal()
 
   const [filters, setFilters] = React.useState<FilterState>({
     q: "",
@@ -471,6 +519,7 @@ export default function AttestationsPage() {
     filters,
     cursor,
     lastChangedAt,
+    refreshKey,
   )
 
   // Sync fetched items to local state (allows optimistic removal on retract)
@@ -491,92 +540,143 @@ export default function AttestationsPage() {
     setLocalItems((prev) => prev.filter((a) => a.id !== attestationId))
   }, [])
 
-  // Mint function — calls API to persist state, will be extended with Intuition SDK later
-  const handleMint = React.useCallback(async (id: string, options?: { silent?: boolean }) => {
-    setMintingIds((prev) => new Set(prev).add(id))
-
-    try {
-      // TODO: When Intuition integration is ready:
-      // 1. Call Intuition SDK to mint onchain
-      // 2. Get txHash and onchainId from the response
-      // 3. Pass them to the API below
-
-      // For now, simulate the blockchain call delay
-      await new Promise((resolve) => setTimeout(resolve, 1000))
-
-      const result = await apiPost<{
-        attestation: { id: string; mintedAt: string };
-        alreadyMinted: boolean;
-      }>("/api/attestation/mint", {
-        attestationId: id,
-      })
-
-      if (result.ok) {
-        const mintedAt = result.value.attestation.mintedAt
-        setLocalItems((prev) =>
-          prev.map((a) =>
-            a.id === id ? { ...a, mintedAt } : a
-          )
-        )
-        if (!options?.silent) {
-          sounds.mint()
-        }
-      } else {
-        console.error("[Mint] Failed to mint attestation:", result.error)
-        if (!options?.silent) {
-          sounds.error()
-        }
-      }
-    } catch (err) {
-      console.error("[Mint] Error minting attestation:", err)
-      if (!options?.silent) {
-        sounds.error()
-      }
-    } finally {
-      setMintingIds((prev) => {
-        const next = new Set(prev)
-        next.delete(id)
-        return next
-      })
-    }
-  }, [])
-
+  // Real on-chain minting — same flow as the cart panel
   const handleMintAll = React.useCallback(async () => {
-    const unmintedIds = localItems
-      .filter((a) => !a.mintedAt && a.fromUser.id === viewerId)
-      .map((a) => a.id)
+    // Only mint unminted attestations from the viewer with wallets on the recipient
+    const mintable = localItems.filter(
+      (a) => a.fromUser.id === viewerId && !a.mintedAt && Boolean(a.toUser.walletAddress),
+    )
 
-    if (unmintedIds.length === 0) return
+    if (isMinting || mintable.length === 0) return
 
+    // Guard: viewer must have a linked wallet
+    if (!viewerWallet) {
+      setMintError("Link a wallet in Settings to publish attestations.")
+      return
+    }
+
+    // Guard: wallet must be connected and match the linked wallet
+    if (!connectedAddress || connectedAddress.toLowerCase() !== viewerWallet.toLowerCase()) {
+      setMintError(
+        `Connect wallet ${viewerWallet.slice(0, 6)}…${viewerWallet.slice(-4)} to publish.`,
+      )
+      if (openConnectModal) openConnectModal()
+      return
+    }
+
+    // Ensure wallet is on the Intuition chain
+    if (chainId !== INTUITION_CHAIN.id) {
+      try {
+        await switchChainAsync({ chainId: INTUITION_CHAIN.id })
+      } catch {
+        setMintError(`Switch your wallet to ${INTUITION_CHAIN.name} and try again.`)
+        return
+      }
+    }
+
+    setIsMinting(true)
+    setMintError(null)
+
+    // Start looping mint sound
     const loopControl = await sounds.loopMintAll()
+    let success = false
 
     try {
-      for (const id of unmintedIds) {
-        await handleMint(id, { silent: true })
+      // Build batch items
+      const batchItems: BatchMintItem[] = mintable.map((item) => ({
+        attestationId: item.id,
+        type: item.type,
+        toAddress: item.toUser.walletAddress as Address,
+        attributeId: item.attributeId ?? undefined,
+      }))
+
+      // Execute on-chain batch (wallet signatures happen here)
+      const result = await batchCreateAttestations(
+        viewerWallet as Address,
+        batchItems,
+      )
+
+      // Persist mint results to DB
+      const persistResult = await apiPost<{
+        minted: Array<{ id: string; mintedAt: string; mintTxHash: string }>
+        skipped: string[]
+      }>("/api/attestation/batch-mint", {
+        items: result.items.map((item) => ({
+          attestationId: item.attestationId,
+          txHash: result.triplesTxHash,
+          onchainId: item.onchainId,
+        })),
+      })
+
+      if (!persistResult.ok) {
+        setMintError("Published on-chain but failed to save. Refresh the page to sync.")
+        return
       }
+
+      // Remove minted items from the queue provider
+      for (const m of persistResult.value.minted) {
+        onItemMinted(m.id)
+      }
+
+      // Update local items to reflect minted state
+      const mintedIds = new Set(persistResult.value.minted.map((m) => m.id))
+      const txHash = result.triplesTxHash
+      setLocalItems((prev) =>
+        prev.map((a) =>
+          mintedIds.has(a.id) ? { ...a, mintedAt: new Date().toISOString(), mintTxHash: txHash } : a,
+        ),
+      )
+
+      // Show info about skipped items (recipients without wallets)
+      const unmintableCount = localItems.filter(
+        (a) => a.fromUser.id === viewerId && !a.mintedAt && !a.toUser.walletAddress,
+      ).length
+      if (unmintableCount > 0) {
+        setMintError(
+          `${unmintableCount} attestation${unmintableCount !== 1 ? "s" : ""} skipped — recipient${unmintableCount !== 1 ? "s have" : " has"} no linked wallet.`,
+        )
+      }
+
+      success = true
+      // Force refetch to get fresh data
+      setRefreshKey((k) => k + 1)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Publishing failed"
+      setMintError(message)
     } finally {
       loopControl.stop()
-      sounds.mint()
+      if (success) sounds.mint()
+      setIsMinting(false)
     }
-  }, [localItems, viewerId, handleMint])
+  }, [localItems, viewerId, viewerWallet, connectedAddress, chainId, switchChainAsync, openConnectModal, isMinting, onItemMinted])
 
   const activeFilters = hasActiveFilters(filters)
   const items = localItems
 
   // Calculate minting stats
-  const [mintStats, setMintStats] = React.useState({ totalCount: 0, mintedCount: 0 })
+  const [mintStats, setMintStats] = React.useState({ totalCount: 0, mintedCount: 0, mintableCount: 0 })
 
   React.useEffect(() => {
-    const total = localItems.filter((a) => a.fromUser.id === viewerId).length
-    const minted = localItems.filter((a) => a.fromUser.id === viewerId && a.mintedAt).length
+    const mine = localItems.filter((a) => a.fromUser.id === viewerId)
+    const total = mine.length
+    const minted = mine.filter((a) => a.mintedAt).length
+    const mintable = mine.filter((a) => !a.mintedAt && Boolean(a.toUser.walletAddress)).length
 
     if (total > 0 || mintStats.totalCount === 0) {
-      setMintStats({ totalCount: total, mintedCount: minted })
+      setMintStats({ totalCount: total, mintedCount: minted, mintableCount: mintable })
     }
   }, [localItems, viewerId, mintStats.totalCount])
 
-  const { totalCount, mintedCount } = mintStats
-  const isMinting = mintingIds.size > 0
+  const { totalCount, mintedCount, mintableCount } = mintStats
+
+  // Delete all unminted attestations
+  const handleDeleteAll = React.useCallback(async () => {
+    if (isMinting) return
+    await retractAll()
+    // Optimistically remove unminted items from local state
+    setLocalItems((prev) => prev.filter((a) => a.fromUser.id !== viewerId || a.mintedAt))
+    setRefreshKey((k) => k + 1)
+  }, [isMinting, retractAll, viewerId])
 
   // Reset paging when filters change
   React.useEffect(() => {
@@ -602,8 +702,10 @@ export default function AttestationsPage() {
         <OnchainBanner
           totalCount={totalCount}
           mintedCount={mintedCount}
+          mintableCount={mintableCount}
           isMinting={isMinting}
           onMintAll={handleMintAll}
+          onDeleteAll={handleDeleteAll}
         />
       )}
 
@@ -617,9 +719,9 @@ export default function AttestationsPage() {
         />
       )}
 
-      {error && (
+      {(error || mintError) && (
         <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{mintError ?? error}</AlertDescription>
         </Alert>
       )}
 

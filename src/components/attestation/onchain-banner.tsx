@@ -15,10 +15,14 @@ type OnchainBannerProps = {
   totalCount: number
   /** Number of already minted attestations */
   mintedCount: number
+  /** Number of mintable attestations (unminted with wallets) */
+  mintableCount: number
   /** Whether any minting operation is in progress */
   isMinting: boolean
   /** Callback to mint all unminted attestations */
   onMintAll: () => void
+  /** Callback to delete all unminted attestations */
+  onDeleteAll: () => void
   /** Optional className */
   className?: string
 }
@@ -51,18 +55,22 @@ function usePageHeaderHeight() {
 
 type ActionsBarProps = {
   unmintedCount: number
+  mintableCount: number
   mintedCount: number
   isMinting: boolean
   onMintAll: () => void
+  onDeleteAll: () => void
   /** When true, hides stats and uses xs buttons */
   compact?: boolean
 }
 
 function ActionsBar({
   unmintedCount,
+  mintableCount,
   mintedCount,
   isMinting,
   onMintAll,
+  onDeleteAll,
   compact,
 }: ActionsBarProps) {
   const btnSize = compact ? "xs" as const : "default" as const
@@ -87,22 +95,29 @@ function ActionsBar({
         </div>
       )}
 
-      <div className="flex items-center justify-center gap-2">
+      <div className="grid grid-cols-2 gap-2">
         <Button
+          variant="destructive"
+          size={btnSize}
+          onClick={onDeleteAll}
+          disabled={isMinting}
+        >
+          Delete all
+        </Button>
+        <Button
+          variant="positive"
           size={btnSize}
           onClick={onMintAll}
-          disabled={isMinting}
+          disabled={isMinting || mintableCount === 0}
           className="gap-2"
         >
           {isMinting ? (
             <>
               <Loader2 className="size-4 animate-spin" />
-              Publishing...
+              Publishing…
             </>
           ) : (
-            <>
-              Publish all
-            </>
+            `Publish ${mintableCount}`
           )}
         </Button>
       </div>
@@ -117,8 +132,10 @@ function ActionsBar({
 export function OnchainBanner({
   totalCount,
   mintedCount,
+  mintableCount,
   isMinting,
   onMintAll,
+  onDeleteAll,
   className,
 }: OnchainBannerProps) {
   const unmintedCount = totalCount - mintedCount
@@ -146,9 +163,11 @@ export function OnchainBanner({
 
   const actionsProps: ActionsBarProps = {
     unmintedCount,
+    mintableCount,
     mintedCount,
     isMinting,
     onMintAll,
+    onDeleteAll,
   }
 
   return (

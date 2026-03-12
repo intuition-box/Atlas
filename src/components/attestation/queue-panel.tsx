@@ -43,6 +43,7 @@ function CartItem({
   isActing: boolean;
 }) {
   const hasWallet = Boolean(item.toUser.walletAddress);
+  const isOppose = item.stance === "against";
 
   return (
     <div className={cn(
@@ -51,43 +52,57 @@ function CartItem({
     )}>
       <ProfileAvatar type="user" src={item.toUser.avatarUrl} name={item.toUser.name ?? ""} className="size-9 shrink-0" />
 
-      {/* Stance indicator */}
-      <span className="text-sm shrink-0" title={item.stance === "against" ? "Oppose" : "Support"}>
-        {item.stance === "against" ? "\ud83d\udc4e" : "\ud83d\udc4d"}
-      </span>
+      {/* Name + handle */}
+      <div className="flex flex-col min-w-0 shrink-0">
+        <span className="font-medium text-sm truncate">{item.toUser.name}</span>
+        {item.toUser.handle && (
+          <span className="text-xs text-muted-foreground truncate">@{item.toUser.handle}</span>
+        )}
+      </div>
 
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="font-medium text-sm truncate">{item.toUser.name}</span>
-          {item.toUser.handle && (
-            <span className="text-xs text-muted-foreground">@{item.toUser.handle}</span>
-          )}
-          {!hasWallet && (
-            <span className="inline-flex items-center gap-1 text-[10px] text-warning-foreground/70">
-              <Wallet className="size-2.5" />
-              No wallet
-            </span>
-          )}
+      {/* Separator */}
+      <div className="h-6 w-px bg-border/60 shrink-0" aria-hidden="true" />
+
+      {/* Wallet + stance/attestation */}
+      <div className="flex flex-col gap-0.5 flex-1 min-w-0">
+        {hasWallet ? (
+          <span className="text-[10px] text-muted-foreground font-mono truncate">
+            {item.toUser.walletAddress!.slice(0, 6)}…{item.toUser.walletAddress!.slice(-4)}
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 text-[10px] text-warning-foreground/70">
+            <Wallet className="size-2.5" />
+            No wallet
+          </span>
+        )}
+        <div className="flex items-center gap-1.5">
+          <span className={cn(
+            "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium leading-none",
+            isOppose
+              ? "bg-destructive/10 text-destructive"
+              : "bg-primary/10 text-primary",
+          )}>
+            {isOppose ? "Oppose" : "Support"}
+          </span>
+          <span className="text-xs text-muted-foreground truncate">
+            <AttestationBadge type={item.type} bare />
+            {(item.type === "SKILL_ENDORSE" || item.type === "TOOL_ENDORSE") && item.attributeId && (
+              <span className="ml-1 text-foreground/60">{getAttributeById(item.attributeId)?.label ?? item.attributeId}</span>
+            )}
+          </span>
         </div>
-        <span className="text-xs text-muted-foreground">
-          <AttestationBadge type={item.type} bare />
-          {(item.type === "SKILL_ENDORSE" || item.type === "TOOL_ENDORSE") && item.attributeId && (
-            <span className="ml-1 text-foreground/60">{getAttributeById(item.attributeId)?.label ?? item.attributeId}</span>
-          )}
-        </span>
       </div>
 
-      <div className="flex items-center gap-2 shrink-0">
-        <Button
-          variant="secondary"
-          size="icon-xs"
-          onClick={() => onDelete(item.id)}
-          disabled={isActing}
-          aria-label="Delete attestation"
-        >
-          <X className="size-3.5" />
-        </Button>
-      </div>
+      <Button
+        variant="secondary"
+        size="icon-xs"
+        onClick={() => onDelete(item.id)}
+        disabled={isActing}
+        aria-label="Delete attestation"
+        className="shrink-0"
+      >
+        <X className="size-3.5" />
+      </Button>
     </div>
   );
 }

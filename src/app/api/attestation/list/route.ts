@@ -36,6 +36,7 @@ type AttestationListItem = {
   confidence: number | null;
   createdAt: string;
   mintedAt: string | null;
+  mintTxHash: string | null;
   fromUser: {
     id: string;
     handle: string | null;
@@ -114,6 +115,7 @@ export const GET = api(QuerySchema, async (ctx) => {
       confidence: true,
       createdAt: true,
       mintedAt: true,
+      mintTxHash: true,
       fromUser: {
         select: {
           id: true,
@@ -163,6 +165,7 @@ export const GET = api(QuerySchema, async (ctx) => {
       confidence: a.confidence,
       createdAt: a.createdAt.toISOString(),
       mintedAt: a.mintedAt?.toISOString() ?? null,
+      mintTxHash: a.mintTxHash ?? null,
       fromUser: {
         id: a.fromUser.id,
         handle: fromHandle,

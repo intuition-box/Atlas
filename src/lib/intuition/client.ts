@@ -405,10 +405,11 @@ export async function batchCreateAttestations(
     ).map((a) => getAddress(a));
 
     const uniqueTypes = Array.from(new Set(items.map((i) => i.type)));
-    const predicateStrings = uniqueTypes.map((t) => getPredicateForType(t));
 
-    // ── Step 2: Query indexer for existing atoms (0 signatures) ──
-    const known = await resolveExistingAtoms([...uniqueAddresses, ...predicateStrings]);
+    // ── Step 2: Query indexer for existing address atoms (0 signatures) ──
+    // Note: predicates are resolved separately via getOrCreatePredicate (Step 4)
+    // to ensure they're always beautiful Thing atoms, not legacy string atoms.
+    const known = await resolveExistingAtoms(uniqueAddresses);
     console.log(LOG, "Step 2 — known atoms:", known.size);
 
     // ── Step 3: Create missing address atoms (0–1 signature) ──
@@ -452,20 +453,15 @@ export async function batchCreateAttestations(
       }
     }
 
-    // ── Step 4: Resolve predicate atoms ──
+    // ── Step 4: Resolve predicate atoms (always use beautiful Thing atoms) ──
+    // Always go through getOrCreatePredicate to ensure predicates are Thing atoms
+    // with IPFS-pinned metadata (name, description, url). This avoids reusing
+    // legacy string atoms from the indexer that the portal can't render.
     const predicateTermIds = new Map<AttestationType, `0x${string}`>();
 
-    for (let i = 0; i < uniqueTypes.length; i++) {
-      const type = uniqueTypes[i];
-      const existing = known.get(predicateStrings[i].toLowerCase());
-
-      if (existing) {
-        predicateTermIds.set(type, existing);
-        predicateCache.set(type, existing);
-      } else {
-        const termId = await getOrCreatePredicate(type);
-        predicateTermIds.set(type, termId);
-      }
+    for (const type of uniqueTypes) {
+      const termId = await getOrCreatePredicate(type);
+      predicateTermIds.set(type, termId);
     }
 
     // ── Step 4b: Resolve attribute atoms for endorsements (beautiful atoms) ──

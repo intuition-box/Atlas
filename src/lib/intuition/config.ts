@@ -68,6 +68,28 @@ export function getNativeCurrencySymbol() {
 }
 
 /* ────────────────────────────
+   Explorer URLs
+──────────────────────────── */
+
+/**
+ * Returns the base block explorer URL for the active Intuition chain.
+ * Uses the Blockscout explorer from the SDK chain config.
+ */
+function getExplorerBaseUrl(): string {
+  const chain = getIntuitionChain();
+  return chain.blockExplorers?.default.url ?? "https://explorer.intuition.systems";
+}
+
+/**
+ * Build a block explorer URL for a transaction hash.
+ * Returns null if no txHash is provided.
+ */
+export function getExplorerTxUrl(txHash: string | null | undefined): string | null {
+  if (!txHash) return null;
+  return `${getExplorerBaseUrl()}/tx/${txHash}`;
+}
+
+/* ────────────────────────────
    Convenience Constants
 ──────────────────────────── */
 
