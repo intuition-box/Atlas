@@ -9,8 +9,8 @@ export interface MetaConfig {
   icons: {
     favicon: string;
     app: string;
+    touchIcon: string;
     logo: string;
-    logomark: string;
   };
   og: {
     locale: string;
@@ -29,15 +29,15 @@ export const meta: MetaConfig = {
   url: 'https://atlas.box',
   canonical: 'https://atlas.box',
   name: 'Atlas',
-  title: '',
+  title: 'A framework for building reputation for communities',
   description: '',
   themeColor: '#000000',
   backgroundColor: '#ffffff',
   icons: {
     favicon: '/favicon.ico',
-    app: '/app.svg',
-    logo: '/brand/logo.svg',
-    logomark: '/brand/logomark.svg',
+    app: '/brand/app.svg',
+    touchIcon: '/apple-touch-icon.png',
+    logo: '/brand/logomark.svg',
   },
   og: {
     locale: 'en-US',
