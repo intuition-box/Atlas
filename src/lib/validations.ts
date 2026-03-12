@@ -212,6 +212,7 @@ export const CommunityUpdateSchema = z.object({
   avatarUrl: OptionalUrl.nullable().optional(),
   isMembershipOpen: z.coerce.boolean().optional(),
   isPublicDirectory: z.coerce.boolean().optional(),
+  autoOrbitPlacement: z.coerce.boolean().optional(),
   membershipConfig: jsonOk(z.unknown()).nullable().optional(),
   orbitConfig: jsonOk(z.unknown()).nullable().optional(),
   discordUrl: OptionalUrl.nullable().optional(),

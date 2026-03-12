@@ -364,6 +364,10 @@ model Community {
   /// If false, users cannot submit new applications to join this community.
   isMembershipOpen Boolean @default(true)
 
+  /// If true, orbit levels are auto-assigned based on gravity thresholds.
+  /// If false (default), members start at EXPLORER and admins place them manually.
+  autoOrbitPlacement Boolean @default(false)
+
   // Social links (plain URLs, no OAuth)
   discordUrl  String?
   xUrl        String?

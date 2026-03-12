@@ -47,6 +47,7 @@ const CommunitySettingsSchema = z.object({
   avatarUrl: z.string().url("Enter a valid image URL").optional().or(z.literal("")),
   isPublicDirectory: z.boolean(),
   isMembershipOpen: z.boolean(),
+  autoOrbitPlacement: z.boolean(),
   applicationQuestions: z.array(ApplicationQuestionSchema),
   discordUrl: z.string().max(2048, "URL is too long"),
   xUrl: z.string().max(2048, "URL is too long"),
@@ -254,6 +255,7 @@ export default function CommunitySettingsPage() {
       avatarUrl: "",
       isPublicDirectory: true,
       isMembershipOpen: true,
+      autoOrbitPlacement: false,
       applicationQuestions: [],
       discordUrl: "",
       xUrl: "",
@@ -312,6 +314,7 @@ export default function CommunitySettingsPage() {
         avatarUrl: community.avatarUrl ?? "",
         isPublicDirectory: community.isPublicDirectory ?? true,
         isMembershipOpen: community.isMembershipOpen ?? true,
+        autoOrbitPlacement: community.autoOrbitPlacement ?? false,
         applicationQuestions: safeQuestions,
         discordUrl: community.discordUrl ?? "",
         xUrl: community.xUrl ?? "",
@@ -358,6 +361,7 @@ export default function CommunitySettingsPage() {
       avatarUrl: optionalString(values.avatarUrl) ?? null,
       isPublicDirectory: !!values.isPublicDirectory,
       isMembershipOpen: !!values.isMembershipOpen,
+      autoOrbitPlacement: !!values.autoOrbitPlacement,
       membershipConfig: {
         ...membershipConfig,
         applicationQuestions: values.applicationQuestions.map((q) => ({
@@ -387,6 +391,7 @@ export default function CommunitySettingsPage() {
         avatarUrl: values.avatarUrl,
         isPublicDirectory: values.isPublicDirectory,
         isMembershipOpen: values.isMembershipOpen,
+        autoOrbitPlacement: values.autoOrbitPlacement,
         applicationQuestions: values.applicationQuestions.map((q) => ({
           id: q.id,
           label: q.label,
@@ -727,6 +732,22 @@ function PrivacySection({ form }: { form: ReturnType<typeof useForm<CommunitySet
               <div className="flex flex-col gap-1">
                 <div className="text-sm font-medium">Accepting applications</div>
                 <div className="text-xs text-muted-foreground">If off, hide apply and treat as closed.</div>
+              </div>
+              <Switch id={id} checked={!!field.value} onCheckedChange={field.onChange} />
+            </div>
+          )}
+        />
+
+        <FormField<CommunitySettingsValues, "autoOrbitPlacement">
+          name="autoOrbitPlacement"
+          render={({ id, field }) => (
+            <div className="flex items-center justify-between gap-4 rounded-2xl border border-border/60 p-4 sm:col-span-2">
+              <div className="flex flex-col gap-1">
+                <div className="text-sm font-medium">Auto orbit placement</div>
+                <div className="text-xs text-muted-foreground">
+                  If on, members move between orbits automatically based on their gravity score.
+                  If off, admins place members manually. Scores are always calculated either way.
+                </div>
               </div>
               <Switch id={id} checked={!!field.value} onCheckedChange={field.onChange} />
             </div>

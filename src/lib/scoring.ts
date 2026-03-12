@@ -401,12 +401,16 @@ export async function recomputeMemberScoresBatch(params: {
 export async function recomputeOrbitLevelsForCommunity(params: { communityId: string }) {
   const { communityId } = params;
 
-  // Load config
+  // Load config + placement mode
   const community = await db.community.findUnique({
     where: { id: communityId },
-    select: { orbitConfig: true },
+    select: { orbitConfig: true, autoOrbitPlacement: true },
   });
-  const config = getOrbitConfig(community?.orbitConfig);
+
+  // Manual mode (default): scores still compute, but orbit placement is admin-only.
+  if (!community?.autoOrbitPlacement) return;
+
+  const config = getOrbitConfig(community.orbitConfig);
 
   // Fetch approved members (no override, skip owners — always Advocate)
   const members = await db.membership.findMany({

@@ -22,6 +22,7 @@ export type CommunityData = {
     createdAt: string
     isMembershipOpen: boolean
     isPublicDirectory: boolean
+    autoOrbitPlacement: boolean
     discordUrl: string | null
     xUrl: string | null
     telegramUrl: string | null

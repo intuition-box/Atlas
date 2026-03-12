@@ -23,6 +23,7 @@ type CommunityGetOk = {
     createdAt: string;
     isMembershipOpen: boolean;
     isPublicDirectory: boolean;
+    autoOrbitPlacement: boolean;
     membershipConfig: unknown | null;
     orbitConfig: unknown | null;
     permissions: unknown | null;
@@ -99,6 +100,7 @@ export async function GET(req: NextRequest) {
         createdAt: true,
         isMembershipOpen: true,
         isPublicDirectory: true,
+        autoOrbitPlacement: true,
         membershipConfig: true,
         orbitConfig: true,
         permissions: true,
@@ -177,6 +179,7 @@ export async function GET(req: NextRequest) {
           createdAt: row.createdAt.toISOString(),
           isMembershipOpen: row.isMembershipOpen,
           isPublicDirectory: row.isPublicDirectory,
+          autoOrbitPlacement: row.autoOrbitPlacement,
           membershipConfig: null,
           orbitConfig: null,
           permissions: null,
@@ -262,6 +265,7 @@ export async function GET(req: NextRequest) {
         createdAt: row.createdAt.toISOString(),
         isMembershipOpen: row.isMembershipOpen,
         isPublicDirectory: row.isPublicDirectory,
+        autoOrbitPlacement: row.autoOrbitPlacement,
         membershipConfig: (row.membershipConfig as unknown) ?? null,
         orbitConfig: (row.orbitConfig as unknown) ?? null,
         permissions: (row.permissions as unknown) ?? null,

@@ -28,6 +28,7 @@ type UpdateCommunityOk = {
     avatarUrl: string | null;
     isMembershipOpen: boolean;
     isPublicDirectory: boolean;
+    autoOrbitPlacement: boolean;
     membershipConfig: unknown | null;
     orbitConfig: unknown | null;
   };
@@ -41,6 +42,7 @@ const UpdateSchema = CommunityUpdateSchema.refine(
     v.avatarUrl !== undefined ||
     v.isMembershipOpen !== undefined ||
     v.isPublicDirectory !== undefined ||
+    v.autoOrbitPlacement !== undefined ||
     v.membershipConfig !== undefined ||
     v.orbitConfig !== undefined,
   { message: "No updates provided", path: ["name"] },
@@ -97,6 +99,7 @@ export async function POST(req: NextRequest) {
     if (input.avatarUrl !== undefined) data.avatarUrl = input.avatarUrl;
     if (input.isMembershipOpen !== undefined) data.isMembershipOpen = input.isMembershipOpen;
     if (input.isPublicDirectory !== undefined) data.isPublicDirectory = input.isPublicDirectory;
+    if (input.autoOrbitPlacement !== undefined) data.autoOrbitPlacement = input.autoOrbitPlacement;
     if (input.membershipConfig !== undefined) data.membershipConfig = prismaJson(input.membershipConfig);
     if (input.orbitConfig !== undefined) data.orbitConfig = prismaJson(input.orbitConfig);
     if (input.discordUrl !== undefined) data.discordUrl = input.discordUrl ?? null;
@@ -153,6 +156,7 @@ export async function POST(req: NextRequest) {
           avatarUrl: true,
           isMembershipOpen: true,
           isPublicDirectory: true,
+          autoOrbitPlacement: true,
           membershipConfig: true,
           orbitConfig: true,
         },
@@ -247,6 +251,7 @@ export async function POST(req: NextRequest) {
         avatarUrl: updated.avatarUrl,
         isMembershipOpen: updated.isMembershipOpen,
         isPublicDirectory: updated.isPublicDirectory,
+        autoOrbitPlacement: updated.autoOrbitPlacement,
         membershipConfig: (updated.membershipConfig as unknown) ?? null,
         orbitConfig: (updated.orbitConfig as unknown) ?? null,
       },
