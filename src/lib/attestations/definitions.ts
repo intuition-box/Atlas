@@ -10,7 +10,26 @@
  *
  * Each type has a corresponding blockchain predicate for on-chain minting.
  * Offchain (DB) and onchain (Intuition) are just different states.
+ *
+ * Attributes are minted as schema.org "Thing" atoms (beautiful atoms) on the
+ * Intuition protocol. The Thing metadata (name, description, image, url) is
+ * pinned to IPFS and the URI stored on-chain, making atoms rich and
+ * discoverable across the ecosystem.
  */
+
+/** Base URL for Thing atom metadata (image hosting + canonical URLs). */
+const ATLAS_BASE_URL = "https://atlas.box";
+
+/**
+ * Schema.org Thing metadata for an Intuition atom.
+ * Matches PinThingMutationVariables from @0xintuition/graphql.
+ */
+export type ThingData = {
+  name: string;
+  description?: string;
+  image?: string;
+  url?: string;
+};
 
 /* ────────────────────────────
    Attestation Types
@@ -23,34 +42,59 @@ export const ATTESTATION_TYPES = {
     emoji: "👀",
     description: "Get notifications and updates about this user",
     predicate: "FOLLOW",
+    thing: {
+      name: "Follow",
+      description: "A follow relationship — get notifications and updates about this user",
+      url: `${ATLAS_BASE_URL}/attestations/follow`,
+    },
   },
   TRUST: {
     id: "TRUST",
     label: "I Trust",
     emoji: "🤝",
-    description: "Influences reputation score (love and reach)",
+    description: "The trust signal",
     predicate: "TRUST",
+    thing: {
+      name: "Trust",
+      description: "A trust signal that influences reputation",
+      url: `${ATLAS_BASE_URL}/attestations/trust`,
+    },
   },
   KNOW_IRL: {
     id: "KNOW_IRL",
     label: "I Know IRL",
     emoji: "📍",
-    description: "Opportunities for physical events and hackathons",
+    description: "An in-real-life connection",
     predicate: "KNOW_IRL",
+    thing: {
+      name: "Know IRL",
+      description: "An in-real-life connection with physical events or relashionship",
+      url: `${ATLAS_BASE_URL}/attestations/know-irl`,
+    },
   },
   WORK_WITH: {
     id: "WORK_WITH",
     label: "I Work With",
     emoji: "💼",
-    description: "Collaborate and code together",
+    description: "Collaborate and work together",
     predicate: "WORK_WITH",
+    thing: {
+      name: "Work With",
+      description: "A working relationship — collaborate and work together",
+      url: `${ATLAS_BASE_URL}/attestations/work-with`,
+    },
   },
   MET: {
     id: "MET",
     label: "I Met",
     emoji: "👋",
-    description: "Having meetings and calls to discuss",
+    description: "Having meetings and calls to connect",
     predicate: "MET",
+    thing: {
+      name: "Met",
+      description: "A connection formed through meetings and calls",
+      url: `${ATLAS_BASE_URL}/attestations/met`,
+    },
   },
   SKILL_ENDORSE: {
     id: "SKILL_ENDORSE",
@@ -58,6 +102,11 @@ export const ATTESTATION_TYPES = {
     emoji: "🎯",
     description: "Endorse this user's skill",
     predicate: "is_skilled_in",
+    thing: {
+      name: "Is Skilled In",
+      description: "An endorsement that a user is skilled in a particular area",
+      url: `${ATLAS_BASE_URL}/attestations/skill-endorse`,
+    },
   },
   TOOL_ENDORSE: {
     id: "TOOL_ENDORSE",
@@ -65,6 +114,11 @@ export const ATTESTATION_TYPES = {
     emoji: "⚡",
     description: "Endorse this user's tool proficiency",
     predicate: "uses_tool",
+    thing: {
+      name: "Uses Tool",
+      description: "An endorsement that a user is proficient with a specific tool",
+      url: `${ATLAS_BASE_URL}/attestations/tool-endorse`,
+    },
   },
 } as const;
 
@@ -86,11 +140,19 @@ export function endorsementTypeForCategory(category: AttributeCategory): Attesta
 }
 
 /**
- * Get the blockchain predicate for an attestation type.
- * Used when minting attestations on-chain via Intuition SDK.
+ * Get the legacy blockchain predicate string for an attestation type.
+ * @deprecated Use getPredicateThingData for beautiful atoms.
  */
 export function getPredicateForType(type: AttestationType): string {
   return ATTESTATION_TYPES[type].predicate;
+}
+
+/**
+ * Get schema.org Thing metadata for a predicate atom (beautiful atom).
+ * No image — predicates are administrative atoms.
+ */
+export function getPredicateThingData(type: AttestationType): ThingData {
+  return { ...ATTESTATION_TYPES[type].thing };
 }
 
 /* ────────────────────────────
@@ -908,11 +970,27 @@ export type Skill = string;
 export type Tool = string;
 
 /**
- * Get the on-chain atom data string for an attribute.
- * This becomes the object atom in triples: [User] [has_attribute] [atomData]
+ * Get the legacy on-chain atom data string for an attribute.
+ * @deprecated Use getAttributeThingData for beautiful atoms.
  */
 export function getAttributeAtomData(id: AttributeId): string {
   return ATTRIBUTES[id].atomData;
+}
+
+/**
+ * Get schema.org Thing metadata for an attribute (beautiful atom).
+ *
+ * Deterministic: same attribute always produces identical JSON-LD,
+ * which means the same IPFS CID and on-chain atom.
+ */
+export function getAttributeThingData(id: AttributeId): ThingData {
+  const attr = ATTRIBUTES[id];
+  const categoryLabel = attr.category === "skill" ? "skill" : "tool";
+  return {
+    name: attr.label,
+    description: `${attr.label} — a ${categoryLabel} on Atlas`,
+    url: `${ATLAS_BASE_URL}/${attr.category}s/${attr.id}`,
+  };
 }
 
 /** Reverse lookup: find an attribute by its display label (case-insensitive). */

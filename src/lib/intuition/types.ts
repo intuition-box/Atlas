@@ -27,6 +27,8 @@ export type BatchMintItem = {
   attestationId: string;
   type: AttestationType;
   toAddress: Address;
+  /** Attribute ID for endorsements (SKILL_ENDORSE / TOOL_ENDORSE). */
+  attributeId?: string;
 };
 
 /** Result from batch minting on-chain. */

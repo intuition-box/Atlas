@@ -198,6 +198,7 @@ export function AttestationQueuePanel() {
         attestationId: item.id,
         type: item.type,
         toAddress: item.toUser.walletAddress as Address,
+        attributeId: item.attributeId ?? undefined,
       }));
 
       // Execute on-chain batch (wallet signatures happen here)

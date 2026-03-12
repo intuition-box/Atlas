@@ -34,6 +34,7 @@ import {
   createAtomFromEthereumAccount,
   batchCreateAtomsFromEthereumAccounts,
   findAtomIds,
+  pinThing,
   multiVaultCreateTriples,
   multiVaultGetTripleCost,
   multiVaultGetGeneralConfig,
@@ -45,7 +46,11 @@ import {
 
 import {
   type AttestationType,
+  type AttributeId,
   getPredicateForType,
+  getPredicateThingData,
+  getAttributeThingData,
+  isEndorsementType,
 } from "@/lib/attestations/definitions";
 
 import {
@@ -231,11 +236,42 @@ async function createStringAtom(content: string) {
 /** Cache predicate termIds to avoid redundant lookups. */
 const predicateCache = new Map<AttestationType, `0x${string}`>();
 
-/** Get or create a predicate atom for an attestation type. */
+/**
+ * Get or create a predicate atom for an attestation type (beautiful atom).
+ *
+ * Predicates are minted as schema.org Thing atoms with name + description
+ * (no image — they're administrative). Falls back to legacy string atom
+ * if IPFS pinning fails.
+ */
 async function getOrCreatePredicate(type: AttestationType): Promise<`0x${string}`> {
   const cached = predicateCache.get(type);
   if (cached) return cached;
 
+  // Try beautiful atom first
+  const thingData = getPredicateThingData(type);
+  const uri = await pinThing(thingData);
+
+  if (uri) {
+    const atomData = toHex(uri);
+    const termId = calculateAtomId(atomData);
+
+    const exists = await multiVaultIsTermCreated(readConfig, { args: [termId] });
+    if (exists) {
+      console.log(LOG, `Predicate Thing atom "${thingData.name}" already exists:`, termId);
+      predicateCache.set(type, termId);
+      return termId;
+    }
+
+    // Create on-chain using IPFS URI as atom data
+    console.log(LOG, `Creating predicate Thing atom "${thingData.name}" (uri: ${uri})`);
+    const walletClient = await requireWalletClient();
+    const result = await createAtomFromString(buildWriteConfig(walletClient), uri);
+    predicateCache.set(type, result.state.termId);
+    return result.state.termId;
+  }
+
+  // Fallback: legacy string atom if pinning fails
+  console.warn(LOG, `IPFS pin failed for predicate "${thingData.name}", falling back to string atom`);
   const result = await createStringAtom(getPredicateForType(type));
   predicateCache.set(type, result.state.termId);
   return result.state.termId;
@@ -280,6 +316,56 @@ async function resolveExistingAtoms(
   }
 
   return result;
+}
+
+/* ════════════════════════════════════════════════
+   LAYER: thing atoms (beautiful atoms)
+════════════════════════════════════════════════ */
+
+/** Cache attribute termIds to avoid redundant IPFS pins + on-chain lookups. */
+const attributeAtomCache = new Map<string, `0x${string}`>();
+
+/**
+ * Get or create a "beautiful" Thing atom on Intuition.
+ *
+ * Flow: pin JSON-LD to IPFS → check on-chain existence → create if missing.
+ * IPFS pinning is idempotent (same content = same CID), so re-pinning is safe.
+ *
+ * @param attributeId - Attribute key from ATTRIBUTES (used for caching)
+ * @param config - Write config (only needed if atom must be created)
+ */
+async function getOrCreateThingAtom(
+  attributeId: string,
+  config: WriteConfig,
+): Promise<`0x${string}`> {
+  const cached = attributeAtomCache.get(attributeId);
+  if (cached) return cached;
+
+  const thingData = getAttributeThingData(attributeId as AttributeId);
+
+  // Pin metadata to IPFS → deterministic CID for identical content
+  const uri = await pinThing(thingData);
+  if (!uri) {
+    throw new IntuitionError("TRANSACTION_FAILED", `Failed to pin Thing atom for "${thingData.name}" to IPFS`);
+  }
+
+  // Calculate termId from the IPFS URI (same as SDK does internally)
+  const atomData = toHex(uri);
+  const termId = calculateAtomId(atomData);
+
+  // Check if this atom already exists on-chain
+  const exists = await multiVaultIsTermCreated(readConfig, { args: [termId] });
+  if (exists) {
+    console.log(LOG, `Thing atom "${thingData.name}" already exists:`, termId);
+    attributeAtomCache.set(attributeId, termId);
+    return termId;
+  }
+
+  // Create the atom on-chain using the IPFS URI as data
+  console.log(LOG, `Creating Thing atom "${thingData.name}" (uri: ${uri})`);
+  const result = await createAtomFromString(config, uri);
+  attributeAtomCache.set(attributeId, result.state.termId);
+  return result.state.termId;
 }
 
 /* ════════════════════════════════════════════════
@@ -382,6 +468,35 @@ export async function batchCreateAttestations(
       }
     }
 
+    // ── Step 4b: Resolve attribute atoms for endorsements (beautiful atoms) ──
+    const attributeTermIds = new Map<string, `0x${string}`>();
+    const uniqueAttributeIds = Array.from(
+      new Set(items.filter((i) => i.attributeId).map((i) => i.attributeId!)),
+    );
+
+    if (uniqueAttributeIds.length > 0) {
+      console.log(LOG, "Step 4b — resolving", uniqueAttributeIds.length, "attribute Thing atoms");
+      for (const attrId of uniqueAttributeIds) {
+        try {
+          const termId = await getOrCreateThingAtom(attrId, config);
+          attributeTermIds.set(attrId, termId);
+        } catch (error) {
+          if (isAtomExistsError(error)) {
+            // Atom exists but we couldn't resolve termId earlier — pin to get URI and compute
+            const thingData = getAttributeThingData(attrId as AttributeId);
+            const uri = await pinThing(thingData);
+            if (uri) {
+              const termId = calculateAtomId(toHex(uri));
+              attributeTermIds.set(attrId, termId);
+              attributeAtomCache.set(attrId, termId);
+            }
+          } else {
+            throw error;
+          }
+        }
+      }
+    }
+
     // ── Step 5: Build parallel arrays + pre-flight balance check ──
     const fromTermId = known.get(fromAddress.toLowerCase())!;
     const assetPerTriple = await getTripleCost();
@@ -393,9 +508,32 @@ export async function batchCreateAttestations(
     const deposits: bigint[] = [];
 
     for (const item of items) {
-      subjectIds.push(fromTermId);
-      predicateIds.push(predicateTermIds.get(item.type)!);
-      objectIds.push(known.get(item.toAddress.toLowerCase())!);
+      const isEndorsement = isEndorsementType(item.type) && item.attributeId;
+
+      if (isEndorsement) {
+        // Endorsement triple: [toUser] [is_skilled_in] [attribute]
+        // Semantics: "toUser is skilled in Engineering", staked by fromUser
+        const toTermId = known.get(item.toAddress.toLowerCase())!;
+        const attrTermId = attributeTermIds.get(item.attributeId!);
+
+        if (!attrTermId) {
+          console.warn(LOG, `Skipping endorsement — no atom for attribute "${item.attributeId}"`);
+          // Fall back to legacy triple structure
+          subjectIds.push(fromTermId);
+          predicateIds.push(predicateTermIds.get(item.type)!);
+          objectIds.push(toTermId);
+        } else {
+          subjectIds.push(toTermId);
+          predicateIds.push(predicateTermIds.get(item.type)!);
+          objectIds.push(attrTermId);
+        }
+      } else {
+        // Network attestation: [fromUser] [predicate] [toUser]
+        subjectIds.push(fromTermId);
+        predicateIds.push(predicateTermIds.get(item.type)!);
+        objectIds.push(known.get(item.toAddress.toLowerCase())!);
+      }
+
       deposits.push(assetPerTriple);
     }
 
