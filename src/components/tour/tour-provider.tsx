@@ -59,6 +59,8 @@ type TourContextValue = {
   currentStepIndex: number;
   /** Total steps in the active tour */
   totalSteps: number;
+  /** Monotonically increasing counter — changes on every startTour call */
+  tourInstanceId: number;
 
   /** Start a specific tour (ignores completion state) */
   startTour: (tour: TourDefinition) => void;
@@ -66,6 +68,8 @@ type TourContextValue = {
   nextStep: () => void;
   /** Go back to the previous step */
   prevStep: () => void;
+  /** Jump directly to a specific step index */
+  goToStep: (index: number) => void;
   /** Dismiss the tour without marking it completed (Skip / backdrop / Escape) */
   dismissTour: () => void;
   /** Trigger a tour (no-op if already completed or another tour is running) */
@@ -92,6 +96,10 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
   const [currentStepIndex, setCurrentStepIndex] = React.useState(0);
   const [completedTours, setCompletedTours] = React.useState<string[]>([]);
 
+  /** Monotonically increasing counter — increments on every startTour so the
+   *  overlay can detect tour restarts (even same-tour-ID) and reset cleanly. */
+  const [tourInstanceId, setTourInstanceId] = React.useState(0);
+
   // Load completed tours from localStorage on mount
   React.useEffect(() => {
     setCompletedTours(getCompletedTours());
@@ -108,6 +116,7 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
     (tour: TourDefinition) => {
       setActiveTour(tour);
       setCurrentStepIndex(0);
+      setTourInstanceId((prev) => prev + 1);
 
       const firstStep = tour.steps[0];
       if (firstStep?.route) {
@@ -163,6 +172,15 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
     navigateToStep(activeTour.steps[prevIdx]!);
   }, [activeTour, currentStepIndex, navigateToStep]);
 
+  const goToStep = React.useCallback(
+    (index: number) => {
+      if (!activeTour || index < 0 || index >= activeTour.steps.length) return;
+      setCurrentStepIndex(index);
+      navigateToStep(activeTour.steps[index]!);
+    },
+    [activeTour, navigateToStep],
+  );
+
   // Use refs so trigger has a stable identity (doesn't re-fire effects)
   const activeTourRef = React.useRef(activeTour);
   activeTourRef.current = activeTour;
@@ -190,25 +208,8 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
     setCompletedTours((prev) => prev.filter((id) => id !== tourId));
   }, []);
 
-  // Keyboard navigation
-  React.useEffect(() => {
-    if (!isRunning) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        dismissTour();
-      } else if (e.key === "ArrowRight") {
-        e.preventDefault();
-        nextStep();
-      } else if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        prevStep();
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isRunning, dismissTour, nextStep, prevStep]);
+  // Keyboard navigation is handled in TourOverlay so it can skip over
+  // steps whose DOM target is missing (the overlay tracks skipped steps).
 
   // Auto-trigger Welcome tour on home page for first-time visitors
   React.useEffect(() => {
@@ -227,9 +228,11 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
       currentStep,
       currentStepIndex,
       totalSteps,
+      tourInstanceId,
       startTour,
       nextStep,
       prevStep,
+      goToStep,
       dismissTour,
       trigger,
       isTourCompleted,
@@ -241,9 +244,11 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
       currentStep,
       currentStepIndex,
       totalSteps,
+      tourInstanceId,
       startTour,
       nextStep,
       prevStep,
+      goToStep,
       dismissTour,
       trigger,
       isTourCompleted,

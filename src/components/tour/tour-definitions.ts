@@ -190,9 +190,9 @@ export function createFirstEndorsementTour(viewerHandle: string | null): TourDef
       {
         target: '[data-tour="profile-nav"]',
         route: demoProfile,
-        title: "Explore Their Profile",
+        title: "Explore User Profiles",
         description:
-          "Use these tabs to check their activity, attestations, and profile details. It's a good way to learn about someone before endorsing them.",
+          "Use these tabs to check the activity, attestations, and profile details. It's a good way to learn about someone before endorsing them.",
         side: "bottom",
         align: "center",
 
@@ -200,9 +200,9 @@ export function createFirstEndorsementTour(viewerHandle: string | null): TourDef
       {
         target: '[data-tour="socials-card"]',
         route: demoProfile,
-        title: "Verify Their Identity",
+        title: "Verify User Identity",
         description:
-          "Check their linked accounts — Discord, X, GitHub, and wallets. This helps confirm they are who they say they are before you endorse.",
+          "Check the linked accounts — socials and wallets. This helps confirm they are who they say they are before you endorse.",
         side: "bottom",
         align: "center",
 
@@ -255,9 +255,9 @@ export function createPublishingTour(handle: string): TourDefinition {
         route: attestationsRoute,
         title: "Pending vs Published",
         description:
-          "Pending means saved but not onchain yet. Published means it's permanent and verifiable onchain.",
+          "'Pending' means saved but not onchain yet. 'Published' means it's permanent and verifiable onchain. You can open it on the block explorer with the 'Published' button, and view your transaction details.\n\n'Remove' will delete offchain endorsements, while 'Widthdraw' will remove all your positions from the onchain claim and then delete the endorsement.",
         side: "bottom",
-        align: "start",
+        align: "end",
       },
       {
         target: '[data-tour="publish-button"]',

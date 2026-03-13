@@ -45,9 +45,22 @@ const EXPAND_DURATION = 0.15;
    Utilities
 ──────────────────────────── */
 
+/** Returns true when the element has been laid out (non-zero bounding rect). */
+function hasLayout(el: HTMLElement): boolean {
+  const r = el.getBoundingClientRect();
+  return r.width > 0 && r.height > 0;
+}
+
 /**
- * Wait for a DOM element matching `selector` to appear.
- * Uses MutationObserver with a timeout fallback.
+ * Wait for a DOM element matching `selector` to appear **and** have a
+ * non-zero bounding rect (width > 0 && height > 0).
+ *
+ * Elements with `display: none` or that haven't been laid out yet return
+ * `{0, 0, 0, 0}` from `getBoundingClientRect()`. We must not consider
+ * those "found" — the spotlight would render at the top-left corner.
+ *
+ * Uses MutationObserver + a polling interval to catch both DOM insertion
+ * and style changes (e.g. `display: none` → `display: block`).
  */
 function waitForElement(
   selector: string,
@@ -56,35 +69,127 @@ function waitForElement(
   return new Promise((resolve) => {
     // Check immediately
     const existing = document.querySelector<HTMLElement>(selector);
-    if (existing) {
+    if (existing && hasLayout(existing)) {
       resolve(existing);
       return;
     }
 
+    let observer: MutationObserver;
+    let interval: ReturnType<typeof setInterval>;
+
+    const cleanup = () => {
+      clearTimeout(timeout);
+      clearInterval(interval);
+      observer?.disconnect();
+    };
+
     const timeout = setTimeout(() => {
-      observer.disconnect();
+      cleanup();
       resolve(null);
     }, timeoutMs);
 
-    const observer = new MutationObserver(() => {
+    /** Shared check — called by both MutationObserver and polling. */
+    const check = () => {
       const el = document.querySelector<HTMLElement>(selector);
-      if (el) {
-        clearTimeout(timeout);
-        observer.disconnect();
+      if (el && hasLayout(el)) {
+        cleanup();
         resolve(el);
+        return true;
       }
+      return false;
+    };
+
+    observer = new MutationObserver(() => {
+      check();
     });
 
-    observer.observe(document.body, {
+    const root = document.getElementById("__next") ?? document.body;
+
+    observer.observe(root, {
       childList: true,
       subtree: true,
+      attributes: true,
+      attributeFilter: ["style", "class"],
     });
+
+    // Poll every 100ms for style-driven visibility changes
+    // (e.g. canvas code sets `display: block` without DOM mutation)
+    interval = setInterval(check, 100);
   });
 }
 
 /** Sleep utility. */
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Wait for `window.location.pathname` to match the expected route.
+ *
+ * During Next.js soft navigation, `router.push()` is async — the URL
+ * updates only after the new page has started rendering. Without this
+ * guard, `waitForElement` can resolve a same-selector element from the
+ * PREVIOUS page (e.g. navigating between user profiles that share a
+ * layout), leading to the spotlight appearing at a stale position.
+ */
+function waitForRoute(
+  targetRoute: string,
+  timeoutMs: number,
+): Promise<boolean> {
+  const normalize = (p: string) => p.replace(/\/+$/, "") || "/";
+  const target = normalize(targetRoute);
+
+  return new Promise((resolve) => {
+    if (normalize(window.location.pathname) === target) {
+      resolve(true);
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      clearInterval(interval);
+      resolve(false);
+    }, timeoutMs);
+
+    const interval = setInterval(() => {
+      if (normalize(window.location.pathname) === target) {
+        clearTimeout(timeout);
+        clearInterval(interval);
+        resolve(true);
+      }
+    }, 50);
+  });
+}
+
+/**
+ * Wait for an element's position to stabilize (layout done shifting).
+ * Measures every 50ms, returns once two consecutive reads match within 2px
+ * AND the element has non-zero dimensions, or after `maxWaitMs` has elapsed.
+ */
+async function waitForStablePosition(
+  el: HTMLElement,
+  maxWaitMs = 500,
+): Promise<DOMRect> {
+  let prev = el.getBoundingClientRect();
+  const deadline = Date.now() + maxWaitMs;
+
+  while (Date.now() < deadline) {
+    await sleep(50);
+    const curr = el.getBoundingClientRect();
+    const isStable =
+      Math.abs(curr.top - prev.top) < 2 &&
+      Math.abs(curr.left - prev.left) < 2 &&
+      Math.abs(curr.width - prev.width) < 2 &&
+      Math.abs(curr.height - prev.height) < 2;
+
+    // Don't accept zero-dimension rects as "stable" — the element
+    // might have `display: none` or not yet been laid out.
+    if (isStable && curr.width > 0 && curr.height > 0) {
+      return curr;
+    }
+    prev = curr;
+  }
+
+  return el.getBoundingClientRect();
 }
 
 /* ────────────────────────────
@@ -112,8 +217,9 @@ export function TourOverlay() {
     currentStep,
     currentStepIndex,
     totalSteps,
+    tourInstanceId,
     nextStep,
-    prevStep,
+    goToStep,
     dismissTour,
   } = useTour();
 
@@ -130,10 +236,9 @@ export function TourOverlay() {
    */
   const [isTransitioning, setIsTransitioning] = React.useState(false);
 
-  /** Whether the spotlight has been shown at least once (used to fade-in first, slide subsequent). */
+  /** Whether the spotlight has been shown at least once (used to determine dot-transition vs fade-in). */
   const hasShownRef = React.useRef(false);
   const prevRouteRef = React.useRef<string | undefined>(undefined);
-  const [isFirstSpotlight, setIsFirstSpotlight] = React.useState(true);
 
   /** Tracks step indices that were auto-skipped (element not found). */
   const [skippedSteps, setSkippedSteps] = React.useState<Set<number>>(new Set());
@@ -145,39 +250,46 @@ export function TourOverlay() {
   const pendingElRef = React.useRef<HTMLElement | null>(null);
   const collapseReadyRef = React.useRef(false);
 
-  /** Tracks which tour is active so we can detect direct tour-to-tour switches. */
-  const activeTourIdRef = React.useRef<string | null>(null);
+  /** Tracks the provider's tourInstanceId so we detect ANY tour start (even same ID). */
+  const instanceIdRef = React.useRef(-1);
+
+  /**
+   * When true, the rAF loop skips `setRect` calls. This prevents the
+   * spotlight from rendering before we've verified the element's position
+   * (first step of each tour). Released after SPOTLIGHT_SETTLE_MS in the
+   * fade-in path.
+   */
+  const deferRectRef = React.useRef(false);
+
+  /** Reset every piece of overlay state to a clean slate. */
+  const resetOverlay = React.useCallback(() => {
+    setTargetEl(null);
+    setRect(null);
+    setIsTransitioning(false);
+    setIsWaiting(false);
+    setSkippedSteps(new Set());
+    setPhase("idle");
+    hasShownRef.current = false;
+    prevRouteRef.current = undefined;
+    prevRectRef.current = null;
+    resolvedRectRef.current = null;
+    pendingElRef.current = null;
+    collapseReadyRef.current = false;
+    deferRectRef.current = false;
+  }, []);
 
   // Resolve target element when step changes
   React.useEffect(() => {
     if (!isRunning || !currentStep) {
-      setTargetEl(null);
-      setRect(null);
-      hasShownRef.current = false;
-      prevRouteRef.current = undefined;
-      setIsFirstSpotlight(true);
-      setSkippedSteps(new Set());
-      setPhase("idle");
-      prevRectRef.current = null;
-      resolvedRectRef.current = null;
-      pendingElRef.current = null;
-      collapseReadyRef.current = false;
-      activeTourIdRef.current = null;
+      resetOverlay();
+      instanceIdRef.current = -1;
       return;
     }
 
-    // Detect direct tour-to-tour switch (isRunning never went false)
-    const tourChanged = activeTour?.id !== activeTourIdRef.current;
-    if (tourChanged) {
-      hasShownRef.current = false;
-      prevRouteRef.current = undefined;
-      setIsFirstSpotlight(true);
-      setRect(null);
-      prevRectRef.current = null;
-      resolvedRectRef.current = null;
-      pendingElRef.current = null;
-      collapseReadyRef.current = false;
-      activeTourIdRef.current = activeTour?.id ?? null;
+    // Detect any tour start/restart (different instance = different tour run)
+    if (tourInstanceId !== instanceIdRef.current) {
+      resetOverlay();
+      instanceIdRef.current = tourInstanceId;
     }
 
     let cancelled = false;
@@ -206,6 +318,15 @@ export function TourOverlay() {
     }
 
     async function resolve() {
+      // If the step requires a different route, wait for the browser
+      // pathname to match before looking for DOM elements. Without this,
+      // `waitForElement` can grab a same-selector element from the
+      // PREVIOUS page (e.g. shared layout between user profiles).
+      if (currentStep!.route && isNewPage) {
+        const arrived = await waitForRoute(currentStep!.route, WAIT_TIMEOUT_MS);
+        if (!arrived || cancelled) return;
+      }
+
       const timeout = isNewPage ? WAIT_TIMEOUT_MS : 1_000;
       let el = await waitForElement(currentStep!.target, timeout);
 
@@ -234,9 +355,10 @@ export function TourOverlay() {
           }
         }
 
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
-        await sleep(SCROLL_SETTLE_MS);
-        if (cancelled) return;
+        // Instant scroll — completes synchronously so the measurement
+        // is always accurate. Also cancels any leftover smooth scroll
+        // from the previous step. The overlay hides the jump.
+        el.scrollIntoView({ behavior: "auto", block: "center" });
 
         setPopoverSide(currentStep!.side);
         setPopoverAlign(currentStep!.align ?? "center");
@@ -244,7 +366,6 @@ export function TourOverlay() {
         prevRouteRef.current = currentStep!.route;
 
         if (useDotTransition) {
-          // Measure destination rect for the dot animation
           const newR = el.getBoundingClientRect();
           const newComputed = getComputedStyle(el);
           resolvedRectRef.current = {
@@ -265,12 +386,48 @@ export function TourOverlay() {
           }
           // Otherwise handlePhaseComplete will advance when collapse finishes
         } else {
-          // Fade-in path (first step only)
+          // ── Fade-in path (first step only — NO traveling) ──
+          //
+          // CRITICAL: the spotlight must NOT render until we have a
+          // verified, stable position. We use `deferRectRef` to gate
+          // all `setRect` calls from the rAF loop, keeping
+          // `spotlightTarget` null (and the spotlight hidden) until
+          // we're ready.
+
+          // 1. Block rAF from setting rect (keeps spotlight hidden)
+          deferRectRef.current = true;
+
+          // 2. Wait for layout to stabilise — the element may exist
+          //    but the orbit visualisation / streaming content might
+          //    still be shifting things around.
+          await waitForStablePosition(el);
+          if (cancelled) return;
+
+          // 3. Scroll element into the centre of the viewport.
+          el.scrollIntoView({ behavior: "auto", block: "center" });
+
+          // 4. Start the rAF loop (updates prevRectRef but NOT rect
+          //    because deferRectRef is true).
           setTargetEl(el);
+
+          // 5. Let the rAF run for SPOTLIGHT_SETTLE_MS so any final
+          //    micro-shifts settle.
           await sleep(SPOTLIGHT_SETTLE_MS);
           if (cancelled) return;
 
-          setIsFirstSpotlight(false);
+          // 6. Release the gate — measure the element NOW and push
+          //    the rect in one batch so the spotlight mounts at the
+          //    correct, verified position.
+          deferRectRef.current = false;
+          const finalR = el.getBoundingClientRect();
+          const finalComputed = getComputedStyle(el);
+          setRect({
+            top: finalR.top,
+            left: finalR.left,
+            width: finalR.width,
+            height: finalR.height,
+            borderRadius: finalComputed.borderRadius,
+          });
           setIsTransitioning(false);
         }
       } else if (currentStepIndex < totalSteps - 1) {
@@ -291,14 +448,17 @@ export function TourOverlay() {
     };
   }, [isRunning, currentStep, currentStepIndex, nextStep]);
 
-  // Track target element position with rAF
+  // Track target element position with rAF.
+  // When `deferRectRef` is true the loop still runs (to keep prevRectRef
+  // fresh for dot transitions) but skips `setRect` so the spotlight stays
+  // hidden until the fade-in path explicitly releases it.
   React.useEffect(() => {
     if (!targetEl) return;
 
     let raf: number;
-    const computed = getComputedStyle(targetEl);
     const track = () => {
       const r = targetEl.getBoundingClientRect();
+      const computed = getComputedStyle(targetEl);
       const newRect: Rect = {
         top: r.top,
         left: r.left,
@@ -306,7 +466,9 @@ export function TourOverlay() {
         height: r.height,
         borderRadius: computed.borderRadius,
       };
-      setRect(newRect);
+      if (!deferRectRef.current) {
+        setRect(newRect);
+      }
       prevRectRef.current = newRect; // keep snapshot for dot transition
       raf = requestAnimationFrame(track);
     };
@@ -318,15 +480,38 @@ export function TourOverlay() {
   const popoverRef = React.useRef<HTMLDivElement>(null);
   const [popoverSize, setPopoverSize] = React.useState({ width: POPOVER_WIDTH, height: POPOVER_ESTIMATED_HEIGHT });
 
+  // Force popover position recompute on window resize
+  const [, forceViewportUpdate] = React.useReducer((x: number) => x + 1, 0);
+
+  React.useEffect(() => {
+    const handleResize = () => forceViewportUpdate();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
   React.useEffect(() => {
     const el = popoverRef.current;
     if (!el) return;
 
     const ro = new ResizeObserver(([entry]) => {
       if (!entry) return;
-      const { width, height } = entry.borderBoxSize[0]
-        ? { width: entry.borderBoxSize[0].inlineSize, height: entry.borderBoxSize[0].blockSize }
-        : entry.contentRect;
+
+      let width: number;
+      let height: number;
+
+      // Safari may return a single object instead of an array
+      const box = Array.isArray(entry.borderBoxSize)
+        ? entry.borderBoxSize[0]
+        : entry.borderBoxSize;
+
+      if (box) {
+        width = box.inlineSize;
+        height = box.blockSize;
+      } else {
+        width = entry.contentRect.width;
+        height = entry.contentRect.height;
+      }
+
       setPopoverSize((prev) =>
         prev.width === width && prev.height === height ? prev : { width, height },
       );
@@ -464,7 +649,6 @@ export function TourOverlay() {
     } else if (phase === "expanding") {
       setPhase("idle");
       setIsTransitioning(false);
-      setIsFirstSpotlight(false);
     }
   }, [phase]);
 
@@ -511,7 +695,7 @@ export function TourOverlay() {
     switch (phase) {
       case "collapsing": return { duration: COLLAPSE_DURATION, ease: "linear" as const };
       case "traveling": return { duration: TRAVEL_DURATION, ease: "linear" as const };
-      case "expanding": return { duration: EXPAND_DURATION, ease: "linear" as const };
+      case "expanding": return { type: "spring" as const, stiffness: 400, damping: 35 };
       default: return { duration: 0.3, ease: "linear" as const };
     }
   }, [phase]);
@@ -529,7 +713,7 @@ export function TourOverlay() {
     return true;
   })();
 
-  // Find the previous non-skipped step index (for Back button)
+  // Find the previous non-skipped step index (for Back button + ArrowLeft)
   const prevVisibleStepIndex = (() => {
     for (let i = currentStepIndex - 1; i >= 0; i--) {
       if (!skippedSteps.has(i)) return i;
@@ -537,9 +721,46 @@ export function TourOverlay() {
     return -1;
   })();
 
-  if (!isRunning) return null;
+  // Keyboard navigation — lives here (not in TourProvider) so
+  // ArrowLeft can jump directly to prevVisibleStepIndex and skip
+  // over steps whose DOM target is missing.
+  React.useEffect(() => {
+    if (!isRunning) return;
 
-  const tourId = activeTour?.id ?? "none";
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        dismissTour();
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        nextStep();
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        if (prevVisibleStepIndex >= 0) goToStep(prevVisibleStepIndex);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isRunning, dismissTour, nextStep, goToStep, prevVisibleStepIndex]);
+
+  // Focus popover when it appears (a11y)
+  React.useEffect(() => {
+    if (!isTransitioning && rect && popoverRef.current) {
+      popoverRef.current.focus({ preventScroll: true });
+    }
+  }, [isTransitioning, rect, currentStepIndex]);
+
+  // ── Stale-frame guard ──
+  // When a new tour starts (tourInstanceId changes), there is ONE render
+  // between the provider update and the overlay effect that calls
+  // resetOverlay(). During that render, overlay state (rect, phase, etc.)
+  // is stale from the previous tour. Block all rendering for that frame.
+  const isStaleFrame =
+    tourInstanceId !== instanceIdRef.current && instanceIdRef.current !== -1;
+
+  if (!isRunning || isStaleFrame) return null;
+
+  const instanceKey = String(tourInstanceId);
 
   return (
     <>
@@ -547,7 +768,7 @@ export function TourOverlay() {
       <AnimatePresence>
         {rect && (
           <motion.div
-            key={`backdrop-${tourId}`}
+            key={`backdrop-${instanceKey}`}
             className="fixed inset-0 z-[54]"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -562,16 +783,12 @@ export function TourOverlay() {
       <AnimatePresence>
         {spotlightTarget && (
           <motion.div
-            key={`spotlight-${tourId}`}
+            key={`spotlight-${instanceKey}`}
             className={cn(
               "fixed z-[55] pointer-events-none",
               phase === "traveling" && "bg-primary",
             )}
-            initial={
-              isFirstSpotlight
-                ? { ...spotlightTarget, opacity: 0 }
-                : undefined
-            }
+            initial={{ ...spotlightTarget, opacity: 0 }}
             animate={spotlightTarget}
             exit={{ opacity: 0 }}
             transition={spotlightTransition}
@@ -591,12 +808,17 @@ export function TourOverlay() {
         {rect && currentStep && !isTransitioning && (
           <motion.div
             ref={popoverRef}
-            key={`step-${tourId}-${currentStepIndex}`}
+            key={`step-${instanceKey}-${currentStepIndex}`}
+            role="dialog"
+            aria-modal="true"
+            aria-label={currentStep.title}
+            tabIndex={-1}
             className={cn(
               "fixed z-[60] w-80 max-w-[calc(100vw-2rem)]",
               "bg-popover text-popover-foreground",
               "rounded-2xl p-4 shadow-2xl ring-1 ring-foreground/5",
               "flex flex-col gap-3",
+              "outline-none",
             )}
             style={popoverStyle}
             initial={{
@@ -639,7 +861,7 @@ export function TourOverlay() {
                   <Button
                     variant="secondary"
                     size="xs"
-                    onClick={prevStep}
+                    onClick={() => goToStep(prevVisibleStepIndex)}
                   >
                     <ArrowLeft className="size-3" />
                     Back
@@ -671,7 +893,7 @@ export function TourOverlay() {
       <AnimatePresence>
         {isWaiting && !rect && (
           <motion.div
-            key={`waiting-${tourId}`}
+            key={`waiting-${instanceKey}`}
             className="fixed inset-0 z-[54] bg-black/30"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
