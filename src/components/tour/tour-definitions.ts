@@ -78,7 +78,7 @@ export function createWelcomeTour(isAuthed: boolean): TourDefinition {
       route: ROUTES.home,
       title: "Welcome to Atlas",
       description:
-        "This is the Atlas Universe, each node is a community. This is Intuition — you can enter it to explore its members, activity, and orbit.",
+        "You are in the Atlas Universe, each node is a community. This is Intuition — you can enter it to explore its members, activity, and orbit.",
       side: "bottom",
       align: "center",
     },

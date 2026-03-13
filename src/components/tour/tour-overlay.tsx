@@ -33,6 +33,14 @@ const VIEWPORT_MARGIN = 16;
 /** Time to wait for the spotlight spring animation to settle before fading in the popover (ms). */
 const SPOTLIGHT_SETTLE_MS = 400;
 
+/** Size of the traveling dot between steps (px). */
+const DOT_SIZE = 8;
+
+/** Duration of each dot-transition phase (seconds). */
+const COLLAPSE_DURATION = 0.15;
+const TRAVEL_DURATION = 0.2;
+const EXPAND_DURATION = 0.15;
+
 /* ────────────────────────────
    Utilities
 ──────────────────────────── */
@@ -91,6 +99,8 @@ type Rect = {
   borderRadius: string;
 };
 
+type TransitionPhase = "idle" | "collapsing" | "traveling" | "expanding";
+
 /* ────────────────────────────
    Component
 ──────────────────────────── */
@@ -128,6 +138,16 @@ export function TourOverlay() {
   /** Tracks step indices that were auto-skipped (element not found). */
   const [skippedSteps, setSkippedSteps] = React.useState<Set<number>>(new Set());
 
+  /** Dot-transition phase for step changes. */
+  const [phase, setPhase] = React.useState<TransitionPhase>("idle");
+  const prevRectRef = React.useRef<Rect | null>(null);
+  const resolvedRectRef = React.useRef<Rect | null>(null);
+  const pendingElRef = React.useRef<HTMLElement | null>(null);
+  const collapseReadyRef = React.useRef(false);
+
+  /** Tracks which tour is active so we can detect direct tour-to-tour switches. */
+  const activeTourIdRef = React.useRef<string | null>(null);
+
   // Resolve target element when step changes
   React.useEffect(() => {
     if (!isRunning || !currentStep) {
@@ -137,53 +157,73 @@ export function TourOverlay() {
       prevRouteRef.current = undefined;
       setIsFirstSpotlight(true);
       setSkippedSteps(new Set());
+      setPhase("idle");
+      prevRectRef.current = null;
+      resolvedRectRef.current = null;
+      pendingElRef.current = null;
+      collapseReadyRef.current = false;
+      activeTourIdRef.current = null;
       return;
+    }
+
+    // Detect direct tour-to-tour switch (isRunning never went false)
+    const tourChanged = activeTour?.id !== activeTourIdRef.current;
+    if (tourChanged) {
+      hasShownRef.current = false;
+      prevRouteRef.current = undefined;
+      setIsFirstSpotlight(true);
+      setRect(null);
+      prevRectRef.current = null;
+      resolvedRectRef.current = null;
+      pendingElRef.current = null;
+      collapseReadyRef.current = false;
+      activeTourIdRef.current = activeTour?.id ?? null;
     }
 
     let cancelled = false;
     const isFirstStep = !hasShownRef.current;
     const isNewPage = currentStep.route !== prevRouteRef.current;
+    const useDotTransition = !isFirstStep;
 
-    // Hide popover immediately and freeze spotlight at current position
+    // Hide popover immediately
     setIsTransitioning(true);
     setIsWaiting(true);
 
-    // Detach from old element so the rAF loop stops — spotlight freezes in place
-    setTargetEl(null);
+    // Reset dot animation refs
+    resolvedRectRef.current = null;
+    pendingElRef.current = null;
+    collapseReadyRef.current = false;
 
-    // If navigating to a new page, also clear the rect so the spotlight
-    // fades in at the new position instead of sliding from a stale one
-    if (isNewPage && !isFirstStep) {
-      setRect(null);
-      setIsFirstSpotlight(true);
+    if (useDotTransition) {
+      // Start dot collapse animation (same-page or cross-page)
+      // prevRectRef.current is already maintained by the rAF loop
+      setPhase("collapsing");
+      setTargetEl(null); // stop rAF, rect stays frozen
+    } else {
+      // First step: fade-in behavior
+      setPhase("idle");
+      setTargetEl(null);
     }
 
     async function resolve() {
-      // Same-page elements should already be in the DOM — use a shorter timeout
-      // so missing steps (e.g. user has no skills/tools) are skipped quickly
       const timeout = isNewPage ? WAIT_TIMEOUT_MS : 1_000;
       let el = await waitForElement(currentStep!.target, timeout);
 
-      // Try fallback selector if primary target is missing (e.g. no attestation rows → highlight the card)
       if (!el && currentStep!.fallbackTarget) {
         el = document.querySelector<HTMLElement>(currentStep!.fallbackTarget);
       }
       if (cancelled) return;
 
       if (el) {
-        // Pre-scan: once we're on a page, check all future steps on the same
-        // route and mark missing ones as skipped so the counter is correct
-        // from the very first step (e.g. "1 of 3" instead of "1 of 4").
+        // Pre-scan future steps for missing elements
         if (activeTour) {
           const currentRoute = currentStep!.route;
           const missing = new Set<number>();
           for (let i = currentStepIndex + 1; i < activeTour.steps.length; i++) {
             const s = activeTour.steps[i]!;
-            if (s.route !== currentRoute) break; // stop at page boundary
+            if (s.route !== currentRoute) break;
             const hasTarget = document.querySelector(s.target) || (s.fallbackTarget && document.querySelector(s.fallbackTarget));
-            if (!hasTarget) {
-              missing.add(i);
-            }
+            if (!hasTarget) missing.add(i);
           }
           if (missing.size > 0) {
             setSkippedSteps((prev) => {
@@ -194,38 +234,51 @@ export function TourOverlay() {
           }
         }
 
-        // Scroll element into view
         el.scrollIntoView({ behavior: "smooth", block: "center" });
         await sleep(SCROLL_SETTLE_MS);
         if (cancelled) return;
 
-        // Update target — rAF loop will pick up new rect, spotlight spring-animates
-        setTargetEl(el);
         setPopoverSide(currentStep!.side);
         setPopoverAlign(currentStep!.align ?? "center");
         hasShownRef.current = true;
         prevRouteRef.current = currentStep!.route;
 
-        // Fade in on first step or after a page change; spring-slide on same-page steps
-        const shouldFadeIn = isFirstStep || isNewPage;
+        if (useDotTransition) {
+          // Measure destination rect for the dot animation
+          const newR = el.getBoundingClientRect();
+          const newComputed = getComputedStyle(el);
+          resolvedRectRef.current = {
+            top: newR.top,
+            left: newR.left,
+            width: newR.width,
+            height: newR.height,
+            borderRadius: newComputed.borderRadius,
+          };
+          pendingElRef.current = el;
 
-        // Wait for animation to settle before showing popover
-        await sleep(SPOTLIGHT_SETTLE_MS);
-        if (cancelled) return;
+          // If collapse already completed, advance to traveling
+          if (collapseReadyRef.current) {
+            collapseReadyRef.current = false;
+            setTargetEl(el);
+            pendingElRef.current = null;
+            setPhase("traveling");
+          }
+          // Otherwise handlePhaseComplete will advance when collapse finishes
+        } else {
+          // Fade-in path (first step only)
+          setTargetEl(el);
+          await sleep(SPOTLIGHT_SETTLE_MS);
+          if (cancelled) return;
 
-        if (shouldFadeIn) {
-          // Switch to spring transitions for subsequent same-page steps
           setIsFirstSpotlight(false);
+          setIsTransitioning(false);
         }
-
-        // Reveal popover at the new position
-        setIsTransitioning(false);
       } else if (currentStepIndex < totalSteps - 1) {
-        // Element not found on a middle step — mark as skipped and advance
         setSkippedSteps((prev) => new Set(prev).add(currentStepIndex));
+        setPhase("idle");
         nextStep();
       } else {
-        // Element not found on the last step — dismiss without completing
+        setPhase("idle");
         dismissTour();
       }
 
@@ -246,13 +299,15 @@ export function TourOverlay() {
     const computed = getComputedStyle(targetEl);
     const track = () => {
       const r = targetEl.getBoundingClientRect();
-      setRect({
+      const newRect: Rect = {
         top: r.top,
         left: r.left,
         width: r.width,
         height: r.height,
         borderRadius: computed.borderRadius,
-      });
+      };
+      setRect(newRect);
+      prevRectRef.current = newRect; // keep snapshot for dot transition
       raf = requestAnimationFrame(track);
     };
     track();
@@ -391,6 +446,76 @@ export function TourOverlay() {
     }
   }, [rect, popoverSide, popoverAlign, popoverSize, popoverPosition]);
 
+  // ── Dot transition: phase complete handler ──
+  const handlePhaseComplete = React.useCallback(() => {
+    if (phase === "collapsing") {
+      if (resolvedRectRef.current) {
+        if (pendingElRef.current) {
+          setTargetEl(pendingElRef.current);
+          pendingElRef.current = null;
+        }
+        setPhase("traveling");
+      } else {
+        // Collapse finished before element resolved — wait
+        collapseReadyRef.current = true;
+      }
+    } else if (phase === "traveling") {
+      setPhase("expanding");
+    } else if (phase === "expanding") {
+      setPhase("idle");
+      setIsTransitioning(false);
+      setIsFirstSpotlight(false);
+    }
+  }, [phase]);
+
+  // ── Dot transition: computed spotlight target ──
+  const spotlightTarget = React.useMemo(() => {
+    if (phase === "collapsing") {
+      const prev = prevRectRef.current;
+      if (!prev) return null;
+      return {
+        opacity: 1,
+        top: prev.top + prev.height / 2 - DOT_SIZE / 2,
+        left: prev.left + prev.width / 2 - DOT_SIZE / 2,
+        width: DOT_SIZE,
+        height: DOT_SIZE,
+        borderRadius: prev.borderRadius, // keep original — browser clamps at small sizes
+      };
+    }
+    if (phase === "traveling") {
+      const next = resolvedRectRef.current;
+      if (!next) return null;
+      return {
+        opacity: 1,
+        top: next.top + next.height / 2 - DOT_SIZE / 2,
+        left: next.left + next.width / 2 - DOT_SIZE / 2,
+        width: DOT_SIZE,
+        height: DOT_SIZE,
+        borderRadius: `${DOT_SIZE / 2}px`,
+      };
+    }
+    // expanding or idle — use live rect
+    if (!rect) return null;
+    return {
+      opacity: 1,
+      top: rect.top - SPOTLIGHT_PADDING,
+      left: rect.left - SPOTLIGHT_PADDING,
+      width: rect.width + SPOTLIGHT_PADDING * 2,
+      height: rect.height + SPOTLIGHT_PADDING * 2,
+      borderRadius: rect.borderRadius,
+    };
+  }, [phase, rect]);
+
+  // ── Dot transition: phase-aware transition config ──
+  const spotlightTransition = React.useMemo(() => {
+    switch (phase) {
+      case "collapsing": return { duration: COLLAPSE_DURATION, ease: "linear" as const };
+      case "traveling": return { duration: TRAVEL_DURATION, ease: "linear" as const };
+      case "expanding": return { duration: EXPAND_DURATION, ease: "linear" as const };
+      default: return { duration: 0.3, ease: "linear" as const };
+    }
+  }, [phase]);
+
   // Compute display counter that excludes skipped steps
   const displayTotal = totalSteps - skippedSteps.size;
   const skippedBefore = [...skippedSteps].filter((i) => i < currentStepIndex).length;
@@ -414,13 +539,15 @@ export function TourOverlay() {
 
   if (!isRunning) return null;
 
+  const tourId = activeTour?.id ?? "none";
+
   return (
     <>
       {/* Click catcher — dismisses tour when clicking outside spotlight */}
       <AnimatePresence>
         {rect && (
           <motion.div
-            key="backdrop"
+            key={`backdrop-${tourId}`}
             className="fixed inset-0 z-[54]"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -431,35 +558,29 @@ export function TourOverlay() {
         )}
       </AnimatePresence>
 
-      {/* Spotlight cutout — transparent hole with dark overlay around it */}
+      {/* Spotlight cutout — morphs into a primary dot between steps */}
       <AnimatePresence>
-        {rect && (
+        {spotlightTarget && (
           <motion.div
-            key="spotlight"
-            className="fixed z-[55] pointer-events-none"
+            key={`spotlight-${tourId}`}
+            className={cn(
+              "fixed z-[55] pointer-events-none",
+              phase === "traveling" && "bg-primary",
+            )}
             initial={
               isFirstSpotlight
-                ? {
-                    opacity: 0,
-                    top: rect.top - SPOTLIGHT_PADDING,
-                    left: rect.left - SPOTLIGHT_PADDING,
-                    width: rect.width + SPOTLIGHT_PADDING * 2,
-                    height: rect.height + SPOTLIGHT_PADDING * 2,
-                  }
-                : { opacity: 0 }
+                ? { ...spotlightTarget, opacity: 0 }
+                : undefined
             }
-            animate={{
-              opacity: 1,
-              top: rect.top - SPOTLIGHT_PADDING,
-              left: rect.left - SPOTLIGHT_PADDING,
-              width: rect.width + SPOTLIGHT_PADDING * 2,
-              height: rect.height + SPOTLIGHT_PADDING * 2,
-            }}
+            animate={spotlightTarget}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.3, ease: "linear" }}
+            transition={spotlightTransition}
+            onAnimationComplete={handlePhaseComplete}
             style={{
-              borderRadius: rect.borderRadius,
               boxShadow: "0 0 0 9999px rgba(0, 0, 0, 0.6)",
+              transitionProperty: "background-color",
+              transitionDuration: `${TRAVEL_DURATION}s`,
+              transitionTimingFunction: "linear",
             }}
           />
         )}
@@ -470,7 +591,7 @@ export function TourOverlay() {
         {rect && currentStep && !isTransitioning && (
           <motion.div
             ref={popoverRef}
-            key={`step-${currentStepIndex}`}
+            key={`step-${tourId}-${currentStepIndex}`}
             className={cn(
               "fixed z-[60] w-80 max-w-[calc(100vw-2rem)]",
               "bg-popover text-popover-foreground",
@@ -550,7 +671,7 @@ export function TourOverlay() {
       <AnimatePresence>
         {isWaiting && !rect && (
           <motion.div
-            key="waiting"
+            key={`waiting-${tourId}`}
             className="fixed inset-0 z-[54] bg-black/30"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
