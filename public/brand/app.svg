@@ -6,11 +6,19 @@
   fill="none"
 >
   <defs>
-    <radialGradient id="a" cx="0" cy="0" r="1" gradientTransform="rotate(120 109.526 402.669)scale(370.961)" gradientUnits="userSpaceOnUse">
+    <radialGradient
+      id="a" cx="0" cy="0" r="1"
+      gradientTransform="rotate(120 109.526 402.669)scale(370.961)"
+      gradientUnits="userSpaceOnUse"
+    >
       <stop offset=".154" stop-color="gray" stop-opacity="0"/>
       <stop offset="1" stop-color="gray"/>
     </radialGradient>
-    <radialGradient id="b" cx="0" cy="0" r="1" gradientTransform="rotate(60 -187.046 699.2)scale(195.986 261.315)" gradientUnits="userSpaceOnUse">
+    <radialGradient
+      id="b" cx="0" cy="0" r="1"
+      gradientTransform="rotate(60 -187.046 699.2)scale(195.986 261.315)"
+      gradientUnits="userSpaceOnUse"
+    >
       <stop stop-color="#00cbff"/>
       <stop offset="1" stop-color="#00cbff" stop-opacity="0"/>
     </radialGradient>
