@@ -978,12 +978,17 @@ export function UniverseView({
       const wx = (x - t.x) / t.k;
       const wy = (y - t.y) / t.k;
 
+      // Larger hit area for touch inputs (finger vs cursor)
+      const isTouch = e.pointerType === "touch";
+      const hitMultiplier = isTouch ? 1.4 : 1;
+
       for (let i = s.nodes.length - 1; i >= 0; i--) {
         const n = s.nodes[i];
         if (n.x === undefined || n.y === undefined) continue;
         const dx = n.x - wx;
         const dy = n.y - wy;
-        if (dx * dx + dy * dy <= n.radius * n.radius) {
+        const hitRadius = n.radius * hitMultiplier;
+        if (dx * dx + dy * dy <= hitRadius * hitRadius) {
           s.draggedNode = n;
           s.dragStart = { x: n.x, y: n.y };
           n.fx = n.x;
@@ -1000,7 +1005,9 @@ export function UniverseView({
     [scheduleFrame],
   );
 
-  const onPointerUp = React.useCallback(
+  /** Shared logic for pointerup and pointercancel — resolves drag state and
+   *  triggers a click when the pointer barely moved. */
+  const finishPointer = React.useCallback(
     (e: React.PointerEvent) => {
       const s = stateRef.current;
 
@@ -1026,7 +1033,9 @@ export function UniverseView({
         draggedNode.fx = null;
         draggedNode.fy = null;
 
-        if (moved < 5) {
+        // Larger threshold for touch (finger jitter) vs mouse
+        const clickThreshold = e.pointerType === "touch" ? 10 : 5;
+        if (moved < clickThreshold) {
           // Click on community — trigger zoom
           const community = communities.find((c) => c.id === draggedNode.id);
           if (community) {
@@ -1038,6 +1047,12 @@ export function UniverseView({
     },
     [communities, handleCommunityClick, scheduleFrame],
   );
+
+  const onPointerUp = finishPointer;
+
+  // Android Chrome often fires pointercancel instead of pointerup.
+  // Without this handler the drag state is never cleaned up and the click is lost.
+  const onPointerCancel = finishPointer;
 
   const onPointerLeave = React.useCallback(() => {
     const s = stateRef.current;
@@ -1103,6 +1118,7 @@ export function UniverseView({
         onPointerMove={onPointerMove}
         onPointerDown={onPointerDown}
         onPointerUp={onPointerUp}
+        onPointerCancel={onPointerCancel}
         onPointerLeave={onPointerLeave}
         onWheel={onWheel}
         style={{

@@ -73,7 +73,7 @@ function isCenterHit(wx: number, wy: number, hitMultiplier = 1.3): boolean {
 
 type DragState =
   | { type: "none" }
-  | { type: "node"; nodeId: string; pointerId: number; didMove: boolean }
+  | { type: "node"; nodeId: string; pointerId: number; didMove: boolean; startX: number; startY: number }
   | {
       type: "pan";
       pointerId: number;
@@ -477,11 +477,13 @@ export function OrbitCanvas({
     const simCx = cw / 2;
     const simCy = ch / 2;
 
-    const hitNode = findNodeAtWorld(nodesRef.current, world.x, world.y, simCx, simCy);
+    // Larger hit area for touch inputs (finger vs cursor)
+    const hitMult = e.pointerType === "touch" ? 1.6 : 1.3;
+    const hitNode = findNodeAtWorld(nodesRef.current, world.x, world.y, simCx, simCy, hitMult);
 
     if (hitNode) {
       canvas.setPointerCapture(e.pointerId);
-      dragRef.current = { type: "node", nodeId: hitNode.id, pointerId: e.pointerId, didMove: false };
+      dragRef.current = { type: "node", nodeId: hitNode.id, pointerId: e.pointerId, didMove: false, startX: e.clientX, startY: e.clientY };
       // Clear tooltips on drag start (matches scene.tsx line 1586-1587)
       onDragStartRef.current?.();
       onDragRef.current(hitNode.id, world.x + simCx, world.y + simCy);
@@ -507,7 +509,14 @@ export function OrbitCanvas({
     const drag = dragRef.current;
 
     if (drag.type === "node") {
-      drag.didMove = true;
+      // Only flag as moved after exceeding a threshold — touch jitter on
+      // Android fires pointermove even when the finger is stationary
+      if (!drag.didMove) {
+        const jx = e.clientX - drag.startX;
+        const jy = e.clientY - drag.startY;
+        if (jx * jx + jy * jy < 64) return; // < 8px — ignore jitter
+        drag.didMove = true;
+      }
       const canvas = canvasRef.current;
       if (!canvas) return;
       const rect = canvas.getBoundingClientRect();
@@ -616,8 +625,10 @@ export function OrbitCanvas({
       const dx = e.clientX - drag.startX;
       const dy = e.clientY - drag.startY;
       const movedDist = Math.sqrt(dx * dx + dy * dy);
+      // Larger threshold for touch (finger jitter)
+      const panClickThreshold = e.pointerType === "touch" ? 10 : 4;
 
-      if (movedDist < 4) {
+      if (movedDist < panClickThreshold) {
         const rect = canvas.getBoundingClientRect();
         const screenX = e.clientX - rect.left;
         const screenY = e.clientY - rect.top;
@@ -625,6 +636,39 @@ export function OrbitCanvas({
 
         if (isCenterHit(world.x, world.y)) {
           onCenterClickRef.current(getCenterScreenPos(rect));
+        }
+      }
+    }
+
+    dragRef.current = { type: "none" };
+  }, []);
+
+  // Android Chrome often fires pointercancel instead of pointerup.
+  // Without this handler the drag state is never cleaned up and the click is lost.
+  const handlePointerCancel = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+    const drag = dragRef.current;
+    if (drag.type === "none") return;
+
+    const canvas = canvasRef.current;
+    if (canvas) {
+      try { canvas.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+    }
+
+    if (drag.type === "node") {
+      onDragEndRef.current(drag.nodeId);
+
+      // Treat cancel-without-move as a click (same as pointerup)
+      if (!drag.didMove && onNodeClickRef.current) {
+        const node = nodesRef.current.find((n) => n.id === drag.nodeId);
+        if (node && canvas) {
+          const rect = canvas.getBoundingClientRect();
+          const { width: cw, height: ch } = sizeRef.current;
+          const simCx = cw / 2;
+          const simCy = ch / 2;
+          const nx = (node.x ?? simCx) - simCx;
+          const ny = (node.y ?? simCy) - simCy;
+          const screen = worldToScreen(nx, ny, transformRef.current);
+          onNodeClickRef.current(node, { x: screen.x + rect.left, y: screen.y + rect.top, screenRadius: node.radius * transformRef.current.k + 1.5 });
         }
       }
     }
@@ -657,6 +701,7 @@ export function OrbitCanvas({
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerCancel}
       onPointerLeave={handlePointerLeave}
     />
   );
