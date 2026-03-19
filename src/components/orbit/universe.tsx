@@ -231,6 +231,8 @@ export function UniverseView({
     // Pointer
     draggedNode: null as UniverseNode | null,
     dragStart: null as { x: number; y: number } | null,
+    pointerStartScreen: null as { x: number; y: number } | null,
+    wasDrag: false,
     hoveredNode: null as UniverseNode | null,
   });
 
@@ -914,6 +916,15 @@ export function UniverseView({
       const y = e.clientY - rect.top;
 
       if (s.draggedNode) {
+        // Ignore jitter — only start actual drag after 8px movement
+        if (!s.wasDrag && s.pointerStartScreen) {
+          const jx = e.clientX - s.pointerStartScreen.x;
+          const jy = e.clientY - s.pointerStartScreen.y;
+          if (jx * jx + jy * jy < 64) return;
+          s.wasDrag = true;
+          // Now that actual drag started, capture the pointer
+          try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* ignore */ }
+        }
         const t = s.transform;
         s.draggedNode.fx = (x - t.x) / t.k;
         s.draggedNode.fy = (y - t.y) / t.k;
@@ -972,7 +983,11 @@ export function UniverseView({
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
 
-      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      // Do NOT setPointerCapture here — it suppresses pointerup on Android
+      // quick taps. Capture is deferred to onPointerMove when drag starts.
+
+      s.wasDrag = false;
+      s.pointerStartScreen = { x: e.clientX, y: e.clientY };
 
       const t = s.transform;
       const wx = (x - t.x) / t.k;
@@ -1005,8 +1020,8 @@ export function UniverseView({
     [scheduleFrame],
   );
 
-  /** Shared logic for pointerup and pointercancel — resolves drag state and
-   *  triggers a click when the pointer barely moved. */
+  /** Clean up drag state — shared by pointerup and pointercancel.
+   *  Click detection is NOT here; it lives in onClick. */
   const finishPointer = React.useCallback(
     (e: React.PointerEvent) => {
       const s = stateRef.current;
@@ -1018,41 +1033,64 @@ export function UniverseView({
       }
 
       const draggedNode = s.draggedNode;
-      const dragStart = s.dragStart;
-
-      if (draggedNode && dragStart) {
-        const dx = (draggedNode.x ?? 0) - dragStart.x;
-        const dy = (draggedNode.y ?? 0) - dragStart.y;
-        const moved = Math.hypot(dx, dy);
-
+      if (draggedNode) {
         s.simulation?.alphaTarget(0);
         s.draggedNode = null;
         s.dragStart = null;
-
-        // Always unpin so node returns to simulation control
         draggedNode.fx = null;
         draggedNode.fy = null;
-
-        // Larger threshold for touch (finger jitter) vs mouse
-        const clickThreshold = e.pointerType === "touch" ? 10 : 5;
-        if (moved < clickThreshold) {
-          // Click on community — trigger zoom
-          const community = communities.find((c) => c.id === draggedNode.id);
-          if (community) {
-            handleCommunityClick(community, draggedNode);
-          }
-        }
         scheduleFrame();
       }
     },
-    [communities, handleCommunityClick, scheduleFrame],
+    [scheduleFrame],
   );
 
   const onPointerUp = finishPointer;
-
-  // Android Chrome often fires pointercancel instead of pointerup.
-  // Without this handler the drag state is never cleaned up and the click is lost.
   const onPointerCancel = finishPointer;
+
+  /** Native click event — fires reliably on all platforms (including Android
+   *  quick taps where pointerup may be suppressed by setPointerCapture). */
+  const onClick = React.useCallback(
+    (e: React.MouseEvent) => {
+      const s = stateRef.current;
+      if (s.mode !== "idle") return;
+      if (s.wasDrag) return;
+
+      // Clean up any lingering drag state (pointerup may not have fired)
+      const draggedNode = s.draggedNode;
+      if (draggedNode) {
+        s.simulation?.alphaTarget(0);
+        s.draggedNode = null;
+        s.dragStart = null;
+        draggedNode.fx = null;
+        draggedNode.fy = null;
+      }
+
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      const t = s.transform;
+      const wx = (x - t.x) / t.k;
+      const wy = (y - t.y) / t.k;
+
+      // Hit test with generous touch multiplier
+      for (let i = s.nodes.length - 1; i >= 0; i--) {
+        const n = s.nodes[i];
+        if (n.x === undefined || n.y === undefined) continue;
+        const dx = n.x - wx;
+        const dy = n.y - wy;
+        const hitRadius = n.radius * 1.4;
+        if (dx * dx + dy * dy <= hitRadius * hitRadius) {
+          const community = communities.find((c) => c.id === n.id);
+          if (community) {
+            handleCommunityClick(community, n);
+          }
+          return;
+        }
+      }
+    },
+    [communities, handleCommunityClick],
+  );
 
   const onPointerLeave = React.useCallback(() => {
     const s = stateRef.current;
@@ -1120,6 +1158,7 @@ export function UniverseView({
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerCancel}
         onPointerLeave={onPointerLeave}
+        onClick={onClick}
         onWheel={onWheel}
         style={{
           display: "block",
