@@ -461,15 +461,21 @@ export function OrbitCanvas({
   }
 
   /* ────────────────────────────
-     Pointer events
+     Pointer / touch events
+
+     Android Chrome can suppress pointerup AND click for quick taps on
+     canvas elements with touch-action:none. The only touch event that
+     fires reliably across all platforms is `touchend`. We use it as the
+     primary tap detector, and keep `click` as a fallback for mouse users.
+
+     To avoid re-doing the hit test in touchend/click (the node may have
+     moved by then), we store the tapped node/center from pointerdown.
   ──────────────────────────── */
 
-  /* Track whether the current pointer sequence involved actual movement.
-     Click detection lives in the native `click` handler — NOT in pointerup —
-     because Android Chrome can suppress pointerup for quick taps when
-     setPointerCapture was called in pointerdown. The `click` event fires
-     reliably on every platform regardless. */
-  const wasDragRef = useRef(false);
+  /** Node ID hit in pointerdown — consumed by touchend/click to trigger action */
+  const pendingTapRef = useRef<{ nodeId: string | null; isCenter: boolean }>({ nodeId: null, isCenter: false });
+  /** Prevents click from double-firing after touchend already handled it */
+  const tapHandledRef = useRef(false);
 
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -484,23 +490,20 @@ export function OrbitCanvas({
     const simCx = cw / 2;
     const simCy = ch / 2;
 
-    wasDragRef.current = false;
-
     // Larger hit area for touch inputs (finger vs cursor)
     const hitMult = e.pointerType === "touch" ? 1.6 : 1.3;
     const hitNode = findNodeAtWorld(nodesRef.current, world.x, world.y, simCx, simCy, hitMult);
 
     if (hitNode) {
-      // Do NOT setPointerCapture here — it can suppress pointerup on Android
-      // quick taps. Capture is deferred to handlePointerMove when drag starts.
       dragRef.current = { type: "node", nodeId: hitNode.id, pointerId: e.pointerId, didMove: false, startX: e.clientX, startY: e.clientY };
-      // Clear tooltips on drag start (matches scene.tsx line 1586-1587)
+      pendingTapRef.current = { nodeId: hitNode.id, isCenter: false };
+      tapHandledRef.current = false;
       onDragStartRef.current?.();
       onDragRef.current(hitNode.id, world.x + simCx, world.y + simCy);
       return;
     }
 
-    // No node hit → pan (also defer capture)
+    // No node hit → pan
     onDragStartRef.current?.();
     const t = transformRef.current;
     dragRef.current = {
@@ -511,21 +514,21 @@ export function OrbitCanvas({
       startTx: t.x,
       startTy: t.y,
     };
+    // Store center hit for tap detection
+    pendingTapRef.current = { nodeId: null, isCenter: isCenterHit(world.x, world.y) };
+    tapHandledRef.current = false;
   }, []);
 
   const handlePointerMove = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     const drag = dragRef.current;
 
     if (drag.type === "node") {
-      // Only flag as moved after exceeding a threshold — touch jitter on
-      // Android fires pointermove even when the finger is stationary
       if (!drag.didMove) {
         const jx = e.clientX - drag.startX;
         const jy = e.clientY - drag.startY;
         if (jx * jx + jy * jy < 64) return; // < 8px — ignore jitter
         drag.didMove = true;
-        wasDragRef.current = true;
-        // Now that actual drag started, capture the pointer
+        pendingTapRef.current = { nodeId: null, isCenter: false }; // cancel tap
         const canvas = canvasRef.current;
         if (canvas) {
           try { canvas.setPointerCapture(drag.pointerId); } catch { /* ignore */ }
@@ -545,22 +548,19 @@ export function OrbitCanvas({
     if (drag.type === "pan") {
       const dx = e.clientX - drag.startX;
       const dy = e.clientY - drag.startY;
-      // Ignore jitter for pan too
-      if (!wasDragRef.current && dx * dx + dy * dy >= 64) {
-        wasDragRef.current = true;
+      if (dx * dx + dy * dy >= 64) {
+        pendingTapRef.current = { nodeId: null, isCenter: false }; // cancel tap
         const canvas = canvasRef.current;
         if (canvas) {
           try { canvas.setPointerCapture(drag.pointerId); } catch { /* ignore */ }
         }
       }
-      if (wasDragRef.current) {
-        transformRef.current = {
-          ...transformRef.current,
-          x: drag.startTx + dx,
-          y: drag.startTy + dy,
-        };
-        staticDirtyRef.current = true;
-      }
+      transformRef.current = {
+        ...transformRef.current,
+        x: drag.startTx + dx,
+        y: drag.startTy + dy,
+      };
+      staticDirtyRef.current = true;
       return;
     }
 
@@ -617,7 +617,7 @@ export function OrbitCanvas({
   }, []);
 
   /** Clean up drag state — shared by pointerup and pointercancel.
-   *  Click detection is NOT here; it lives in handleClick. */
+   *  Click/tap detection is NOT here; it lives in handleTouchEnd / handleClick. */
   const finishPointer = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     const drag = dragRef.current;
     if (drag.type === "none") return;
@@ -637,10 +637,12 @@ export function OrbitCanvas({
   const handlePointerUp = finishPointer;
   const handlePointerCancel = finishPointer;
 
-  /** Native click event — fires reliably on all platforms (including Android
-   *  quick taps where pointerup may be suppressed by setPointerCapture). */
-  const handleClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (wasDragRef.current) return;
+  /** Fire the stored tap action (node click or center click).
+   *  Uses the node ID captured in pointerdown so it works even if the
+   *  node has since moved back to its orbit position. */
+  const fireTap = useCallback((clientX: number, clientY: number) => {
+    const { nodeId, isCenter } = pendingTapRef.current;
+    pendingTapRef.current = { nodeId: null, isCenter: false };
 
     // Clean up any lingering drag state (pointerup may not have fired)
     const drag = dragRef.current;
@@ -649,32 +651,54 @@ export function OrbitCanvas({
     }
     dragRef.current = { type: "none" };
 
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const rect = canvas.getBoundingClientRect();
-    const screenX = e.clientX - rect.left;
-    const screenY = e.clientY - rect.top;
-    const world = screenToWorld(screenX, screenY, transformRef.current);
-    const { width: cw, height: ch } = sizeRef.current;
-    const simCx = cw / 2;
-    const simCy = ch / 2;
-
-    // Check member node hit (use generous touch-size multiplier)
-    const hitNode = findNodeAtWorld(nodesRef.current, world.x, world.y, simCx, simCy, 1.6);
-    if (hitNode && onNodeClickRef.current) {
-      const nx = (hitNode.x ?? simCx) - simCx;
-      const ny = (hitNode.y ?? simCy) - simCy;
-      const screen = worldToScreen(nx, ny, transformRef.current);
-      onNodeClickRef.current(hitNode, { x: screen.x + rect.left, y: screen.y + rect.top, screenRadius: hitNode.radius * transformRef.current.k + 1.5 });
+    if (nodeId && onNodeClickRef.current) {
+      const node = nodesRef.current.find((n) => n.id === nodeId);
+      if (node) {
+        // Use the tap position for popover anchoring
+        onNodeClickRef.current(node, {
+          x: clientX,
+          y: clientY,
+          screenRadius: node.radius * transformRef.current.k + 1.5,
+        });
+      }
       return;
     }
 
-    // Check center avatar hit
-    if (isCenterHit(world.x, world.y) && onCenterClickRef.current) {
-      onCenterClickRef.current(getCenterScreenPos(rect));
+    if (isCenter && onCenterClickRef.current) {
+      const canvas = canvasRef.current;
+      if (canvas) {
+        onCenterClickRef.current(getCenterScreenPos(canvas.getBoundingClientRect()));
+      }
     }
   }, []);
+
+  /** touchend is the only event guaranteed to fire on Android for quick taps.
+   *  pointerup and click can both be suppressed. */
+  const handleTouchEnd = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
+    const { nodeId, isCenter } = pendingTapRef.current;
+    if (!nodeId && !isCenter) return; // was cancelled by drag movement
+
+    const touch = e.changedTouches[0];
+    if (!touch) return;
+
+    // Prevent synthetic click from double-firing
+    e.preventDefault();
+    tapHandledRef.current = true;
+    fireTap(touch.clientX, touch.clientY);
+  }, [fireTap]);
+
+  /** click fires reliably for mouse — used as fallback (touchend handles touch) */
+  const handleClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (tapHandledRef.current) {
+      tapHandledRef.current = false;
+      return;
+    }
+
+    const { nodeId, isCenter } = pendingTapRef.current;
+    if (!nodeId && !isCenter) return;
+
+    fireTap(e.clientX, e.clientY);
+  }, [fireTap]);
 
   const handlePointerLeave = useCallback(() => {
     if (hoveredNodeIdRef.current) {
@@ -703,6 +727,7 @@ export function OrbitCanvas({
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerCancel}
       onPointerLeave={handlePointerLeave}
+      onTouchEnd={handleTouchEnd}
       onClick={handleClick}
     />
   );
