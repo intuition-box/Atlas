@@ -127,12 +127,18 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
     [router],
   );
 
-  /** Stop the tour without persisting (used by Skip, backdrop, Escape). */
+  /** Stop the tour and mark it completed (used by Skip, backdrop, Escape). */
   const dismissTour = React.useCallback(() => {
+    if (activeTour) {
+      markTourCompleted(activeTour.id);
+      setCompletedTours((prev) =>
+        prev.includes(activeTour.id) ? prev : [...prev, activeTour.id],
+      );
+    }
     setActiveTour(null);
     setCurrentStepIndex(0);
     currentRouteRef.current = undefined;
-  }, []);
+  }, [activeTour]);
 
   const navigateToStep = React.useCallback(
     (step: TourStep) => {
