@@ -41,8 +41,15 @@ import {
   multiVaultIsTermCreated,
   calculateAtomId,
   eventParseTripleCreated,
+  redeem,
   type WriteConfig,
 } from "@0xintuition/sdk";
+
+import {
+  MultiVaultAbi,
+  multiVaultMaxRedeem,
+  multiVaultDepositBatch,
+} from "@0xintuition/protocol";
 
 import {
   type AttestationType,
@@ -64,6 +71,8 @@ import type {
   WalletState,
   BatchMintItem,
   BatchMintResult,
+  BatchWithdrawItem,
+  BatchWithdrawResult,
   EthereumProvider,
 } from "./types";
 
@@ -546,7 +555,7 @@ export async function batchCreateAttestations(
     console.log(LOG, "Step 6 — creating", items.length, "triples");
 
     let triplesTxHash: `0x${string}` | null = null;
-    const skippedIndices = new Set<number>();
+    const existingIndices = new Set<number>();
 
     try {
       triplesTxHash = await multiVaultCreateTriples(config, {
@@ -564,14 +573,14 @@ export async function batchCreateAttestations(
       for (let i = 0; i < subjectIds.length; i++) {
         try {
           const hash = await multiVaultCreateTriples(config, {
-            args: [[subjectIds[i]], [predicateIds[i]], [objectIds[i]], [deposits[i]]],
-            value: deposits[i],
+            args: [[subjectIds[i]!], [predicateIds[i]!], [objectIds[i]!], [deposits[i]!]],
+            value: deposits[i]!,
           });
           triplesTxHash = hash;
         } catch (innerError) {
           if (isTripleExistsError(innerError)) {
-            console.log(LOG, `  Triple ${i} already exists, skipping`);
-            skippedIndices.add(i);
+            console.log(LOG, `  Triple ${i} already exists on-chain`);
+            existingIndices.add(i);
           } else {
             throw innerError;
           }
@@ -579,17 +588,83 @@ export async function batchCreateAttestations(
       }
     }
 
+    // ── Step 6b: Deposit into existing triples (1 signature) ──
+    // When a triple already exists, we don't skip it — we deposit into
+    // its vault so the user gets real shares they can later redeem.
+    // Without this, "publishing" would silently succeed with no wallet
+    // interaction, leaving the user with zero onchain position.
+    const existingTermIds = new Map<number, string>();
+
+    if (existingIndices.size > 0) {
+      console.log(LOG, "Step 6b — depositing into", existingIndices.size, "existing triples");
+
+      // Compute termIds directly from the contract (no indexer dependency).
+      // calculateTripleId is a pure view function — deterministic, instant.
+      for (const i of existingIndices) {
+        try {
+          const termId = await publicClient.readContract({
+            address: MULTIVAULT_ADDRESS,
+            abi: MultiVaultAbi,
+            functionName: "calculateTripleId",
+            args: [subjectIds[i]!, predicateIds[i]!, objectIds[i]!],
+          });
+          existingTermIds.set(i, termId);
+          console.log(LOG, `  Triple ${i} → termId: ${termId}`);
+        } catch (err) {
+          console.warn(LOG, `  Triple ${i} — failed to calculate termId:`, err);
+        }
+      }
+
+      // Build deposit batch for all resolved existing triples
+      const depositTermIds: `0x${string}`[] = [];
+      const depositCurveIds: bigint[] = [];
+      const depositAssets: bigint[] = [];
+      const depositMinShares: bigint[] = [];
+
+      for (const [idx, termId] of existingTermIds) {
+        depositTermIds.push(termId as `0x${string}`);
+        depositCurveIds.push(BigInt(1));   // default bonding curve
+        depositAssets.push(deposits[idx]!);
+        depositMinShares.push(BigInt(0));  // accept any shares
+      }
+
+      if (depositTermIds.length > 0) {
+        const depositValue = depositAssets.reduce((sum, a) => sum + a, BigInt(0));
+
+        const depositTxHash = await multiVaultDepositBatch(config, {
+          args: [fromAddress, depositTermIds, depositCurveIds, depositAssets, depositMinShares],
+          value: depositValue,
+        });
+
+        // Use the deposit tx as the triples tx if no new triples were created
+        if (!triplesTxHash) {
+          triplesTxHash = depositTxHash;
+        }
+
+        console.log(LOG, "Step 6b — deposited into existing triples, tx:", depositTxHash);
+      }
+    }
+
     // ── Step 7: Parse events + map results ──
     let tripleEvents: Awaited<ReturnType<typeof eventParseTripleCreated>> = [];
-    if (triplesTxHash) {
-      tripleEvents = await eventParseTripleCreated(publicClient, triplesTxHash);
+    if (triplesTxHash && existingIndices.size < items.length) {
+      // Only parse TripleCreated events if we actually created new triples
+      try {
+        tripleEvents = await eventParseTripleCreated(publicClient, triplesTxHash);
+      } catch {
+        // If parsing fails (e.g. tx was a deposit, not a create), ignore
+      }
     }
 
     let eventIdx = 0;
     const resultItems = items.map((item, i) => {
-      if (skippedIndices.has(i)) {
-        // Triple already existed on-chain — mark as minted with no new tx
-        return { attestationId: item.attestationId, onchainId: "existing" };
+      if (existingIndices.has(i)) {
+        // Triple already existed on-chain — use the real termId from the indexer
+        const resolvedTermId = existingTermIds.get(i);
+        return {
+          attestationId: item.attestationId,
+          onchainId: resolvedTermId ?? "unknown",
+        };
       }
       const event = tripleEvents[eventIdx++];
       return {
@@ -598,12 +673,21 @@ export async function batchCreateAttestations(
       };
     });
 
-    const finalTxHash = triplesTxHash ?? "existing";
+    if (!triplesTxHash) {
+      // This should never happen — either createTriples or depositBatch
+      // should have produced a tx hash. If we're here, something is wrong.
+      throw new IntuitionError(
+        "TRANSACTION_FAILED",
+        "No transaction was produced. Please try again.",
+      );
+    }
+
+    const finalTxHash = triplesTxHash;
     console.log(LOG, "DONE ✓ —", {
       atomsTxHash,
       triplesTxHash: finalTxHash,
-      created: items.length - skippedIndices.size,
-      skipped: skippedIndices.size,
+      created: items.length - existingIndices.size,
+      deposited: existingIndices.size,
     });
 
     return {
@@ -613,6 +697,102 @@ export async function batchCreateAttestations(
     };
   } catch (error) {
     console.error(LOG, "ERROR ✗ —", error);
+    throw mapError(error);
+  }
+}
+
+/* ════════════════════════════════════════════════
+   LAYER: withdrawal
+════════════════════════════════════════════════ */
+
+/**
+ * Withdraw staking positions for minted attestations.
+ *
+ * Calls `redeem()` on the MultiVault contract for each attestation's
+ * triple vault, withdrawing the user's full share balance.
+ *
+ * Must be called BEFORE soft-deleting the attestation from the DB.
+ * The caller should persist the result via POST /api/attestation/batch-withdraw.
+ */
+export async function withdrawAttestations(
+  fromAddress: Address,
+  items: BatchWithdrawItem[],
+): Promise<BatchWithdrawResult> {
+  if (!INTUITION_ENABLED) {
+    throw new IntuitionError("NETWORK_ERROR", "Intuition integration is not enabled");
+  }
+
+  if (items.length === 0) {
+    throw new IntuitionError("TRANSACTION_FAILED", "No attestations to withdraw");
+  }
+
+  console.log(LOG, "WITHDRAW START —", { from: fromAddress, count: items.length });
+
+  try {
+    const walletClient = await requireWalletClient();
+    const writeConfig = buildWriteConfig(walletClient);
+
+    // ── Step 1: Query max redeemable shares for each item ──
+    const shareQueries = await Promise.all(
+      items.map(async (item) => {
+        const shares = await multiVaultMaxRedeem(readConfig, {
+          args: [fromAddress, item.onchainId as `0x${string}`, BigInt(1)],
+        });
+        return { ...item, shares };
+      }),
+    );
+
+    // Filter items with redeemable shares
+    const redeemable = shareQueries.filter((item) => item.shares > BigInt(0));
+
+    if (redeemable.length === 0) {
+      console.log(LOG, "WITHDRAW — no redeemable shares found");
+      throw new IntuitionError(
+        "TRANSACTION_FAILED",
+        "No onchain position found to withdraw. The attestation may have already been withdrawn or the onchain ID is invalid.",
+      );
+    }
+
+    console.log(LOG, "WITHDRAW — shares to redeem:", redeemable.map((r) => ({
+      onchainId: r.onchainId,
+      shares: r.shares.toString(),
+    })));
+
+    // ── Step 2: Redeem each position ──
+    // Redeem one at a time — each gets a separate tx for clarity.
+    // The SDK's redeem() handles the wallet signature prompt.
+    let lastTxHash = "";
+
+    for (const item of redeemable) {
+      console.log(LOG, `WITHDRAW — redeeming ${item.onchainId} (${item.shares} shares)`);
+
+      const result = await redeem(writeConfig, [
+        fromAddress,                        // receiver
+        item.onchainId as `0x${string}`,    // termId
+        BigInt(1),                          // curveId (default bonding curve)
+        item.shares,                        // shares (full balance)
+        BigInt(0),                          // minAssets (no slippage protection)
+      ]);
+
+      lastTxHash = result.transactionHash;
+      console.log(LOG, `WITHDRAW — redeemed ${item.onchainId}, tx: ${lastTxHash}`);
+    }
+
+    console.log(LOG, "WITHDRAW DONE ✓ —", {
+      txHash: lastTxHash,
+      redeemed: redeemable.length,
+      skipped: items.length - redeemable.length,
+    });
+
+    return {
+      txHash: lastTxHash,
+      items: items.map((item) => ({
+        attestationId: item.attestationId,
+        onchainId: item.onchainId,
+      })),
+    };
+  } catch (error) {
+    console.error(LOG, "WITHDRAW ERROR ✗ —", error);
     throw mapError(error);
   }
 }

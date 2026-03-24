@@ -15,9 +15,9 @@ import { formatRelativeTime } from "@/lib/format"
 import { ROUTES, userPath } from "@/lib/routes"
 import { ATTESTATION_TYPES, ATTESTATION_TYPE_LIST, isEndorsementType, getAttributeById, type AttestationType } from "@/lib/attestations/definitions"
 import { sounds } from "@/lib/sounds"
-import { batchCreateAttestations } from "@/lib/intuition/client"
+import { batchCreateAttestations, withdrawAttestations } from "@/lib/intuition/client"
 import { INTUITION_CHAIN, getExplorerTxUrl } from "@/lib/intuition/config"
-import type { BatchMintItem } from "@/lib/intuition/types"
+import type { BatchMintItem, BatchWithdrawItem } from "@/lib/intuition/types"
 import { useDebouncedValue } from "@/hooks/use-debounced-value"
 import { useTourTrigger } from "@/hooks/use-tour-trigger"
 import { createPublishingTour } from "@/components/tour/tour-definitions"
@@ -62,6 +62,7 @@ type Attestation = {
   createdAt: string
   mintedAt: string | null
   mintTxHash: string | null
+  onchainId: string | null
   fromUser: AttestationUser
   toUser: AttestationUser
 }
@@ -228,12 +229,15 @@ function AttestationRow({
   attestation,
   viewerId,
   onRemove,
+  onWithdraw,
 }: {
   attestation: Attestation
   viewerId: string | null
   onRemove?: (id: string) => void
+  onWithdraw?: (id: string, onchainId: string) => Promise<void>
 }) {
   const [isRemoving, setIsRemoving] = React.useState(false)
+  const [isWithdrawing, setIsWithdrawing] = React.useState(false)
   const otherUser = attestation.toUser
   const canRemove = viewerId === attestation.fromUser.id
   const isMinted = !!attestation.mintedAt
@@ -243,11 +247,13 @@ function AttestationRow({
   const href = userPath(otherUser.handle ?? otherUser.id)
   const isEndorsement = isEndorsementType(attestation.type)
   const attribute = attestation.attributeId ? getAttributeById(attestation.attributeId) : undefined
+  const isBusy = isRemoving || isWithdrawing
 
+  /** Remove an unminted (pending) attestation — DB-only soft-delete. */
   const handleRemove = async (e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    if (isRemoving || !canRemove) return
+    if (isBusy || !canRemove || isMinted) return
 
     setIsRemoving(true)
     try {
@@ -261,6 +267,20 @@ function AttestationRow({
       }
     } finally {
       setIsRemoving(false)
+    }
+  }
+
+  /** Withdraw a minted (onchain) attestation — redeems position then soft-deletes. */
+  const handleWithdraw = async (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (isBusy || !canRemove || !isMinted || !attestation.onchainId) return
+
+    setIsWithdrawing(true)
+    try {
+      await onWithdraw?.(attestation.id, attestation.onchainId)
+    } finally {
+      setIsWithdrawing(false)
     }
   }
 
@@ -291,16 +311,28 @@ function AttestationRow({
             No wallet
           </span>
         )}
-        {canRemove && (
+        {canRemove && !isMinted && (
           <Button
             variant="destructive"
             size="xs"
             onClick={handleRemove}
-            disabled={isRemoving}
+            disabled={isBusy}
             className="gap-1"
           >
             <Undo2 className="size-3" />
-            {isRemoving ? "…" : isMinted ? "Withdraw" : "Remove"}
+            {isRemoving ? "…" : "Remove"}
+          </Button>
+        )}
+        {canRemove && isMinted && (
+          <Button
+            variant="destructive"
+            size="xs"
+            onClick={handleWithdraw}
+            disabled={isBusy || !attestation.onchainId}
+            className="gap-1"
+          >
+            <Undo2 className="size-3" />
+            {isWithdrawing ? "…" : "Withdraw"}
           </Button>
         )}
         {isMinted ? (
@@ -549,6 +581,67 @@ export default function AttestationsPage() {
     setLocalItems((prev) => prev.filter((a) => a.id !== attestationId))
   }, [])
 
+  // Withdraw a minted attestation — redeems onchain position then soft-deletes in DB
+  const handleWithdraw = React.useCallback(async (attestationId: string, onchainId: string) => {
+    // Guard: viewer must have a linked wallet
+    if (!viewerWallet) {
+      setMintError("Link a wallet in Settings to withdraw attestations.")
+      return
+    }
+
+    // Guard: wallet must be connected and match the linked wallet
+    if (!connectedAddress || connectedAddress.toLowerCase() !== viewerWallet.toLowerCase()) {
+      setMintError(
+        `Connect wallet ${viewerWallet.slice(0, 6)}…${viewerWallet.slice(-4)} to withdraw.`,
+      )
+      if (openConnectModal) openConnectModal()
+      return
+    }
+
+    // Ensure wallet is on the Intuition chain
+    if (chainId !== INTUITION_CHAIN.id) {
+      try {
+        await switchChainAsync({ chainId: INTUITION_CHAIN.id })
+      } catch {
+        setMintError(`Switch your wallet to ${INTUITION_CHAIN.name} and try again.`)
+        return
+      }
+    }
+
+    setMintError(null)
+
+    try {
+      // Step 1: Redeem onchain position (wallet signature)
+      const result = await withdrawAttestations(
+        viewerWallet as Address,
+        [{ attestationId, onchainId }],
+      )
+
+      // Step 2: Persist withdrawal to DB
+      const persistResult = await apiPost<{
+        withdrawn: Array<{ id: string; withdrawTxHash: string }>
+        skipped: string[]
+      }>("/api/attestation/batch-withdraw", {
+        items: result.items.map((item) => ({
+          attestationId: item.attestationId,
+          withdrawTxHash: result.txHash,
+        })),
+      })
+
+      if (!persistResult.ok) {
+        setMintError("Withdrawn on-chain but failed to save. Refresh the page to sync.")
+        return
+      }
+
+      // Step 3: Remove from local state
+      setLocalItems((prev) => prev.filter((a) => a.id !== attestationId))
+      setRefreshKey((k) => k + 1)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Withdrawal failed"
+      setMintError(message)
+    }
+  }, [viewerWallet, connectedAddress, chainId, switchChainAsync, openConnectModal])
+
   // Real on-chain minting — same flow as the cart panel
   const handleMintAll = React.useCallback(async () => {
     // Only mint unminted attestations from the viewer with wallets on the recipient
@@ -607,7 +700,7 @@ export default function AttestationsPage() {
 
       // Persist mint results to DB
       const persistResult = await apiPost<{
-        minted: Array<{ id: string; mintedAt: string; mintTxHash: string }>
+        minted: Array<{ id: string; mintedAt: string; mintTxHash: string; onchainId: string | null }>
         skipped: string[]
       }>("/api/attestation/batch-mint", {
         items: result.items.map((item) => ({
@@ -627,13 +720,17 @@ export default function AttestationsPage() {
         onItemMinted(m.id)
       }
 
-      // Update local items to reflect minted state
-      const mintedIds = new Set(persistResult.value.minted.map((m) => m.id))
+      // Update local items to reflect minted state (including onchainId for Withdraw)
+      const mintedById = new Map(
+        persistResult.value.minted.map((m) => [m.id, m]),
+      )
       const txHash = result.triplesTxHash
       setLocalItems((prev) =>
-        prev.map((a) =>
-          mintedIds.has(a.id) ? { ...a, mintedAt: new Date().toISOString(), mintTxHash: txHash } : a,
-        ),
+        prev.map((a) => {
+          const minted = mintedById.get(a.id)
+          if (!minted) return a
+          return { ...a, mintedAt: new Date().toISOString(), mintTxHash: txHash, onchainId: minted.onchainId }
+        }),
       )
 
       // Show info about skipped items (recipients without wallets)
@@ -760,6 +857,7 @@ export default function AttestationsPage() {
                     attestation={a}
                     viewerId={viewerId}
                     onRemove={handleRemove}
+                    onWithdraw={handleWithdraw}
                   />
                 )}
                 loading={false}

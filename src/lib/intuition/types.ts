@@ -42,6 +42,26 @@ export type BatchMintResult = {
 };
 
 /* ────────────────────────────
+   Batch Withdraw
+──────────────────────────── */
+
+/** A single item in a batch withdraw request. */
+export type BatchWithdrawItem = {
+  attestationId: string;
+  /** bytes32 termId from the Intuition protocol (stored as `attestation.onchainId`). */
+  onchainId: string;
+};
+
+/** Result from batch withdrawal on-chain. */
+export type BatchWithdrawResult = {
+  txHash: string;
+  items: Array<{
+    attestationId: string;
+    onchainId: string;
+  }>;
+};
+
+/* ────────────────────────────
    Wallet
 ──────────────────────────── */
 

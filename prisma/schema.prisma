@@ -521,6 +521,10 @@ model Attestation {
   mintTxHash  String?    // blockchain transaction hash
   onchainId   String?    // ID assigned by Intuition protocol
 
+  /// Onchain withdrawal support.
+  /// When set, the user's staking position was redeemed from the MultiVault.
+  withdrawTxHash String?
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

@@ -51,6 +51,17 @@ export const POST = api(BodySchema, async (ctx) => {
     });
   }
 
+  // Minted attestations require onchain withdrawal — the user's staking
+  // position must be redeemed from the MultiVault before soft-deleting.
+  // Use POST /api/attestation/batch-withdraw instead.
+  if (row.mintedAt) {
+    return errJson({
+      code: "ONCHAIN_WITHDRAWAL_REQUIRED",
+      message: "Minted attestations require onchain withdrawal. Use the Withdraw button to sign a transaction.",
+      status: 422,
+    });
+  }
+
   // Only the author can retract their own attestation.
   if (row.fromUserId !== viewerId) {
     return errJson({ code: "FORBIDDEN", message: "Not allowed", status: 403 });
