@@ -40,7 +40,6 @@ import {
   multiVaultGetGeneralConfig,
   multiVaultIsTermCreated,
   calculateAtomId,
-  eventParseTripleCreated,
   redeem,
   type WriteConfig,
 } from "@0xintuition/sdk";
@@ -57,6 +56,7 @@ import {
   getPredicateForType,
   getPredicateThingData,
   getAttributeThingData,
+  getHardcodedTermId,
   isEndorsementType,
 } from "@/lib/attestations/definitions";
 
@@ -269,6 +269,14 @@ const predicateCache = new Map<AttestationType, `0x${string}`>();
 async function getOrCreatePredicate(type: AttestationType): Promise<`0x${string}`> {
   const cached = predicateCache.get(type);
   if (cached) return cached;
+
+  // Check for hardcoded ecosystem atom term_id (0 transactions)
+  const hardcoded = getHardcodedTermId(type);
+  if (hardcoded) {
+    console.log(LOG, `Using hardcoded predicate "${type}":`, hardcoded);
+    predicateCache.set(type, hardcoded);
+    return hardcoded;
+  }
 
   // Try beautiful atom first
   const thingData = getPredicateThingData(type);
@@ -761,42 +769,37 @@ export async function batchCreateAttestations(
       }
     }
 
-    // ── Step 7: Parse events + map results ──
-    let tripleEvents: Awaited<ReturnType<typeof eventParseTripleCreated>> = [];
-    if (triplesTxHash && existingIndices.size < items.length) {
-      // Only parse TripleCreated events if we actually created new triples
-      try {
-        tripleEvents = await eventParseTripleCreated(publicClient, triplesTxHash);
-      } catch {
-        // If parsing fails (e.g. tx was a deposit, not a create), ignore
-      }
-    }
+    // ── Step 7: Compute termId for every item deterministically ──
+    // Don't rely on event parsing — calculateTripleId is a pure function
+    // that gives us the exact termId from subject/predicate/object.
+    console.log(LOG, "Step 7 — computing termIds for all", items.length, "items");
+    const resultItems = await Promise.all(
+      items.map(async (item, i) => {
+        // "against" items → use counter_term_id
+        if (item.stance === "against" && counterTermIds.has(i)) {
+          const counterId = counterTermIds.get(i)!;
+          console.log(LOG, `  item ${i} → against → counter: ${String(counterId).slice(0, 16)}`);
+          return { attestationId: item.attestationId, onchainId: String(counterId) };
+        }
 
-    let eventIdx = 0;
-    const resultItems = items.map((item, i) => {
-      // "against" items → store counter_term_id as onchainId
-      if (item.stance === "against" && counterTermIds.has(i)) {
-        return {
-          attestationId: item.attestationId,
-          onchainId: counterTermIds.get(i)!,
-        };
-      }
+        // Use pre-resolved termId from Step 6b (existing triples)
+        if (existingTermIds.has(i)) {
+          const termId = existingTermIds.get(i)!;
+          console.log(LOG, `  item ${i} → existing → ${String(termId).slice(0, 16)}`);
+          return { attestationId: item.attestationId, onchainId: String(termId) };
+        }
 
-      // Items that already existed on-chain → use resolved termId
-      if (existingIndices.has(i)) {
-        return {
-          attestationId: item.attestationId,
-          onchainId: existingTermIds.get(i) ?? "unknown",
-        };
-      }
-
-      // "for" items that were newly created → use event data
-      const event = tripleEvents[eventIdx++];
-      return {
-        attestationId: item.attestationId,
-        onchainId: event?.args?.termId ?? triplesTxHash ?? "unknown",
-      };
-    });
+        // Compute termId from triple components (pure contract call, no events)
+        const termId = await publicClient.readContract({
+          address: MULTIVAULT_ADDRESS,
+          abi: MultiVaultAbi,
+          functionName: "calculateTripleId",
+          args: [subjectIds[i]!, predicateIds[i]!, objectIds[i]!],
+        });
+        console.log(LOG, `  item ${i} → computed → ${String(termId).slice(0, 16)}`);
+        return { attestationId: item.attestationId, onchainId: String(termId) };
+      }),
+    );
 
     if (!triplesTxHash) {
       throw new IntuitionError(
@@ -858,11 +861,14 @@ export async function withdrawAttestations(
     const wCurveId = await getDefaultCurveId();
 
     // ── Step 1: Query max redeemable shares for each item ──
+    console.log(LOG, "WITHDRAW — querying shares for", items.length, "items, curveId:", wCurveId.toString());
     const shareQueries = await Promise.all(
       items.map(async (item) => {
+        console.log(LOG, `WITHDRAW — maxRedeem(${fromAddress}, ${item.onchainId}, ${wCurveId})`);
         const shares = await multiVaultMaxRedeem(readConfig, {
           args: [fromAddress, item.onchainId as `0x${string}`, wCurveId],
         });
+        console.log(LOG, `WITHDRAW — ${item.onchainId} → shares: ${shares.toString()}`);
         return { ...item, shares };
       }),
     );

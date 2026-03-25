@@ -53,12 +53,10 @@ function getVerb(type: AttestationType): string {
       return "follows";
     case "TRUST":
       return "trusts";
-    case "KNOW_IRL":
-      return "knows IRL";
-    case "WORK_WITH":
-      return "works with";
-    case "MET":
-      return "met";
+    case "INTERACTED":
+      return "interacted with";
+    case "COLLAB_WITH":
+      return "collaborates with";
     case "SKILL_ENDORSE":
       return "is skilled in";
     case "TOOL_ENDORSE":

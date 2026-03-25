@@ -15,6 +15,11 @@
  * Intuition protocol. The Thing metadata (name, description, image, url) is
  * pinned to IPFS and the URI stored on-chain, making atoms rich and
  * discoverable across the ecosystem.
+ *
+ * Some predicates reuse existing Intuition ecosystem atoms (trusts, follows,
+ * collaborates with, uses) to maximize interoperability across apps.
+ * Others (Know IRL, Met, Is Skilled In) are Atlas-specific and created on
+ * first use.
  */
 
 /** Base URL for Thing atom metadata (image hosting + canonical URLs). */
@@ -42,10 +47,11 @@ export const ATTESTATION_TYPES = {
     emoji: "👀",
     description: "Get notifications and updates about this user",
     predicate: "FOLLOW",
+    /** Reuses Intuition ecosystem atom "follows". */
+    termId: "0x87daf17b45361ec14fbbe35699133704897e39b358c51305eb9cf8b61e601b80" as const,
     thing: {
       name: "Follow",
       description: "A follow relationship — get notifications and updates about this user",
-      url: `${ATLAS_BASE_URL}/attestations/follow`,
     },
   },
   TRUST: {
@@ -54,46 +60,37 @@ export const ATTESTATION_TYPES = {
     emoji: "🤝",
     description: "The trust signal",
     predicate: "TRUST",
+    /** Reuses Intuition ecosystem atom "trusts". */
+    termId: "0x3a73f3b1613d166eea141a25a2adc70db9304ab3c4e90daecad05f86487c3ee9" as const,
     thing: {
       name: "Trust",
       description: "A trust signal that influences reputation",
-      url: `${ATLAS_BASE_URL}/attestations/trust`,
     },
   },
-  KNOW_IRL: {
-    id: "KNOW_IRL",
-    label: "I Know IRL",
-    emoji: "📍",
-    description: "An in-real-life connection",
-    predicate: "KNOW_IRL",
+  INTERACTED: {
+    id: "INTERACTED",
+    label: "I Interacted With",
+    emoji: "🤙",
+    description: "Calls, meetings, DMs, or in-person meetups",
+    predicate: "INTERACTED",
+    /** Reuses Intuition ecosystem atom "interacted with". */
+    termId: "0x6e4659631eae2d115a8d2a557a1705dead1b0d8e8987b5f7a0f567d8cc676b8a" as const,
     thing: {
-      name: "Know IRL",
-      description: "An in-real-life connection with physical events or relashionship",
-      url: `${ATLAS_BASE_URL}/attestations/know-irl`,
+      name: "Interacted With",
+      description: "Shows engagement or communication between entities.",
     },
   },
-  WORK_WITH: {
-    id: "WORK_WITH",
-    label: "I Work With",
+  COLLAB_WITH: {
+    id: "COLLAB_WITH",
+    label: "I Collaborate With",
     emoji: "💼",
     description: "Collaborate and work together",
-    predicate: "WORK_WITH",
+    predicate: "COLLAB_WITH",
+    /** Reuses Intuition ecosystem atom "collaborates with". */
+    termId: "0x314e6d36910ee516b9fc5f20470b0bca0e36137f5dbcb38e30356fc5396cccdc" as const,
     thing: {
-      name: "Work With",
+      name: "Collaborates With",
       description: "A working relationship — collaborate and work together",
-      url: `${ATLAS_BASE_URL}/attestations/work-with`,
-    },
-  },
-  MET: {
-    id: "MET",
-    label: "I Met",
-    emoji: "👋",
-    description: "Having meetings and calls to connect",
-    predicate: "MET",
-    thing: {
-      name: "Met",
-      description: "A connection formed through meetings and calls",
-      url: `${ATLAS_BASE_URL}/attestations/met`,
     },
   },
   SKILL_ENDORSE: {
@@ -102,10 +99,11 @@ export const ATTESTATION_TYPES = {
     emoji: "🎯",
     description: "Endorse this user's skill",
     predicate: "is_skilled_in",
+    /** Atlas-specific — created on first use. */
+    termId: null,
     thing: {
       name: "Is Skilled In",
       description: "An endorsement that a user is skilled in a particular area",
-      url: `${ATLAS_BASE_URL}/attestations/skill-endorse`,
     },
   },
   TOOL_ENDORSE: {
@@ -114,10 +112,11 @@ export const ATTESTATION_TYPES = {
     emoji: "⚡",
     description: "Endorse this user's tool proficiency",
     predicate: "uses_tool",
+    /** Reuses Intuition ecosystem atom "uses". */
+    termId: "0x5c0bde1cc696456c0268248c4656acdf9621fdb39e605bc99b0a83dc8ff6e800" as const,
     thing: {
       name: "Uses Tool",
       description: "An endorsement that a user is proficient with a specific tool",
-      url: `${ATLAS_BASE_URL}/attestations/tool-endorse`,
     },
   },
 } as const;
@@ -137,6 +136,14 @@ export function isEndorsementType(type: string): boolean {
 /** Get the correct endorsement attestation type for an attribute category. */
 export function endorsementTypeForCategory(category: AttributeCategory): AttestationType {
   return category === "skill" ? "SKILL_ENDORSE" : "TOOL_ENDORSE";
+}
+
+/**
+ * Get the hardcoded term_id for an attestation type, if available.
+ * Returns null for Atlas-specific predicates that are created dynamically.
+ */
+export function getHardcodedTermId(type: AttestationType): `0x${string}` | null {
+  return (ATTESTATION_TYPES[type].termId ?? null) as `0x${string}` | null;
 }
 
 /**
