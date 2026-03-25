@@ -312,7 +312,7 @@ export function AttestationQueuePanel() {
 
         <div
             className={cn(
-              "max-h-[28rem] overflow-y-auto pr-4 [scrollbar-width:thin] [scrollbar-color:oklch(1_0_0/20%)_transparent]",
+              "-mr-2 pr-2 max-h-[28rem] overflow-y-auto [scrollbar-width:thin] [scrollbar-color:oklch(1_0_0/20%)_transparent]",
               unminted.length > 0 && "[mask-image:linear-gradient(transparent,black_1.5rem,black_calc(100%-1.5rem),transparent)]"
             )}
           >

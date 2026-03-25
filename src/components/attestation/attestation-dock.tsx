@@ -10,12 +10,6 @@ import { getAttributeById } from "@/lib/attestations/definitions";
 import type { AttestationType } from "@/lib/attestations/definitions";
 import { Input } from "@/components/ui/input";
 import {
-  Menu,
-  MenuContent,
-  MenuItem,
-  MenuTrigger,
-} from "@/components/ui/menu";
-import {
   useAttestationQueue,
   type UnmintedAttestation,
 } from "./queue-provider";
@@ -29,11 +23,6 @@ const MIN_DEPOSIT = "0.00042";
 
 /** How long (ms) before the dock auto-hides when not hovered/interacted with. */
 const AUTO_HIDE_DELAY = 4_000;
-
-const CURVE_LABELS: Record<string, string> = {
-  linear: "Linear",
-  exponential: "Exponential",
-};
 
 /** Stance options for the toggle buttons. */
 const STANCES = [
@@ -194,8 +183,6 @@ export function AttestationDock({ className }: { className?: string }) {
     },
     [latest, updateDepositAmount],
   );
-  const [curve, setCurve] = React.useState("linear");
-
   // Show dock only when there are items, panel is not open, and not auto-hidden
   const show = hasItems && !isOpen && autoVisible;
 
@@ -290,7 +277,7 @@ export function AttestationDock({ className }: { className?: string }) {
             </div>
 
             {/* ── Attestation label ── */}
-            <p className="text-sm leading-snug mb-3 truncate" title={label}>
+            <p className="text-sm leading-snug mb-3 truncate text-center" title={label}>
               {label}
             </p>
 
@@ -320,38 +307,7 @@ export function AttestationDock({ className }: { className?: string }) {
                   </span>
                 </div>
 
-                <Menu>
-                  <MenuTrigger
-                    className={cn(
-                      "flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5",
-                      "text-xs font-medium whitespace-nowrap",
-                      "transition-colors duration-150",
-                      "hover:bg-muted/50",
-                      accentBorder,
-                    )}
-                  >
-                    {CURVE_LABELS[curve] ?? "Linear"}
-                    <ChevronDown className="size-3 text-muted-foreground" />
-                  </MenuTrigger>
-                  <MenuContent side="top" sideOffset={4} align="end">
-                    <MenuItem
-                      onClick={() => {
-                        setCurve("linear");
-                        resetTimer();
-                      }}
-                    >
-                      Linear
-                    </MenuItem>
-                    <MenuItem
-                      onClick={() => {
-                        setCurve("exponential");
-                        resetTimer();
-                      }}
-                    >
-                      Exponential
-                    </MenuItem>
-                  </MenuContent>
-                </Menu>
+                {/* Curve selector — disabled until exponential curve is deployed */}
               </div>
           </div>
         </motion.div>
