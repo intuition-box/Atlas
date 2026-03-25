@@ -58,6 +58,7 @@ type AttestorInfo = {
   name: string | null;
   handle: string | null;
   avatarUrl: string | null;
+  stance: string;
   createdAt: string;
 };
 
@@ -601,7 +602,13 @@ function AttestorTooltip({ attestors, totalCount }: { attestors: AttestorInfo[];
           <span className="text-xs text-white">
             {u.name ?? `@${u.handle}`}
           </span>
-          <span className="ml-auto pl-5 text-xs text-muted-foreground">
+          <span className={cn(
+            "ml-auto pl-3 text-xs text-muted-foreground",
+            u.stance === "against" ? "text-destructive" : "text-emerald-400",
+          )}>
+            {u.stance === "against" ? "Oppose" : "Support"}
+          </span>
+          <span className="text-xs text-muted-foreground">
             {formatRelativeTime(u.createdAt)}
           </span>
         </div>
