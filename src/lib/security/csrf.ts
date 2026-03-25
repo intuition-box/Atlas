@@ -58,7 +58,15 @@ function isUnsafeMethod(method: string): boolean {
   return m !== "GET" && m !== "HEAD" && m !== "OPTIONS";
 }
 
+/**
+ * Determine the public origin of this server, accounting for reverse proxies.
+ */
 function requestOrigin(req: NextRequest): string {
+  const proto = req.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  const host = req.headers.get("x-forwarded-host")?.split(",")[0]?.trim() ?? req.headers.get("host");
+  if (proto && host) {
+    return `${proto}://${host}`;
+  }
   return req.nextUrl.origin;
 }
 

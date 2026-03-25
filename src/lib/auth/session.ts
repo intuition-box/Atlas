@@ -77,6 +77,20 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           Twitter({
             clientId: process.env.AUTH_X_ID,
             clientSecret: process.env.AUTH_X_SECRET!,
+            profile(profile) {
+              // Twitter API v2 wraps user data under "data", but some
+              // responses (errors, changed formats) may omit it.
+              const data = profile.data ?? profile;
+              if (!data?.id) {
+                console.error("[auth] Twitter profile response missing id:", JSON.stringify(profile));
+              }
+              return {
+                id: data.id,
+                name: data.name,
+                email: data.email ?? null,
+                image: data.profile_image_url,
+              };
+            },
           }),
         ]
       : []),

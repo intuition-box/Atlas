@@ -231,6 +231,9 @@ export function UniverseView({
     // Pointer
     draggedNode: null as UniverseNode | null,
     dragStart: null as { x: number; y: number } | null,
+    pointerStartScreen: null as { x: number; y: number } | null,
+    wasDrag: false,
+    pendingTapNodeId: null as string | null,
     hoveredNode: null as UniverseNode | null,
   });
 
@@ -901,8 +904,16 @@ export function UniverseView({
   }, []);
 
   /* ────────────────────────────
-     Pointer events
+     Pointer / touch events
+
+     Android Chrome can suppress pointerup AND click for quick taps on
+     canvas elements with touch-action:none. The only touch event that
+     fires reliably is `touchend`. We store the tapped node from
+     pointerdown and fire the action from touchend (touch) or click (mouse).
   ──────────────────────────── */
+
+  /** Prevents click from double-firing after touchend already handled it */
+  const tapHandledRef = React.useRef(false);
 
   const onPointerMove = React.useCallback(
     (e: React.PointerEvent) => {
@@ -914,6 +925,15 @@ export function UniverseView({
       const y = e.clientY - rect.top;
 
       if (s.draggedNode) {
+        // Ignore jitter — only start actual drag after 8px movement
+        if (!s.wasDrag && s.pointerStartScreen) {
+          const jx = e.clientX - s.pointerStartScreen.x;
+          const jy = e.clientY - s.pointerStartScreen.y;
+          if (jx * jx + jy * jy < 64) return;
+          s.wasDrag = true;
+          s.pendingTapNodeId = null; // cancel tap
+          try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* ignore */ }
+        }
         const t = s.transform;
         s.draggedNode.fx = (x - t.x) / t.k;
         s.draggedNode.fy = (y - t.y) / t.k;
@@ -972,20 +992,28 @@ export function UniverseView({
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
 
-      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      s.wasDrag = false;
+      s.pointerStartScreen = { x: e.clientX, y: e.clientY };
+      s.pendingTapNodeId = null;
+      tapHandledRef.current = false;
 
       const t = s.transform;
       const wx = (x - t.x) / t.k;
       const wy = (y - t.y) / t.k;
+
+      const isTouch = e.pointerType === "touch";
+      const hitMultiplier = isTouch ? 1.4 : 1;
 
       for (let i = s.nodes.length - 1; i >= 0; i--) {
         const n = s.nodes[i];
         if (n.x === undefined || n.y === undefined) continue;
         const dx = n.x - wx;
         const dy = n.y - wy;
-        if (dx * dx + dy * dy <= n.radius * n.radius) {
+        const hitRadius = n.radius * hitMultiplier;
+        if (dx * dx + dy * dy <= hitRadius * hitRadius) {
           s.draggedNode = n;
           s.dragStart = { x: n.x, y: n.y };
+          s.pendingTapNodeId = n.id;
           n.fx = n.x;
           n.fy = n.y;
 
@@ -1000,7 +1028,8 @@ export function UniverseView({
     [scheduleFrame],
   );
 
-  const onPointerUp = React.useCallback(
+  /** Clean up drag state — shared by pointerup and pointercancel. */
+  const finishPointer = React.useCallback(
     (e: React.PointerEvent) => {
       const s = stateRef.current;
 
@@ -1011,32 +1040,72 @@ export function UniverseView({
       }
 
       const draggedNode = s.draggedNode;
-      const dragStart = s.dragStart;
-
-      if (draggedNode && dragStart) {
-        const dx = (draggedNode.x ?? 0) - dragStart.x;
-        const dy = (draggedNode.y ?? 0) - dragStart.y;
-        const moved = Math.hypot(dx, dy);
-
+      if (draggedNode) {
         s.simulation?.alphaTarget(0);
         s.draggedNode = null;
         s.dragStart = null;
-
-        // Always unpin so node returns to simulation control
         draggedNode.fx = null;
         draggedNode.fy = null;
-
-        if (moved < 5) {
-          // Click on community — trigger zoom
-          const community = communities.find((c) => c.id === draggedNode.id);
-          if (community) {
-            handleCommunityClick(community, draggedNode);
-          }
-        }
         scheduleFrame();
       }
     },
-    [communities, handleCommunityClick, scheduleFrame],
+    [scheduleFrame],
+  );
+
+  const onPointerUp = finishPointer;
+  const onPointerCancel = finishPointer;
+
+  /** Fire the stored tap — uses node ID from pointerdown so it works even
+   *  if the node has moved back to its orbit position. */
+  const fireTap = React.useCallback(() => {
+    const s = stateRef.current;
+    if (s.mode !== "idle") return;
+
+    const nodeId = s.pendingTapNodeId;
+    s.pendingTapNodeId = null;
+    if (!nodeId) return;
+
+    // Clean up any lingering drag state
+    const draggedNode = s.draggedNode;
+    if (draggedNode) {
+      s.simulation?.alphaTarget(0);
+      s.draggedNode = null;
+      s.dragStart = null;
+      draggedNode.fx = null;
+      draggedNode.fy = null;
+    }
+
+    const node = s.nodes.find((n) => n.id === nodeId);
+    const community = communities.find((c) => c.id === nodeId);
+    if (node && community) {
+      handleCommunityClick(community, node);
+    }
+  }, [communities, handleCommunityClick]);
+
+  /** touchend — the only event guaranteed to fire on Android for quick taps. */
+  const onTouchEnd = React.useCallback(
+    (e: React.TouchEvent) => {
+      const s = stateRef.current;
+      if (!s.pendingTapNodeId || s.wasDrag) return;
+
+      e.preventDefault(); // prevent synthetic click from double-firing
+      tapHandledRef.current = true;
+      fireTap();
+    },
+    [fireTap],
+  );
+
+  /** click — fires reliably for mouse; fallback for touch if touchend missed */
+  const onClick = React.useCallback(
+    (e: React.MouseEvent) => {
+      void e; // coordinates not needed — we use stored node ID
+      if (tapHandledRef.current) {
+        tapHandledRef.current = false;
+        return;
+      }
+      fireTap();
+    },
+    [fireTap],
   );
 
   const onPointerLeave = React.useCallback(() => {
@@ -1103,7 +1172,10 @@ export function UniverseView({
         onPointerMove={onPointerMove}
         onPointerDown={onPointerDown}
         onPointerUp={onPointerUp}
+        onPointerCancel={onPointerCancel}
         onPointerLeave={onPointerLeave}
+        onTouchEnd={onTouchEnd}
+        onClick={onClick}
         onWheel={onWheel}
         style={{
           display: "block",

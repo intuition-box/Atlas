@@ -139,6 +139,22 @@ function getOrigin(req: NextRequest): string | null {
   return null;
 }
 
+/**
+ * Determine the public origin of this server, accounting for reverse proxies.
+ *
+ * Behind a proxy (e.g. Coolify/Traefik), `req.nextUrl.origin` returns the
+ * internal address (http://localhost:3000). We reconstruct from forwarded
+ * headers instead.
+ */
+function getServerOrigin(req: NextRequest): string {
+  const proto = req.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  const host = req.headers.get("x-forwarded-host")?.split(",")[0]?.trim() ?? req.headers.get("host");
+  if (proto && host) {
+    return `${proto}://${host}`;
+  }
+  return req.nextUrl.origin;
+}
+
 async function parseBody(req: NextRequest, maxBytes: number): Promise<Result<unknown, ApiError>> {
   let text: string;
   try {
@@ -245,7 +261,7 @@ export function api<S extends z.ZodTypeAny>(
       // 3. Origin (POST only)
       if (isPost && opts.checkOrigin !== false) {
         const origin = getOrigin(req);
-        const allowed = opts.allowOrigins?.length ? opts.allowOrigins : [req.nextUrl.origin];
+        const allowed = opts.allowOrigins?.length ? opts.allowOrigins : [getServerOrigin(req)];
         if (!origin || !allowed.includes(origin)) {
           return errJson(withMeta({ code: "FORBIDDEN", message: "Forbidden", status: 403 }));
         }
