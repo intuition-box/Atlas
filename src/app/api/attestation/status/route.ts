@@ -25,6 +25,7 @@ type AttestorInfo = {
   name: string | null;
   handle: string | null;
   avatarUrl: string | null;
+  stance: string;
   createdAt: string;
 };
 
@@ -83,6 +84,7 @@ export const GET = api(QuerySchema, async (ctx) => {
       select: {
         type: true,
         attributeId: true,
+        stance: true,
         createdAt: true,
         fromUser: { select: { id: true, name: true, image: true, avatarUrl: true } },
       },
@@ -135,6 +137,7 @@ export const GET = api(QuerySchema, async (ctx) => {
           name: row.fromUser.name,
           handle: null,
           avatarUrl: row.fromUser.avatarUrl ?? row.fromUser.image,
+          stance: row.stance === "against" ? "against" : "for",
           createdAt: row.createdAt.toISOString(),
         });
       }
@@ -157,6 +160,7 @@ export const GET = api(QuerySchema, async (ctx) => {
         name: row.fromUser.name,
         handle: null, // resolved below
         avatarUrl: row.fromUser.avatarUrl ?? row.fromUser.image,
+        stance: row.stance === "against" ? "against" : "for",
         createdAt: row.createdAt.toISOString(),
       });
     }

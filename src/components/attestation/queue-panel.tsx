@@ -24,7 +24,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { getAttributeById } from "@/lib/attestations/definitions";
+import { getAttributeById, isEndorsementType } from "@/lib/attestations/definitions";
 import { useAttestationQueue, type UnmintedAttestation } from "./queue-provider";
 import { AttestationBadge } from "@/components/attestation/badge";
 import { ProfileAvatar } from "@/components/common/profile-avatar";
@@ -80,16 +80,16 @@ function CartItem({
 
       {/* Wallet + stance/attestation */}
       <div className="flex flex-col gap-0.5 flex-1 min-w-0">
-        {hasWallet ? (
-          <span className="text-[10px] text-muted-foreground font-mono truncate">
-            {item.toUser.walletAddress!.slice(0, 6)}…{item.toUser.walletAddress!.slice(-4)}
-          </span>
-        ) : (
-          <span className="inline-flex items-center gap-1 text-[10px] text-warning-foreground/70">
-            <Wallet className="size-2.5" />
-            No wallet
-          </span>
-        )}
+        <span className={cn(
+          "inline-flex items-center gap-1 text-[10px] font-mono truncate",
+          hasWallet ? "text-muted-foreground" : "text-warning-foreground/70",
+        )}>
+          <Wallet className="size-2.5 shrink-0" />
+          {hasWallet
+            ? `${item.toUser.walletAddress!.slice(0, 6)}…${item.toUser.walletAddress!.slice(-4)}`
+            : "No wallet"
+          }
+        </span>
         <div className="flex items-center gap-1.5">
           <span className={cn(
             "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium leading-none",
@@ -99,12 +99,13 @@ function CartItem({
           )}>
             {isOppose ? "Oppose" : "Support"}
           </span>
-          <span className="text-xs text-muted-foreground truncate">
-            <AttestationBadge type={item.type} bare />
-            {(item.type === "SKILL_ENDORSE" || item.type === "TOOL_ENDORSE") && item.attributeId && (
-              <span className="ml-1 text-foreground/60">{getAttributeById(item.attributeId)?.label ?? item.attributeId}</span>
-            )}
-          </span>
+          <AttestationBadge
+            type={item.type}
+            bare
+            overrideLabel={isEndorsementType(item.type) && item.attributeId
+              ? getAttributeById(item.attributeId)?.label ?? item.attributeId
+              : undefined}
+          />
         </div>
       </div>
 

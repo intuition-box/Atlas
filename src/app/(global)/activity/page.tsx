@@ -194,13 +194,13 @@ function AttestationEventCard({ event }: { event: AttestationEvent }) {
       </div>
 
       <div className="flex items-center gap-2 shrink-0">
-        <AttestationBadge type={event.attestationType} />
         <Badge
           variant={event.stance === "against" ? "destructive" : "positive"}
           className="text-[10px] px-1.5 py-0"
         >
           {event.stance === "against" ? "Oppose" : "Support"}
         </Badge>
+        <AttestationBadge type={event.attestationType} />
         <ActivityTypeBadge kind="attestation" />
         <span className="text-xs text-muted-foreground">
           {formatRelativeTime(event.createdAt)}

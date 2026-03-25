@@ -300,16 +300,16 @@ function AttestationRow({
           )}
         </Link>
         <ArrowUpRight className="size-3 shrink-0 text-amber-500" />
-        <AttestationBadge type={attestation.type} />
         <Badge
           variant={attestation.stance === "against" ? "destructive" : "positive"}
           className="text-[10px] px-1.5 py-0"
         >
           {attestation.stance === "against" ? "Oppose" : "Support"}
         </Badge>
-        {isEndorsement && attribute && (
-          <span className="truncate text-xs text-muted-foreground">{attribute.label}</span>
-        )}
+        <AttestationBadge
+          type={attestation.type}
+          overrideLabel={isEndorsement && attribute ? attribute.label : undefined}
+        />
       </div>
 
       <div className="flex items-center gap-2 shrink-0">

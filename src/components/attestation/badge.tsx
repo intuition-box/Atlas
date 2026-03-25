@@ -8,8 +8,10 @@ type AttestationBadgeProps = {
   type: string;
   /** Show emoji before the label. Defaults to true. */
   showEmoji?: boolean;
-  /** Show only the emoji, no label text. Useful for endorsements where the attribute label is shown separately. */
+  /** Show only the emoji, no label text. */
   emojiOnly?: boolean;
+  /** Replace the default label text (e.g. show "Linear" instead of "Endorsed tool"). */
+  overrideLabel?: string;
   /** Render as plain text instead of a styled badge. Use inside buttons, spans, etc. */
   bare?: boolean;
   /** Badge variant — defaults to "outline". Ignored when bare. */
@@ -22,12 +24,13 @@ export function AttestationBadge({
   type,
   showEmoji = true,
   emojiOnly = false,
+  overrideLabel,
   bare = false,
   variant = "secondary",
   className,
 }: AttestationBadgeProps) {
   const def = ATTESTATION_TYPES[type as AttestationType];
-  const label = def?.label ?? type;
+  const label = overrideLabel ?? def?.label ?? type;
   const emoji = def?.emoji;
 
   const content = (
