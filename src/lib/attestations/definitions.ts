@@ -48,7 +48,7 @@ export const ATTESTATION_TYPES = {
     description: "Get notifications and updates about this user",
     predicate: "FOLLOW",
     /** Reuses Intuition ecosystem atom "follows". */
-    termId: "0x87daf17b45361ec14fbbe35699133704897e39b358c51305eb9cf8b61e601b80" as const,
+    termId: "0xffd07650dc7ab341184362461ebf52144bf8bcac5a19ef714571de15f1319260" as const,
     thing: {
       name: "Follow",
       description: "A follow relationship — get notifications and updates about this user",
