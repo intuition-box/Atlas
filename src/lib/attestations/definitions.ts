@@ -102,7 +102,7 @@ export const ATTESTATION_TYPES = {
     /** Atlas-specific — created on first use. */
     termId: null,
     thing: {
-      name: "Is Skilled In",
+      name: "is skilled in",
       description: "An endorsement that a user is skilled in a particular area",
     },
   },
