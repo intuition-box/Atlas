@@ -89,8 +89,9 @@ const TourContext = React.createContext<TourContextValue | null>(null);
 export function TourProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { data: session } = useSession();
+  const { data: session, status: sessionStatus } = useSession();
   const isAuthed = !!session?.user?.handle;
+  const isSessionReady = sessionStatus !== "loading";
 
   const [activeTour, setActiveTour] = React.useState<TourDefinition | null>(null);
   const [currentStepIndex, setCurrentStepIndex] = React.useState(0);
@@ -217,15 +218,17 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
   // Keyboard navigation is handled in TourOverlay so it can skip over
   // steps whose DOM target is missing (the overlay tracks skipped steps).
 
-  // Auto-trigger Welcome tour on home page for first-time visitors
+  // Auto-trigger Welcome tour on home page for first-time visitors.
+  // Wait for session to settle so `isAuthed` is stable before creating
+  // the tour definition (signed-out users get an extra sign-in step).
   React.useEffect(() => {
-    if (pathname !== "/") return;
+    if (pathname !== "/" || !isSessionReady) return;
 
     const t = setTimeout(() => {
       trigger(createWelcomeTour(isAuthed));
     }, 800);
     return () => clearTimeout(t);
-  }, [pathname, trigger, isAuthed]);
+  }, [pathname, trigger, isAuthed, isSessionReady]);
 
   const value = React.useMemo<TourContextValue>(
     () => ({

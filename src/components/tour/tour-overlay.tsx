@@ -336,25 +336,6 @@ export function TourOverlay() {
       if (cancelled) return;
 
       if (el) {
-        // Pre-scan future steps for missing elements
-        if (activeTour) {
-          const currentRoute = currentStep!.route;
-          const missing = new Set<number>();
-          for (let i = currentStepIndex + 1; i < activeTour.steps.length; i++) {
-            const s = activeTour.steps[i]!;
-            if (s.route !== currentRoute) break;
-            const hasTarget = document.querySelector(s.target) || (s.fallbackTarget && document.querySelector(s.fallbackTarget));
-            if (!hasTarget) missing.add(i);
-          }
-          if (missing.size > 0) {
-            setSkippedSteps((prev) => {
-              const next = new Set(prev);
-              missing.forEach((i) => next.add(i));
-              return next;
-            });
-          }
-        }
-
         // Instant scroll — completes synchronously so the measurement
         // is always accurate. Also cancels any leftover smooth scroll
         // from the previous step. The overlay hides the jump.
