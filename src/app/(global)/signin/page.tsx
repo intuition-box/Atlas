@@ -70,9 +70,11 @@ export default async function SignInPage({
     }),
   ]);
 
-  const avatarUrls = avatarRows
-    .map((r) => r.avatarUrl)
-    .filter((u): u is string => typeof u === "string" && u.trim().length > 0);
+  const avatarUrls = [...new Set(
+    avatarRows
+      .map((r) => r.avatarUrl)
+      .filter((u): u is string => typeof u === "string" && u.trim().length > 0),
+  )];
 
   // Pick two non-overlapping attestation pairs so no face repeats
   let attestationPair: [string, string] | undefined;
@@ -112,6 +114,9 @@ export default async function SignInPage({
     ?.avatarUrl ?? undefined;
   if (verifiedMemberUrl) reservedUrls.add(verifiedMemberUrl);
 
+  // Filter orbit background avatars to exclude those used in special items
+  const orbitAvatars = avatarUrls.filter((url) => !reservedUrls.has(url));
+
   // No redirect here - let providers.tsx OnboardingGuard handle all routing logic
 
   async function signinDiscord() {
@@ -123,7 +128,7 @@ export default async function SignInPage({
     <div className="flex flex-col min-h-screen w-full space-y-8 items-center justify-center">
       <div data-tour="signin-card" className="overflow-hidden w-full max-w-[460px] border rounded-[40px]">
         <div className="-mt-12 relative w-full aspect-square inset-0 flex items-center justify-center overflow-hidden">
-          <OrbitAnimation className="" avatarUrls={avatarUrls} attestationPair={attestationPair} followPair={followPair} newestMemberUrl={newestMemberUrl} verifiedMemberUrl={verifiedMemberUrl} />
+          <OrbitAnimation className="" avatarUrls={orbitAvatars} attestationPair={attestationPair} followPair={followPair} newestMemberUrl={newestMemberUrl} verifiedMemberUrl={verifiedMemberUrl} />
           <div className="absolute inset-0 flex items-center justify-center">
             <Logo className="size-12"/>
           </div>

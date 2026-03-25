@@ -37,7 +37,7 @@ const ITEMS: OrbitItemDef[] = [
   // Outer ring (r ~ 215)
   { key: "trust",         group: "outer", x: -150, y: -125, size: 32, rotateClassName: "-rotate-10", containerClassName: "bg-transparent",   type: "trust" },
   { key: "participant",   group: "outer", x: -10,  y: -195, size: 28, rotateClassName: "-rotate-12", containerClassName: "bg-purple-500/20", type: "user" },
-  { key: "explorer",      group: "outer", x: -190, y: 60,   size: 24, rotateClassName: "-rotate-15", containerClassName: "bg-yellow-500/20", type: "user" },
+  { key: "explorer-outer", group: "outer", x: -190, y: 60,   size: 24, rotateClassName: "-rotate-15", containerClassName: "bg-yellow-500/20", type: "user" },
   { key: "follow",        group: "outer", x: 195,  y: -10,  size: 32, rotateClassName: "-rotate-6",  containerClassName: "bg-transparent",   type: "follow" },
   { key: "reward",        group: "outer", x: 95,   y: 170,  size: 32,                                containerClassName: "bg-transparent",   type: "reward" },
 ]
