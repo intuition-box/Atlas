@@ -137,6 +137,7 @@ function AttestationEventRow({
   extra?: ReactNode;
 }) {
   const attestationType = (event.metadata?.attestationType as string) ?? null;
+  const stance = (event.metadata?.stance as string) ?? "for";
 
   // For retraction events, show "Withdrawn" for minted attestations, "Removed" for pending
   const retractLabel =
@@ -157,6 +158,12 @@ function AttestationEventRow({
         {attestationType && attestationType in ATTESTATION_TYPES && (
           <AttestationBadge type={attestationType as AttestationType} />
         )}
+        <Badge
+          variant={stance === "against" ? "destructive" : "positive"}
+          className="text-[10px] px-1.5 py-0"
+        >
+          {stance === "against" ? "Oppose" : "Support"}
+        </Badge>
         {extra}
       </div>
       <div className="flex items-center gap-2 shrink-0">

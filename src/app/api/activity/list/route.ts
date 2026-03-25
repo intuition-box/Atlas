@@ -39,6 +39,7 @@ type AttestationEvent = {
   toUser: ActivityUser;
   attestationType: AttestationType;
   attestationTypeLabel: string;
+  stance: string;
   mintedAt: string | null;
 };
 
@@ -145,6 +146,7 @@ export const GET = api(QuerySchema, async (ctx) => {
           select: {
             id: true,
             type: true,
+            stance: true,
             fromUserId: true,
             toUserId: true,
             confidence: true,
@@ -250,6 +252,7 @@ export const GET = api(QuerySchema, async (ctx) => {
       toUser: toActivityUser(a.toUser),
       attestationType: typeKey,
       attestationTypeLabel: typeInfo?.label ?? a.type,
+      stance: a.stance === "against" ? "against" : "for",
       mintedAt: a.mintedAt?.toISOString() ?? null,
     });
   }
