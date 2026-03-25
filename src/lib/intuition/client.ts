@@ -154,6 +154,7 @@ const buildWriteConfig = (walletClient: WalletClient): WriteConfig => ({
 });
 
 let cachedMinDeposit: bigint | null = null;
+let cachedDefaultCurveId: bigint | null = null;
 
 /** Fetch the minimum deposit from the MultiVault contract (cached per page load). */
 async function getMinDeposit(): Promise<bigint> {
@@ -162,6 +163,19 @@ async function getMinDeposit(): Promise<bigint> {
   const config = await multiVaultGetGeneralConfig(readConfig);
   cachedMinDeposit = config.minDeposit;
   return cachedMinDeposit;
+}
+
+/** Get the default curve ID used by createTriples (cached per page load). */
+async function getDefaultCurveId(): Promise<bigint> {
+  if (cachedDefaultCurveId !== null) return cachedDefaultCurveId;
+
+  const [, defaultCurveId] = await publicClient.readContract({
+    address: MULTIVAULT_ADDRESS,
+    abi: MultiVaultAbi,
+    functionName: "bondingCurveConfig",
+  });
+  cachedDefaultCurveId = defaultCurveId;
+  return cachedDefaultCurveId;
 }
 
 /** Fetch per-triple cost (base cost + min deposit). */
@@ -397,6 +411,7 @@ export async function batchCreateAttestations(
   items: BatchMintItem[],
 ): Promise<BatchMintResult> {
   console.log(LOG, "START —", { fromAddress, count: items.length, chain: INTUITION_CHAIN.name });
+  console.log(LOG, "Items —", items.map((i) => ({ id: i.attestationId, stance: i.stance, deposit: i.depositAmount?.toString() })));
 
   if (items.length === 0) {
     throw new IntuitionError("TRANSACTION_FAILED", "No items to mint");
@@ -505,24 +520,31 @@ export async function batchCreateAttestations(
     // ── Step 5: Build parallel arrays + pre-flight balance check ──
     const fromTermId = known.get(fromAddress.toLowerCase())!;
     const minTripleCost = await getTripleCost();
+    const curveId = await getDefaultCurveId();
+    console.log(LOG, "Step 5 — defaultCurveId:", curveId.toString());
 
+    // ── Step 5: Build parallel arrays + pre-flight balance check ──
+    // ALL items go through createTriples to ensure triples exist on-chain.
+    // For "against" items, we use the minimum deposit (unavoidable — createTriples
+    // auto-deposits into the "for" vault), then immediately redeem it and deposit
+    // into the counter vault in Step 6c.
     const subjectIds: `0x${string}`[] = [];
     const predicateIds: `0x${string}`[] = [];
     const objectIds: `0x${string}`[] = [];
     const deposits: bigint[] = [];
 
-    for (const item of items) {
+    const againstIndices: number[] = [];
+
+    for (let idx = 0; idx < items.length; idx++) {
+      const item = items[idx]!;
       const isEndorsement = isEndorsementType(item.type) && item.attributeId;
 
       if (isEndorsement) {
-        // Endorsement triple: [toUser] [is_skilled_in] [attribute]
-        // Semantics: "toUser is skilled in Engineering", staked by fromUser
         const toTermId = known.get(item.toAddress.toLowerCase())!;
         const attrTermId = attributeTermIds.get(item.attributeId!);
 
         if (!attrTermId) {
           console.warn(LOG, `Skipping endorsement — no atom for attribute "${item.attributeId}"`);
-          // Fall back to legacy triple structure
           subjectIds.push(fromTermId);
           predicateIds.push(predicateTermIds.get(item.type)!);
           objectIds.push(toTermId);
@@ -532,21 +554,43 @@ export async function batchCreateAttestations(
           objectIds.push(attrTermId);
         }
       } else {
-        // Network attestation: [fromUser] [predicate] [toUser]
         subjectIds.push(fromTermId);
         predicateIds.push(predicateTermIds.get(item.type)!);
         objectIds.push(known.get(item.toAddress.toLowerCase())!);
       }
 
-      // Use custom deposit if provided and >= minimum, otherwise protocol minimum
+      if (item.stance === "against") {
+        // createTriples uses minimum deposit (will be redeemed in Step 6c)
+        deposits.push(minTripleCost);
+        againstIndices.push(idx);
+      } else {
+        const deposit = item.depositAmount && item.depositAmount >= minTripleCost
+          ? item.depositAmount
+          : minTripleCost;
+        deposits.push(deposit);
+      }
+    }
+
+    // Total = createTriples cost + oppose counter deposits (against items pay twice:
+    // once for triple creation min deposit, once for their actual oppose stake)
+    const createTriplesTotal = deposits.reduce((sum, d) => sum + d, BigInt(0));
+    let againstDepositTotal = BigInt(0);
+    for (const i of againstIndices) {
+      const item = items[i]!;
       const deposit = item.depositAmount && item.depositAmount >= minTripleCost
         ? item.depositAmount
         : minTripleCost;
-      deposits.push(deposit);
+      againstDepositTotal += deposit;
     }
+    const totalValue = createTriplesTotal + againstDepositTotal;
 
-    const totalValue = deposits.reduce((sum, d) => sum + d, BigInt(0));
     const balance = await publicClient.getBalance({ address: fromAddress });
+    console.log(LOG, "Step 5 — balance check:", {
+      balance: formatEther(balance),
+      totalValue: formatEther(totalValue),
+      forItems: items.length - againstIndices.length,
+      againstItems: againstIndices.length,
+    });
 
     if (balance < totalValue) {
       throw new IntuitionError(
@@ -555,7 +599,9 @@ export async function batchCreateAttestations(
       );
     }
 
-    // ── Step 6: Batch-create triples (1 signature) ──
+    // ── Step 6: Batch-create ALL triples (1 signature) ──
+    // Both "for" and "against" items go here. "Against" items use the minimum
+    // deposit which gets redeemed in Step 6c before depositing into the counter vault.
     console.log(LOG, "Step 6 — creating", items.length, "triples");
 
     let triplesTxHash: `0x${string}` | null = null;
@@ -564,46 +610,47 @@ export async function batchCreateAttestations(
     try {
       triplesTxHash = await multiVaultCreateTriples(config, {
         args: [subjectIds, predicateIds, objectIds, deposits],
-        value: totalValue,
+        value: createTriplesTotal,
       });
-    } catch (error) {
-      if (!isTripleExistsError(error)) throw error;
+      } catch (error) {
+        if (!isTripleExistsError(error)) throw error;
 
-      // Batch failed because some triples already exist on-chain.
-      // Fall back to one-by-one — viem simulates before prompting,
-      // so existing triples fail silently (no wallet popup).
-      console.log(LOG, "Step 6 — TripleExists in batch, falling back to one-by-one");
+        // Batch failed because some triples already exist on-chain.
+        // Fall back to one-by-one — viem simulates before prompting,
+        // so existing triples fail silently (no wallet popup).
+        console.log(LOG, "Step 6 — TripleExists in batch, falling back to one-by-one");
 
-      for (let i = 0; i < subjectIds.length; i++) {
-        try {
-          const hash = await multiVaultCreateTriples(config, {
-            args: [[subjectIds[i]!], [predicateIds[i]!], [objectIds[i]!], [deposits[i]!]],
-            value: deposits[i]!,
-          });
-          triplesTxHash = hash;
-        } catch (innerError) {
-          if (isTripleExistsError(innerError)) {
-            console.log(LOG, `  Triple ${i} already exists on-chain`);
-            existingIndices.add(i);
-          } else {
-            throw innerError;
+        for (let i = 0; i < subjectIds.length; i++) {
+          try {
+            const hash = await multiVaultCreateTriples(config, {
+              args: [[subjectIds[i]!], [predicateIds[i]!], [objectIds[i]!], [deposits[i]!]],
+              value: deposits[i]!,
+            });
+            triplesTxHash = hash;
+          } catch (innerError) {
+            if (isTripleExistsError(innerError)) {
+              console.log(LOG, `  Triple ${i} already exists on-chain`);
+              existingIndices.add(i);
+            } else {
+              throw innerError;
+            }
           }
         }
       }
-    }
 
-    // ── Step 6b: Deposit into existing triples (1 signature) ──
-    // When a triple already exists, we don't skip it — we deposit into
-    // its vault so the user gets real shares they can later redeem.
-    // Without this, "publishing" would silently succeed with no wallet
-    // interaction, leaving the user with zero onchain position.
+    // ── Step 6b: Deposit into existing "for" triples (1 signature) ──
+    // Only "for" items that already existed need an extra deposit.
+    // "Against" items that already existed are handled in Step 6c.
     const existingTermIds = new Map<number, string>();
 
     if (existingIndices.size > 0) {
-      console.log(LOG, "Step 6b — depositing into", existingIndices.size, "existing triples");
+      console.log(LOG, "Step 6b — processing", existingIndices.size, "existing triples");
 
-      // Compute termIds directly from the contract (no indexer dependency).
-      // calculateTripleId is a pure view function — deterministic, instant.
+      const forDepositTermIds: `0x${string}`[] = [];
+      const forDepositCurveIds: bigint[] = [];
+      const forDepositAssets: bigint[] = [];
+      const forDepositMinShares: bigint[] = [];
+
       for (const i of existingIndices) {
         try {
           const termId = await publicClient.readContract({
@@ -614,38 +661,103 @@ export async function batchCreateAttestations(
           });
           existingTermIds.set(i, termId);
           console.log(LOG, `  Triple ${i} → termId: ${termId}`);
+
+          // Only deposit for "for" items — "against" handled in Step 6c
+          if (items[i]?.stance !== "against") {
+            forDepositTermIds.push(termId as `0x${string}`);
+            forDepositCurveIds.push(curveId);
+            forDepositAssets.push(deposits[i]!);
+            forDepositMinShares.push(BigInt(0));
+          }
         } catch (err) {
           console.warn(LOG, `  Triple ${i} — failed to calculate termId:`, err);
         }
       }
 
-      // Build deposit batch for all resolved existing triples
-      const depositTermIds: `0x${string}`[] = [];
-      const depositCurveIds: bigint[] = [];
-      const depositAssets: bigint[] = [];
-      const depositMinShares: bigint[] = [];
-
-      for (const [idx, termId] of existingTermIds) {
-        depositTermIds.push(termId as `0x${string}`);
-        depositCurveIds.push(BigInt(1));   // default bonding curve
-        depositAssets.push(deposits[idx]!);
-        depositMinShares.push(BigInt(0));  // accept any shares
-      }
-
-      if (depositTermIds.length > 0) {
-        const depositValue = depositAssets.reduce((sum, a) => sum + a, BigInt(0));
-
+      if (forDepositTermIds.length > 0) {
+        const depositValue = forDepositAssets.reduce((sum, a) => sum + a, BigInt(0));
         const depositTxHash = await multiVaultDepositBatch(config, {
-          args: [fromAddress, depositTermIds, depositCurveIds, depositAssets, depositMinShares],
+          args: [fromAddress, forDepositTermIds, forDepositCurveIds, forDepositAssets, forDepositMinShares],
           value: depositValue,
         });
+        if (!triplesTxHash) triplesTxHash = depositTxHash;
+        console.log(LOG, "Step 6b — deposited into", forDepositTermIds.length, "existing triples (for), tx:", depositTxHash);
+      }
+    }
 
-        // Use the deposit tx as the triples tx if no new triples were created
-        if (!triplesTxHash) {
-          triplesTxHash = depositTxHash;
+    // ── Step 6c: Oppose — redeem "for" position + deposit into counter vault ──
+    // For "against" items, createTriples deposited the minimum into the "for" vault.
+    // The protocol forbids holding positions on both sides (HasCounterStake),
+    // so we must redeem the "for" position first, then deposit into the counter vault.
+    //
+    // For "against" items on existing triples (no "for" position from createTriples),
+    // we skip the redeem and go straight to the counter deposit.
+    const counterTermIds = new Map<number, string>();
+
+    if (againstIndices.length > 0) {
+      console.log(LOG, "Step 6c — processing", againstIndices.length, "oppose items");
+
+      for (const i of againstIndices) {
+        try {
+          // Compute termId from triple components
+          const termId = await publicClient.readContract({
+            address: MULTIVAULT_ADDRESS,
+            abi: MultiVaultAbi,
+            functionName: "calculateTripleId",
+            args: [subjectIds[i]!, predicateIds[i]!, objectIds[i]!],
+          });
+
+          // Get counter_term_id (pure function, no indexer)
+          const counterId = await publicClient.readContract({
+            address: MULTIVAULT_ADDRESS,
+            abi: MultiVaultAbi,
+            functionName: "getCounterIdFromTripleId",
+            args: [termId],
+          });
+          counterTermIds.set(i, counterId);
+          console.log(LOG, `  Oppose ${i} → termId: ${termId} → counter: ${counterId}`);
+
+          // The protocol forbids holding positions on both sides (HasCounterStake).
+          // Check if the user has any "for" position and redeem it first.
+          // This happens when: (a) createTriples just deposited the min into "for",
+          // or (b) the user previously supported this claim and now opposes it.
+          const shares = await multiVaultMaxRedeem(readConfig, {
+            args: [fromAddress, termId, curveId],
+          });
+          if (shares > BigInt(0)) {
+            console.log(LOG, `  Oppose ${i} — redeeming ${shares.toString()} shares from "for" vault`);
+            await redeem(config, [fromAddress, termId, curveId, shares, BigInt(0)]);
+          }
+        } catch (err) {
+          console.warn(LOG, `  Oppose ${i} — failed to resolve counter_term_id:`, err);
         }
+      }
 
-        console.log(LOG, "Step 6b — deposited into existing triples, tx:", depositTxHash);
+      // Build oppose deposit batch
+      const opposeDepositTermIds: `0x${string}`[] = [];
+      const opposeDepositCurveIds: bigint[] = [];
+      const opposeDepositAssets: bigint[] = [];
+      const opposeDepositMinShares: bigint[] = [];
+
+      for (const [idx, counterTermId] of counterTermIds) {
+        const item = items[idx]!;
+        const opposeDeposit = item.depositAmount && item.depositAmount >= minTripleCost
+          ? item.depositAmount
+          : minTripleCost;
+        opposeDepositTermIds.push(counterTermId as `0x${string}`);
+        opposeDepositCurveIds.push(curveId);
+        opposeDepositAssets.push(opposeDeposit);
+        opposeDepositMinShares.push(BigInt(0));
+      }
+
+      if (opposeDepositTermIds.length > 0) {
+        const opposeValue = opposeDepositAssets.reduce((sum, a) => sum + a, BigInt(0));
+        const opposeTxHash = await multiVaultDepositBatch(config, {
+          args: [fromAddress, opposeDepositTermIds, opposeDepositCurveIds, opposeDepositAssets, opposeDepositMinShares],
+          value: opposeValue,
+        });
+        if (!triplesTxHash) triplesTxHash = opposeTxHash;
+        console.log(LOG, "Step 6c — deposited into", opposeDepositTermIds.length, "counter vaults (against), tx:", opposeTxHash);
       }
     }
 
@@ -662,14 +774,23 @@ export async function batchCreateAttestations(
 
     let eventIdx = 0;
     const resultItems = items.map((item, i) => {
-      if (existingIndices.has(i)) {
-        // Triple already existed on-chain — use the real termId from the indexer
-        const resolvedTermId = existingTermIds.get(i);
+      // "against" items → store counter_term_id as onchainId
+      if (item.stance === "against" && counterTermIds.has(i)) {
         return {
           attestationId: item.attestationId,
-          onchainId: resolvedTermId ?? "unknown",
+          onchainId: counterTermIds.get(i)!,
         };
       }
+
+      // Items that already existed on-chain → use resolved termId
+      if (existingIndices.has(i)) {
+        return {
+          attestationId: item.attestationId,
+          onchainId: existingTermIds.get(i) ?? "unknown",
+        };
+      }
+
+      // "for" items that were newly created → use event data
       const event = tripleEvents[eventIdx++];
       return {
         attestationId: item.attestationId,
@@ -678,8 +799,6 @@ export async function batchCreateAttestations(
     });
 
     if (!triplesTxHash) {
-      // This should never happen — either createTriples or depositBatch
-      // should have produced a tx hash. If we're here, something is wrong.
       throw new IntuitionError(
         "TRANSACTION_FAILED",
         "No transaction was produced. Please try again.",
@@ -691,7 +810,8 @@ export async function batchCreateAttestations(
       atomsTxHash,
       triplesTxHash: finalTxHash,
       created: items.length - existingIndices.size,
-      deposited: existingIndices.size,
+      existingDeposited: existingIndices.size,
+      opposeDeposited: counterTermIds.size,
     });
 
     return {
@@ -735,12 +855,13 @@ export async function withdrawAttestations(
   try {
     const walletClient = await requireWalletClient();
     const writeConfig = buildWriteConfig(walletClient);
+    const wCurveId = await getDefaultCurveId();
 
     // ── Step 1: Query max redeemable shares for each item ──
     const shareQueries = await Promise.all(
       items.map(async (item) => {
         const shares = await multiVaultMaxRedeem(readConfig, {
-          args: [fromAddress, item.onchainId as `0x${string}`, BigInt(1)],
+          args: [fromAddress, item.onchainId as `0x${string}`, wCurveId],
         });
         return { ...item, shares };
       }),
@@ -773,7 +894,7 @@ export async function withdrawAttestations(
       const result = await redeem(writeConfig, [
         fromAddress,                        // receiver
         item.onchainId as `0x${string}`,    // termId
-        BigInt(1),                          // curveId (default bonding curve)
+        wCurveId,                           // curveId (from contract config)
         item.shares,                        // shares (full balance)
         BigInt(0),                          // minAssets (no slippage protection)
       ]);

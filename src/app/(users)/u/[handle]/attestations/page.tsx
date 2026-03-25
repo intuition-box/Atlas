@@ -58,6 +58,8 @@ type Attestation = {
   id: string
   type: AttestationType
   attributeId: string | null
+  stance: string | null
+  depositAmount: string | null
   confidence: number | null
   createdAt: string
   mintedAt: string | null
@@ -299,6 +301,12 @@ function AttestationRow({
         </Link>
         <ArrowUpRight className="size-3 shrink-0 text-amber-500" />
         <AttestationBadge type={attestation.type} />
+        <Badge
+          variant={attestation.stance === "against" ? "destructive" : "positive"}
+          className="text-[10px] px-1.5 py-0"
+        >
+          {attestation.stance === "against" ? "Oppose" : "Support"}
+        </Badge>
         {isEndorsement && attribute && (
           <span className="truncate text-xs text-muted-foreground">{attribute.label}</span>
         )}
@@ -690,6 +698,7 @@ export default function AttestationsPage() {
         type: item.type,
         toAddress: item.toUser.walletAddress as Address,
         attributeId: item.attributeId ?? undefined,
+        stance: (item.stance === "against" ? "against" : "for") as "for" | "against",
       }))
 
       // Execute on-chain batch (wallet signatures happen here)

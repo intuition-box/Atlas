@@ -295,12 +295,7 @@ export function AttestationDock({ className }: { className?: string }) {
             </p>
 
             {/* ── Deposit input + curve menu ── */}
-            {!isSupport ? (
-              <p className="text-xs text-muted-foreground text-center">
-                Coming soon
-              </p>
-            ) : (
-              <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2">
                 <div className="relative flex-1">
                   <Input
                     type="text"
@@ -358,7 +353,6 @@ export function AttestationDock({ className }: { className?: string }) {
                   </MenuContent>
                 </Menu>
               </div>
-            )}
           </div>
         </motion.div>
       )}

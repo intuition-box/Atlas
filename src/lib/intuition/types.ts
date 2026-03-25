@@ -31,6 +31,8 @@ export type BatchMintItem = {
   attributeId?: string;
   /** Custom deposit in wei. Falls back to protocol minimum if not set. */
   depositAmount?: bigint;
+  /** Stance: "for" deposits into term_id, "against" deposits into counter_term_id. */
+  stance?: "for" | "against";
 };
 
 /** Result from batch minting on-chain. */

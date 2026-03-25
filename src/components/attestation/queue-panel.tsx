@@ -224,13 +224,17 @@ export function AttestationQueuePanel() {
 
     try {
       // Build batch items (only mintable ones with toUser wallet)
-      const batchItems: BatchMintItem[] = mintable.map((item) => ({
-        attestationId: item.id,
-        type: item.type,
-        toAddress: item.toUser.walletAddress as Address,
-        attributeId: item.attributeId ?? undefined,
-        depositAmount: parseDepositSafe(item.depositAmount),
-      }));
+      const batchItems: BatchMintItem[] = mintable.map((item) => {
+        console.log("[queue-panel] item:", item.id, "stance:", item.stance, "deposit:", item.depositAmount);
+        return {
+          attestationId: item.id,
+          type: item.type,
+          toAddress: item.toUser.walletAddress as Address,
+          attributeId: item.attributeId ?? undefined,
+          depositAmount: parseDepositSafe(item.depositAmount),
+          stance: item.stance,
+        };
+      });
 
       // Execute on-chain batch (wallet signatures happen here)
       const result = await batchCreateAttestations(
