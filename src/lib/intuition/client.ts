@@ -67,6 +67,7 @@ import {
   MULTIVAULT_ADDRESS,
   INTUITION_ENABLED,
   NATIVE_CURRENCY_SYMBOL,
+  I_ATOM_TERM_ID,
 } from "./config";
 
 import type {
@@ -549,7 +550,10 @@ export async function batchCreateAttestations(
           objectIds.push(attrTermId);
         }
       } else {
-        subjectIds.push(fromTermId);
+        // FOLLOW uses the "I" atom as subject: [I, follows, toUser]
+        // All other network types use the sender: [fromUser, predicate, toUser]
+        const subject = item.type === "FOLLOW" ? I_ATOM_TERM_ID : fromTermId;
+        subjectIds.push(subject);
         predicateIds.push(predicateTermIds.get(item.type)!);
         objectIds.push(known.get(item.toAddress.toLowerCase())!);
       }

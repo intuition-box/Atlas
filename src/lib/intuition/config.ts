@@ -96,3 +96,6 @@ export function getExplorerTxUrl(txHash: string | null | undefined): string | nu
 export const INTUITION_CHAIN = getIntuitionChain();
 export const MULTIVAULT_ADDRESS = getMultiVaultAddress();
 export const NATIVE_CURRENCY_SYMBOL = getNativeCurrencySymbol();
+
+/** The "I" atom — represents the transaction signer. Used as subject for TRUST triples. */
+export const I_ATOM_TERM_ID = "0x7ab197b346d386cd5926dbfeeb85dade42f113c7ed99ff2046a5123bb5cd016b" as `0x${string}`;
