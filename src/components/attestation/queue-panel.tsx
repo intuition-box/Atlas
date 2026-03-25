@@ -226,7 +226,6 @@ export function AttestationQueuePanel() {
     try {
       // Build batch items (only mintable ones with toUser wallet)
       const batchItems: BatchMintItem[] = mintable.map((item) => {
-        console.log("[queue-panel] item:", item.id, "stance:", item.stance, "deposit:", item.depositAmount);
         return {
           attestationId: item.id,
           type: item.type,

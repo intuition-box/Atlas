@@ -78,7 +78,6 @@ import type {
 
 import { IntuitionError } from "./types";
 
-const LOG = "[intuition]";
 
 /* ════════════════════════════════════════════════
    LAYER: provider
@@ -273,7 +272,6 @@ async function getOrCreatePredicate(type: AttestationType): Promise<`0x${string}
   // Check for hardcoded ecosystem atom term_id (0 transactions)
   const hardcoded = getHardcodedTermId(type);
   if (hardcoded) {
-    console.log(LOG, `Using hardcoded predicate "${type}":`, hardcoded);
     predicateCache.set(type, hardcoded);
     return hardcoded;
   }
@@ -288,13 +286,11 @@ async function getOrCreatePredicate(type: AttestationType): Promise<`0x${string}
 
     const exists = await multiVaultIsTermCreated(readConfig, { args: [termId] });
     if (exists) {
-      console.log(LOG, `Predicate Thing atom "${thingData.name}" already exists:`, termId);
       predicateCache.set(type, termId);
       return termId;
     }
 
     // Create on-chain using IPFS URI as atom data
-    console.log(LOG, `Creating predicate Thing atom "${thingData.name}" (uri: ${uri})`);
     const walletClient = await requireWalletClient();
     const result = await createAtomFromString(buildWriteConfig(walletClient), uri);
     predicateCache.set(type, result.state.termId);
@@ -302,7 +298,6 @@ async function getOrCreatePredicate(type: AttestationType): Promise<`0x${string}
   }
 
   // Fallback: legacy string atom if pinning fails
-  console.warn(LOG, `IPFS pin failed for predicate "${thingData.name}", falling back to string atom`);
   const result = await createStringAtom(getPredicateForType(type));
   predicateCache.set(type, result.state.termId);
   return result.state.termId;
@@ -387,13 +382,11 @@ async function getOrCreateThingAtom(
   // Check if this atom already exists on-chain
   const exists = await multiVaultIsTermCreated(readConfig, { args: [termId] });
   if (exists) {
-    console.log(LOG, `Thing atom "${thingData.name}" already exists:`, termId);
     attributeAtomCache.set(attributeId, termId);
     return termId;
   }
 
   // Create the atom on-chain using the IPFS URI as data
-  console.log(LOG, `Creating Thing atom "${thingData.name}" (uri: ${uri})`);
   const result = await createAtomFromString(config, uri);
   attributeAtomCache.set(attributeId, result.state.termId);
   return result.state.termId;
@@ -418,8 +411,6 @@ export async function batchCreateAttestations(
   fromAddress: Address,
   items: BatchMintItem[],
 ): Promise<BatchMintResult> {
-  console.log(LOG, "START —", { fromAddress, count: items.length, chain: INTUITION_CHAIN.name });
-  console.log(LOG, "Items —", items.map((i) => ({ id: i.attestationId, stance: i.stance, deposit: i.depositAmount?.toString() })));
 
   if (items.length === 0) {
     throw new IntuitionError("TRANSACTION_FAILED", "No items to mint");
@@ -442,7 +433,6 @@ export async function batchCreateAttestations(
     // Note: predicates are resolved separately via getOrCreatePredicate (Step 4)
     // to ensure they're always beautiful Thing atoms, not legacy string atoms.
     const known = await resolveExistingAtoms(uniqueAddresses);
-    console.log(LOG, "Step 2 — known atoms:", known.size);
 
     // ── Step 3: Create missing address atoms (0–1 signature) ──
     const missingAddresses = uniqueAddresses.filter(
@@ -452,7 +442,6 @@ export async function batchCreateAttestations(
     let atomsTxHash: string | null = null;
 
     if (missingAddresses.length > 0) {
-      console.log(LOG, "Step 3 — creating", missingAddresses.length, "address atoms");
 
       try {
         const atomsResult = await batchCreateAtomsFromEthereumAccounts(config, missingAddresses);
@@ -464,7 +453,6 @@ export async function batchCreateAttestations(
       } catch (error) {
         // Batch failed — fall back to one-by-one (handles AtomExists gracefully)
         if (isAtomExistsError(error)) {
-          console.log(LOG, "Step 3 — AtomExists in batch, falling back to one-by-one");
           for (const addr of missingAddresses) {
             try {
               const result = await createAtomFromEthereumAccount(config, addr);
@@ -503,7 +491,6 @@ export async function batchCreateAttestations(
     );
 
     if (uniqueAttributeIds.length > 0) {
-      console.log(LOG, "Step 4b — resolving", uniqueAttributeIds.length, "attribute Thing atoms");
       for (const attrId of uniqueAttributeIds) {
         try {
           const termId = await getOrCreateThingAtom(attrId, config);
@@ -529,7 +516,6 @@ export async function batchCreateAttestations(
     const fromTermId = known.get(fromAddress.toLowerCase())!;
     const minTripleCost = await getTripleCost();
     const curveId = await getDefaultCurveId();
-    console.log(LOG, "Step 5 — defaultCurveId:", curveId.toString());
 
     // ── Step 5: Build parallel arrays + pre-flight balance check ──
     // ALL items go through createTriples to ensure triples exist on-chain.
@@ -552,7 +538,6 @@ export async function batchCreateAttestations(
         const attrTermId = attributeTermIds.get(item.attributeId!);
 
         if (!attrTermId) {
-          console.warn(LOG, `Skipping endorsement — no atom for attribute "${item.attributeId}"`);
           subjectIds.push(fromTermId);
           predicateIds.push(predicateTermIds.get(item.type)!);
           objectIds.push(toTermId);
@@ -593,12 +578,6 @@ export async function batchCreateAttestations(
     const totalValue = createTriplesTotal + againstDepositTotal;
 
     const balance = await publicClient.getBalance({ address: fromAddress });
-    console.log(LOG, "Step 5 — balance check:", {
-      balance: formatEther(balance),
-      totalValue: formatEther(totalValue),
-      forItems: items.length - againstIndices.length,
-      againstItems: againstIndices.length,
-    });
 
     if (balance < totalValue) {
       throw new IntuitionError(
@@ -610,7 +589,6 @@ export async function batchCreateAttestations(
     // ── Step 6: Batch-create ALL triples (1 signature) ──
     // Both "for" and "against" items go here. "Against" items use the minimum
     // deposit which gets redeemed in Step 6c before depositing into the counter vault.
-    console.log(LOG, "Step 6 — creating", items.length, "triples");
 
     let triplesTxHash: `0x${string}` | null = null;
     const existingIndices = new Set<number>();
@@ -626,7 +604,6 @@ export async function batchCreateAttestations(
         // Batch failed because some triples already exist on-chain.
         // Fall back to one-by-one — viem simulates before prompting,
         // so existing triples fail silently (no wallet popup).
-        console.log(LOG, "Step 6 — TripleExists in batch, falling back to one-by-one");
 
         for (let i = 0; i < subjectIds.length; i++) {
           try {
@@ -637,7 +614,6 @@ export async function batchCreateAttestations(
             triplesTxHash = hash;
           } catch (innerError) {
             if (isTripleExistsError(innerError)) {
-              console.log(LOG, `  Triple ${i} already exists on-chain`);
               existingIndices.add(i);
             } else {
               throw innerError;
@@ -652,7 +628,6 @@ export async function batchCreateAttestations(
     const existingTermIds = new Map<number, string>();
 
     if (existingIndices.size > 0) {
-      console.log(LOG, "Step 6b — processing", existingIndices.size, "existing triples");
 
       const forDepositTermIds: `0x${string}`[] = [];
       const forDepositCurveIds: bigint[] = [];
@@ -668,7 +643,6 @@ export async function batchCreateAttestations(
             args: [subjectIds[i]!, predicateIds[i]!, objectIds[i]!],
           });
           existingTermIds.set(i, termId);
-          console.log(LOG, `  Triple ${i} → termId: ${termId}`);
 
           // Only deposit for "for" items — "against" handled in Step 6c
           if (items[i]?.stance !== "against") {
@@ -678,7 +652,6 @@ export async function batchCreateAttestations(
             forDepositMinShares.push(BigInt(0));
           }
         } catch (err) {
-          console.warn(LOG, `  Triple ${i} — failed to calculate termId:`, err);
         }
       }
 
@@ -689,7 +662,6 @@ export async function batchCreateAttestations(
           value: depositValue,
         });
         if (!triplesTxHash) triplesTxHash = depositTxHash;
-        console.log(LOG, "Step 6b — deposited into", forDepositTermIds.length, "existing triples (for), tx:", depositTxHash);
       }
     }
 
@@ -703,7 +675,6 @@ export async function batchCreateAttestations(
     const counterTermIds = new Map<number, string>();
 
     if (againstIndices.length > 0) {
-      console.log(LOG, "Step 6c — processing", againstIndices.length, "oppose items");
 
       for (const i of againstIndices) {
         try {
@@ -723,7 +694,6 @@ export async function batchCreateAttestations(
             args: [termId],
           });
           counterTermIds.set(i, counterId);
-          console.log(LOG, `  Oppose ${i} → termId: ${termId} → counter: ${counterId}`);
 
           // The protocol forbids holding positions on both sides (HasCounterStake).
           // Check if the user has any "for" position and redeem it first.
@@ -733,11 +703,9 @@ export async function batchCreateAttestations(
             args: [fromAddress, termId, curveId],
           });
           if (shares > BigInt(0)) {
-            console.log(LOG, `  Oppose ${i} — redeeming ${shares.toString()} shares from "for" vault`);
             await redeem(config, [fromAddress, termId, curveId, shares, BigInt(0)]);
           }
         } catch (err) {
-          console.warn(LOG, `  Oppose ${i} — failed to resolve counter_term_id:`, err);
         }
       }
 
@@ -765,27 +733,23 @@ export async function batchCreateAttestations(
           value: opposeValue,
         });
         if (!triplesTxHash) triplesTxHash = opposeTxHash;
-        console.log(LOG, "Step 6c — deposited into", opposeDepositTermIds.length, "counter vaults (against), tx:", opposeTxHash);
       }
     }
 
     // ── Step 7: Compute termId for every item deterministically ──
     // Don't rely on event parsing — calculateTripleId is a pure function
     // that gives us the exact termId from subject/predicate/object.
-    console.log(LOG, "Step 7 — computing termIds for all", items.length, "items");
     const resultItems = await Promise.all(
       items.map(async (item, i) => {
         // "against" items → use counter_term_id
         if (item.stance === "against" && counterTermIds.has(i)) {
           const counterId = counterTermIds.get(i)!;
-          console.log(LOG, `  item ${i} → against → counter: ${String(counterId).slice(0, 16)}`);
           return { attestationId: item.attestationId, onchainId: String(counterId) };
         }
 
         // Use pre-resolved termId from Step 6b (existing triples)
         if (existingTermIds.has(i)) {
           const termId = existingTermIds.get(i)!;
-          console.log(LOG, `  item ${i} → existing → ${String(termId).slice(0, 16)}`);
           return { attestationId: item.attestationId, onchainId: String(termId) };
         }
 
@@ -796,7 +760,6 @@ export async function batchCreateAttestations(
           functionName: "calculateTripleId",
           args: [subjectIds[i]!, predicateIds[i]!, objectIds[i]!],
         });
-        console.log(LOG, `  item ${i} → computed → ${String(termId).slice(0, 16)}`);
         return { attestationId: item.attestationId, onchainId: String(termId) };
       }),
     );
@@ -809,13 +772,6 @@ export async function batchCreateAttestations(
     }
 
     const finalTxHash = triplesTxHash;
-    console.log(LOG, "DONE ✓ —", {
-      atomsTxHash,
-      triplesTxHash: finalTxHash,
-      created: items.length - existingIndices.size,
-      existingDeposited: existingIndices.size,
-      opposeDeposited: counterTermIds.size,
-    });
 
     return {
       atomsTxHash: atomsTxHash ?? finalTxHash,
@@ -823,7 +779,6 @@ export async function batchCreateAttestations(
       items: resultItems,
     };
   } catch (error) {
-    console.error(LOG, "ERROR ✗ —", error);
     throw mapError(error);
   }
 }
@@ -853,7 +808,6 @@ export async function withdrawAttestations(
     throw new IntuitionError("TRANSACTION_FAILED", "No attestations to withdraw");
   }
 
-  console.log(LOG, "WITHDRAW START —", { from: fromAddress, count: items.length });
 
   try {
     const walletClient = await requireWalletClient();
@@ -861,14 +815,11 @@ export async function withdrawAttestations(
     const wCurveId = await getDefaultCurveId();
 
     // ── Step 1: Query max redeemable shares for each item ──
-    console.log(LOG, "WITHDRAW — querying shares for", items.length, "items, curveId:", wCurveId.toString());
     const shareQueries = await Promise.all(
       items.map(async (item) => {
-        console.log(LOG, `WITHDRAW — maxRedeem(${fromAddress}, ${item.onchainId}, ${wCurveId})`);
         const shares = await multiVaultMaxRedeem(readConfig, {
           args: [fromAddress, item.onchainId as `0x${string}`, wCurveId],
         });
-        console.log(LOG, `WITHDRAW — ${item.onchainId} → shares: ${shares.toString()}`);
         return { ...item, shares };
       }),
     );
@@ -877,17 +828,12 @@ export async function withdrawAttestations(
     const redeemable = shareQueries.filter((item) => item.shares > BigInt(0));
 
     if (redeemable.length === 0) {
-      console.log(LOG, "WITHDRAW — no redeemable shares found");
       throw new IntuitionError(
         "TRANSACTION_FAILED",
         "No onchain position found to withdraw. The attestation may have already been withdrawn or the onchain ID is invalid.",
       );
     }
 
-    console.log(LOG, "WITHDRAW — shares to redeem:", redeemable.map((r) => ({
-      onchainId: r.onchainId,
-      shares: r.shares.toString(),
-    })));
 
     // ── Step 2: Redeem each position ──
     // Redeem one at a time — each gets a separate tx for clarity.
@@ -895,7 +841,6 @@ export async function withdrawAttestations(
     let lastTxHash = "";
 
     for (const item of redeemable) {
-      console.log(LOG, `WITHDRAW — redeeming ${item.onchainId} (${item.shares} shares)`);
 
       const result = await redeem(writeConfig, [
         fromAddress,                        // receiver
@@ -906,14 +851,8 @@ export async function withdrawAttestations(
       ]);
 
       lastTxHash = result.transactionHash;
-      console.log(LOG, `WITHDRAW — redeemed ${item.onchainId}, tx: ${lastTxHash}`);
     }
 
-    console.log(LOG, "WITHDRAW DONE ✓ —", {
-      txHash: lastTxHash,
-      redeemed: redeemable.length,
-      skipped: items.length - redeemable.length,
-    });
 
     return {
       txHash: lastTxHash,
@@ -923,7 +862,6 @@ export async function withdrawAttestations(
       })),
     };
   } catch (error) {
-    console.error(LOG, "WITHDRAW ERROR ✗ —", error);
     throw mapError(error);
   }
 }
