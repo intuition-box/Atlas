@@ -99,8 +99,7 @@ export const ATTESTATION_TYPES = {
     emoji: "🎯",
     description: "Endorse this user's skill",
     predicate: "is_skilled_in",
-    /** Atlas-specific — created on first use. */
-    termId: null,
+    termId: "0xe332e7d663cda20970d2e9a9278b6a5be9575c0514379e8574aa61203c549103" as const,
     thing: {
       name: "is skilled in",
       description: "An endorsement that a user is skilled in a particular area",
