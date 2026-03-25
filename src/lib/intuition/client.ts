@@ -262,7 +262,7 @@ async function createStringAtom(content: string) {
 const predicateCache = new Map<AttestationType, `0x${string}`>();
 
 /**
- * Get or create a predicate atom for an attestation type (beautiful atom).
+ * Get or create a predicate atom for an attestation type (rich atom).
  *
  * Predicates are minted as schema.org Thing atoms with name + description
  * (no image — they're administrative). Falls back to legacy string atom
@@ -279,7 +279,7 @@ async function getOrCreatePredicate(type: AttestationType): Promise<`0x${string}
     return hardcoded;
   }
 
-  // Try beautiful atom first
+  // Try rich atom first
   const thingData = getPredicateThingData(type);
   const uri = await pinThing(thingData);
 
@@ -348,14 +348,14 @@ async function resolveExistingAtoms(
 }
 
 /* ════════════════════════════════════════════════
-   LAYER: thing atoms (beautiful atoms)
+   LAYER: thing atoms (rich atoms)
 ════════════════════════════════════════════════ */
 
 /** Cache attribute termIds to avoid redundant IPFS pins + on-chain lookups. */
 const attributeAtomCache = new Map<string, `0x${string}`>();
 
 /**
- * Get or create a "beautiful" Thing atom on Intuition.
+ * Get or create a rich Thing atom on Intuition.
  *
  * Flow: pin JSON-LD to IPFS → check on-chain existence → create if missing.
  * IPFS pinning is idempotent (same content = same CID), so re-pinning is safe.
@@ -434,7 +434,7 @@ export async function batchCreateAttestations(
 
     // ── Step 2: Query indexer for existing address atoms (0 signatures) ──
     // Note: predicates are resolved separately via getOrCreatePredicate (Step 4)
-    // to ensure they're always beautiful Thing atoms, not legacy string atoms.
+    // to ensure they're always rich Thing atoms, not legacy string atoms.
     const known = await resolveExistingAtoms(uniqueAddresses);
 
     // ── Step 3: Create missing address atoms (0–1 signature) ──
@@ -476,7 +476,7 @@ export async function batchCreateAttestations(
       }
     }
 
-    // ── Step 4: Resolve predicate atoms (always use beautiful Thing atoms) ──
+    // ── Step 4: Resolve predicate atoms (always use rich Thing atoms) ──
     // Always go through getOrCreatePredicate to ensure predicates are Thing atoms
     // with IPFS-pinned metadata (name, description, url). This avoids reusing
     // legacy string atoms from the indexer that the portal can't render.
@@ -487,7 +487,7 @@ export async function batchCreateAttestations(
       predicateTermIds.set(type, termId);
     }
 
-    // ── Step 4b: Resolve attribute atoms for endorsements (beautiful atoms) ──
+    // ── Step 4b: Resolve attribute atoms for endorsements (rich atoms) ──
     const attributeTermIds = new Map<string, `0x${string}`>();
     const uniqueAttributeIds = Array.from(
       new Set(items.filter((i) => i.attributeId).map((i) => i.attributeId!)),
@@ -550,7 +550,7 @@ export async function batchCreateAttestations(
           objectIds.push(attrTermId);
         }
       } else {
-        // FOLLOW uses the "I" atom as subject: [I, follows, toUser]
+        // FOLLOW uses the "I" atom as subject: [I, follow, toUser]
         // All other network types use the sender: [fromUser, predicate, toUser]
         const subject = item.type === "FOLLOW" ? I_ATOM_TERM_ID : fromTermId;
         subjectIds.push(subject);
