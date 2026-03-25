@@ -504,8 +504,7 @@ export async function batchCreateAttestations(
 
     // ── Step 5: Build parallel arrays + pre-flight balance check ──
     const fromTermId = known.get(fromAddress.toLowerCase())!;
-    const assetPerTriple = await getTripleCost();
-    const totalValue = assetPerTriple * BigInt(items.length);
+    const minTripleCost = await getTripleCost();
 
     const subjectIds: `0x${string}`[] = [];
     const predicateIds: `0x${string}`[] = [];
@@ -539,15 +538,20 @@ export async function batchCreateAttestations(
         objectIds.push(known.get(item.toAddress.toLowerCase())!);
       }
 
-      deposits.push(assetPerTriple);
+      // Use custom deposit if provided and >= minimum, otherwise protocol minimum
+      const deposit = item.depositAmount && item.depositAmount >= minTripleCost
+        ? item.depositAmount
+        : minTripleCost;
+      deposits.push(deposit);
     }
 
+    const totalValue = deposits.reduce((sum, d) => sum + d, BigInt(0));
     const balance = await publicClient.getBalance({ address: fromAddress });
 
     if (balance < totalValue) {
       throw new IntuitionError(
         "INSUFFICIENT_FUNDS",
-        `Need ${formatEther(totalValue)} ${NATIVE_CURRENCY_SYMBOL} to publish ${items.length} attestation${items.length !== 1 ? "s" : ""} but wallet only has ${formatEther(balance)} ${NATIVE_CURRENCY_SYMBOL}. (${formatEther(assetPerTriple)} per triple)`,
+        `Need ${formatEther(totalValue)} ${NATIVE_CURRENCY_SYMBOL} to publish ${items.length} attestation${items.length !== 1 ? "s" : ""} but wallet only has ${formatEther(balance)} ${NATIVE_CURRENCY_SYMBOL}.`,
       );
     }
 

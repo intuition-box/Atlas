@@ -505,6 +505,10 @@ model Attestation {
   /// Defaults to "for" when not specified. Stored for display + future on-chain integration.
   stance      String?   // "for" | "against"
 
+  /// Deposit amount in ether (e.g. "0.001", "1").
+  /// Null means the protocol minimum will be used at mint time.
+  depositAmount String?
+
   /// Soft-delete (retract) support.
   /// When revokedAt is set, this attestation should be treated as inactive.
   revokedAt       DateTime?

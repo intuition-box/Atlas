@@ -16,6 +16,7 @@ export type UnmintedAttestation = {
   type: AttestationType;
   attributeId: string | null;
   stance: "for" | "against";
+  depositAmount: string | null;
   createdAt: string;
   toUser: {
     id: string;
@@ -63,6 +64,8 @@ type AttestationCartContextValue = {
   retractAll: () => Promise<void>;
   /** Update the stance of an unminted attestation */
   updateStance: (id: string, stance: "for" | "against") => Promise<void>;
+  /** Update the deposit amount of an unminted attestation (ether string) */
+  updateDepositAmount: (id: string, amount: string) => void;
   /** Remove a minted item from unminted list and notify downstream */
   onItemMinted: (id: string) => void;
 
@@ -80,6 +83,7 @@ type ListResponse = {
     type: string;
     attributeId: string | null;
     stance: string | null;
+    depositAmount: string | null;
     confidence: number | null;
     createdAt: string;
     mintedAt: string | null;
@@ -149,6 +153,7 @@ export function AttestationQueueProvider({ children }: { children: React.ReactNo
             type: a.type as AttestationType,
             attributeId: a.attributeId ?? null,
             stance: (a.stance === "against" ? "against" : "for") as "for" | "against",
+            depositAmount: a.depositAmount ?? null,
             createdAt: a.createdAt,
             toUser: {
               id: a.toUser.id,
@@ -238,6 +243,7 @@ export function AttestationQueueProvider({ children }: { children: React.ReactNo
             type: params.type,
             attributeId: params.attributeId ?? null,
             stance: params.stance ?? "for",
+            depositAmount: null,
             createdAt: new Date().toISOString(),
             toUser: {
               id: params.toUserId,
@@ -334,6 +340,21 @@ export function AttestationQueueProvider({ children }: { children: React.ReactNo
     [unminted],
   );
 
+  const updateDepositAmount = React.useCallback(
+    (id: string, amount: string) => {
+      // Optimistic update
+      setUnminted((prev) =>
+        prev.map((a) => (a.id === id ? { ...a, depositAmount: amount } : a)),
+      );
+      // Persist to DB (fire-and-forget — deposit is non-critical)
+      void apiPost("/api/attestation/update-stance", {
+        attestationId: id,
+        depositAmount: amount,
+      });
+    },
+    [],
+  );
+
   const onItemMinted = React.useCallback((id: string) => {
     setUnminted((prev) => prev.filter((a) => a.id !== id));
     setLastChangedAt(Date.now());
@@ -357,11 +378,12 @@ export function AttestationQueueProvider({ children }: { children: React.ReactNo
       retractAttestation,
       retractAll,
       updateStance,
+      updateDepositAmount,
       onItemMinted,
       setIsOpen,
       toggleOpen,
     }),
-    [unminted, isOpen, isFetching, lastChangedAt, lastCreatedAt, createAttestation, retractAttestation, retractAll, updateStance, onItemMinted, toggleOpen],
+    [unminted, isOpen, isFetching, lastChangedAt, lastCreatedAt, createAttestation, retractAttestation, retractAll, updateStance, updateDepositAmount, onItemMinted, toggleOpen],
   );
 
   return (

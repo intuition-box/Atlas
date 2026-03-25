@@ -7,16 +7,25 @@ export const runtime = "nodejs";
 
 const BodySchema = z.object({
   attestationId: z.string().trim().min(1),
-  stance: z.enum(["for", "against"]),
+  stance: z.enum(["for", "against"]).optional(),
+  depositAmount: z.string().trim().min(1).optional(),
 });
 
 type UpdateStanceOk = {
-  attestation: { id: string; stance: string };
+  attestation: { id: string; stance: string; depositAmount: string | null };
 };
 
 export const POST = api(BodySchema, async (ctx) => {
   const { viewerId, json } = ctx;
-  const { attestationId, stance } = json;
+  const { attestationId, stance, depositAmount } = json;
+
+  if (!stance && !depositAmount) {
+    return errJson({
+      code: "INVALID_REQUEST",
+      message: "At least one of stance or depositAmount is required",
+      status: 400,
+    });
+  }
 
   // Verify the attestation exists, belongs to viewer, and is unminted
   const attestation = await db.attestation.findUnique({
@@ -43,7 +52,7 @@ export const POST = api(BodySchema, async (ctx) => {
   if (attestation.mintedAt) {
     return errJson({
       code: "INVALID_REQUEST",
-      message: "Cannot change stance on a minted attestation",
+      message: "Cannot update a minted attestation",
       status: 400,
     });
   }
@@ -51,18 +60,26 @@ export const POST = api(BodySchema, async (ctx) => {
   if (attestation.revokedAt) {
     return errJson({
       code: "INVALID_REQUEST",
-      message: "Cannot change stance on a removed attestation",
+      message: "Cannot update a removed attestation",
       status: 400,
     });
   }
 
+  const data: Record<string, string> = {};
+  if (stance) data.stance = stance;
+  if (depositAmount) data.depositAmount = depositAmount;
+
   const updated = await db.attestation.update({
     where: { id: attestationId },
-    data: { stance },
-    select: { id: true, stance: true },
+    data,
+    select: { id: true, stance: true, depositAmount: true },
   });
 
   return okJson<UpdateStanceOk>({
-    attestation: { id: updated.id, stance: updated.stance ?? "for" },
+    attestation: {
+      id: updated.id,
+      stance: updated.stance ?? "for",
+      depositAmount: updated.depositAmount,
+    },
   });
 }, { auth: "auth" });

@@ -29,6 +29,8 @@ export type BatchMintItem = {
   toAddress: Address;
   /** Attribute ID for endorsements (SKILL_ENDORSE / TOOL_ENDORSE). */
   attributeId?: string;
+  /** Custom deposit in wei. Falls back to protocol minimum if not set. */
+  depositAmount?: bigint;
 };
 
 /** Result from batch minting on-chain. */

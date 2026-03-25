@@ -169,7 +169,7 @@ function useAutoHide() {
 export function AttestationDock({ className }: { className?: string }) {
   const { data: session } = useSession();
   const viewerHandle = session?.user?.handle ?? null;
-  const { unminted, isOpen, setIsOpen, updateStance, lastCreatedAt } =
+  const { unminted, isOpen, setIsOpen, updateStance, updateDepositAmount, lastCreatedAt } =
     useAttestationQueue();
 
   // Show the most recent attestation (first in array — we prepend on create)
@@ -186,8 +186,14 @@ export function AttestationDock({ className }: { className?: string }) {
     if (lastCreatedAt > 0) trigger();
   }, [lastCreatedAt, trigger]);
 
-  // Deposit amount (Phase 2 — local UI state for now)
-  const [depositAmount, setDepositAmount] = React.useState(MIN_DEPOSIT);
+  // Deposit amount — read from DB-backed queue state, fall back to display default
+  const depositAmount = latest?.depositAmount || MIN_DEPOSIT;
+  const setDepositAmount = React.useCallback(
+    (val: string) => {
+      if (latest) updateDepositAmount(latest.id, val);
+    },
+    [latest, updateDepositAmount],
+  );
   const [curve, setCurve] = React.useState("linear");
 
   // Show dock only when there are items, panel is not open, and not auto-hidden

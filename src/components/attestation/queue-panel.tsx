@@ -7,7 +7,7 @@ import { useSession } from "next-auth/react";
 import { useAccount, useSwitchChain, useChainId } from "wagmi";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { CheckCircle, Loader2, X, Wallet } from "lucide-react";
-import type { Address } from "viem";
+import { type Address, parseEther } from "viem";
 
 import { cn } from "@/lib/utils";
 import { apiPost } from "@/lib/api/client";
@@ -28,6 +28,21 @@ import { getAttributeById } from "@/lib/attestations/definitions";
 import { useAttestationQueue, type UnmintedAttestation } from "./queue-provider";
 import { AttestationBadge } from "@/components/attestation/badge";
 import { ProfileAvatar } from "@/components/common/profile-avatar";
+
+/* ────────────────────────────
+   Helpers
+──────────────────────────── */
+
+/** Parse ether string to bigint, or undefined if empty/invalid. */
+function parseDepositSafe(amount: string | null): bigint | undefined {
+  if (!amount) return undefined;
+  try {
+    const val = parseEther(amount);
+    return val > BigInt(0) ? val : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /* ────────────────────────────
    Cart Item Component
@@ -214,6 +229,7 @@ export function AttestationQueuePanel() {
         type: item.type,
         toAddress: item.toUser.walletAddress as Address,
         attributeId: item.attributeId ?? undefined,
+        depositAmount: parseDepositSafe(item.depositAmount),
       }));
 
       // Execute on-chain batch (wallet signatures happen here)

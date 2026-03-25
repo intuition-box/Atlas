@@ -38,6 +38,7 @@ type AttestationListItem = {
   mintedAt: string | null;
   mintTxHash: string | null;
   onchainId: string | null;
+  depositAmount: string | null;
   fromUser: {
     id: string;
     handle: string | null;
@@ -113,6 +114,7 @@ export const GET = api(QuerySchema, async (ctx) => {
       type: true,
       attributeId: true,
       stance: true,
+      depositAmount: true,
       confidence: true,
       createdAt: true,
       mintedAt: true,
@@ -169,6 +171,7 @@ export const GET = api(QuerySchema, async (ctx) => {
       mintedAt: a.mintedAt?.toISOString() ?? null,
       mintTxHash: a.mintTxHash ?? null,
       onchainId: a.onchainId ?? null,
+      depositAmount: a.depositAmount ?? null,
       fromUser: {
         id: a.fromUser.id,
         handle: fromHandle,
