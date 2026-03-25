@@ -40,6 +40,8 @@ import {
   multiVaultGetGeneralConfig,
   multiVaultIsTermCreated,
   calculateAtomId,
+  calculateTripleId,
+  calculateCounterTripleId,
   redeem,
   type WriteConfig,
 } from "@0xintuition/sdk";
@@ -636,22 +638,28 @@ export async function batchCreateAttestations(
 
       for (const i of existingIndices) {
         try {
-          const termId = await publicClient.readContract({
-            address: MULTIVAULT_ADDRESS,
-            abi: MultiVaultAbi,
-            functionName: "calculateTripleId",
-            args: [subjectIds[i]!, predicateIds[i]!, objectIds[i]!],
-          });
+          const termId = calculateTripleId(subjectIds[i]!, predicateIds[i]!, objectIds[i]!);
           existingTermIds.set(i, termId);
 
           // Only deposit for "for" items — "against" handled in Step 6c
           if (items[i]?.stance !== "against") {
+            // Check if user has a counter (against) position from a previous session.
+            // The protocol forbids holding positions on both sides (HasCounterStake).
+            const counterTermId = calculateCounterTripleId(termId);
+            const counterShares = await multiVaultMaxRedeem(readConfig, {
+              args: [fromAddress, counterTermId as `0x${string}`, curveId],
+            });
+            if (counterShares > BigInt(0)) {
+              await redeem(config, [fromAddress, counterTermId as `0x${string}`, curveId, counterShares, BigInt(0)]);
+            }
+
             forDepositTermIds.push(termId as `0x${string}`);
             forDepositCurveIds.push(curveId);
             forDepositAssets.push(deposits[i]!);
             forDepositMinShares.push(BigInt(0));
           }
         } catch (err) {
+          // Non-fatal: skip this triple
         }
       }
 
@@ -678,21 +686,9 @@ export async function batchCreateAttestations(
 
       for (const i of againstIndices) {
         try {
-          // Compute termId from triple components
-          const termId = await publicClient.readContract({
-            address: MULTIVAULT_ADDRESS,
-            abi: MultiVaultAbi,
-            functionName: "calculateTripleId",
-            args: [subjectIds[i]!, predicateIds[i]!, objectIds[i]!],
-          });
-
-          // Get counter_term_id (pure function, no indexer)
-          const counterId = await publicClient.readContract({
-            address: MULTIVAULT_ADDRESS,
-            abi: MultiVaultAbi,
-            functionName: "getCounterIdFromTripleId",
-            args: [termId],
-          });
+          // Compute termId and counterTermId locally (no RPC calls)
+          const termId = calculateTripleId(subjectIds[i]!, predicateIds[i]!, objectIds[i]!);
+          const counterId = calculateCounterTripleId(termId);
           counterTermIds.set(i, counterId);
 
           // The protocol forbids holding positions on both sides (HasCounterStake).
@@ -706,6 +702,7 @@ export async function batchCreateAttestations(
             await redeem(config, [fromAddress, termId, curveId, shares, BigInt(0)]);
           }
         } catch (err) {
+          // Non-fatal: skip this oppose item
         }
       }
 
@@ -753,13 +750,8 @@ export async function batchCreateAttestations(
           return { attestationId: item.attestationId, onchainId: String(termId) };
         }
 
-        // Compute termId from triple components (pure contract call, no events)
-        const termId = await publicClient.readContract({
-          address: MULTIVAULT_ADDRESS,
-          abi: MultiVaultAbi,
-          functionName: "calculateTripleId",
-          args: [subjectIds[i]!, predicateIds[i]!, objectIds[i]!],
-        });
+        // Compute termId locally (no RPC)
+        const termId = calculateTripleId(subjectIds[i]!, predicateIds[i]!, objectIds[i]!);
         return { attestationId: item.attestationId, onchainId: String(termId) };
       }),
     );
