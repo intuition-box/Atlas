@@ -1,9 +1,10 @@
-import { HandleOwnerType } from "@prisma/client";
+import { HandleOwnerType, MembershipStatus } from "@prisma/client";
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 
 import { db } from "@/lib/db/client";
 import { errJson, okJson } from "@/lib/api/server";
+import { auth } from "@/lib/auth/session";
 import { resolveHandleNamesForOwners } from "@/lib/handle-registry";
 
 export const runtime = "nodejs";
@@ -82,7 +83,31 @@ export async function GET(req: NextRequest) {
     const { q, cursor } = parsed.data;
     const take = parsed.data.take ?? DEFAULT_TAKE;
 
-    const visibilityWhere = { isPublicDirectory: true };
+    // Get viewer session to filter private communities
+    const session = await auth();
+    const viewerId = session?.user?.id ?? null;
+
+    // Private communities are only visible to owners and approved members
+    let viewerMemberCommunityIds: string[] = [];
+    if (viewerId) {
+      const viewerMemberships = await db.membership.findMany({
+        where: { userId: viewerId, status: MembershipStatus.APPROVED },
+        select: { communityId: true },
+      });
+      viewerMemberCommunityIds = viewerMemberships.map((m) => m.communityId);
+    }
+
+    const visibilityWhere = {
+      OR: [
+        { isPublicDirectory: true },
+        ...(viewerId
+          ? [
+              { ownerId: viewerId },
+              { id: { in: viewerMemberCommunityIds } },
+            ]
+          : []),
+      ],
+    };
     const searchWhere = q
       ? {
           OR: [

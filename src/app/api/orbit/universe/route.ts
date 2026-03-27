@@ -2,6 +2,7 @@ import { HandleOwnerType, MembershipStatus, OrbitLevel } from "@prisma/client";
 import type { NextRequest } from "next/server";
 
 import { errJson, okJson } from "@/lib/api/server";
+import { auth } from "@/lib/auth/session";
 import { db } from "@/lib/db/client";
 import { resolveHandleNamesForOwners } from "@/lib/handle-registry";
 
@@ -44,15 +45,19 @@ type OrbitUniverseOk = {
  */
 export async function GET(_req: NextRequest) {
   try {
-    // Fetch public communities
+    // Get viewer session (optional — logged-out users see only public communities)
+    const session = await auth();
+    const viewerId = session?.user?.id ?? null;
+
+    // Fetch all communities
     const communityRows = await db.community.findMany({
-      where: { isPublicDirectory: true },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 100,
       select: {
         id: true,
         name: true,
         avatarUrl: true,
+        ownerId: true,
         isPublicDirectory: true,
         isMembershipOpen: true,
       },
@@ -126,11 +131,27 @@ export async function GET(_req: NextRequest) {
       }
     }
 
-    // Build communities array
+    // Determine which communities the viewer is a member of
+    const viewerCommunityIds = new Set<string>();
+    if (viewerId) {
+      for (const m of memberships) {
+        if (m.userId === viewerId) viewerCommunityIds.add(m.communityId);
+      }
+    }
+
+    // Build communities array — filter out private communities unless
+    // the viewer is the owner or an approved member
     const communities: OrbitCommunity[] = communityRows
       .map((c) => {
         const handle = handleByCommunityId.get(c.id);
         if (!handle) return null;
+
+        // Private communities are hidden from non-members
+        if (!c.isPublicDirectory) {
+          const isOwner = viewerId === c.ownerId;
+          const isMember = viewerCommunityIds.has(c.id);
+          if (!isOwner && !isMember) return null;
+        }
 
         const counts = orbitCounts.get(c.id) ?? { advocates: 0, contributors: 0, participants: 0, explorers: 0 };
         const { advocates, contributors, participants, explorers } = counts;
