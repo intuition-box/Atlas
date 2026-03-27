@@ -234,14 +234,12 @@ function evaluateClaimability(args: {
     return err(notAvailable({ reclaimUntil, availableAt }));
   }
 
-  // Cooldown window: nobody can claim.
-  if (now < row.reclaimUntil) {
-    return err(cooldown({ reclaimUntil, availableAt }));
-  }
-
-  // Reclaim window: only previous owner.
+  // Cooldown + reclaim window: previous owner can always reclaim.
+  // Other users must wait until the handle is fully public.
   if (now < row.availableAt) {
-    return sameLastOwner(row, claimant) ? ok(null) : err(reserved({ reclaimUntil, availableAt }));
+    return sameLastOwner(row, claimant) ? ok(null) : now < row.reclaimUntil
+      ? err(cooldown({ reclaimUntil, availableAt }))
+      : err(reserved({ reclaimUntil, availableAt }));
   }
 
   // Public.
