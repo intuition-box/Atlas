@@ -233,6 +233,8 @@ export function UniverseView({
     dragStart: null as { x: number; y: number } | null,
     pointerStartScreen: null as { x: number; y: number } | null,
     wasDrag: false,
+    isPanning: false,
+    panStart: null as { x: number; y: number; tx: number; ty: number } | null,
     pendingTapNodeId: null as string | null,
     hoveredNode: null as UniverseNode | null,
   });
@@ -941,6 +943,27 @@ export function UniverseView({
         return;
       }
 
+      // Canvas pan
+      if (s.panStart) {
+        const dx = e.clientX - s.panStart.x;
+        const dy = e.clientY - s.panStart.y;
+        if (!s.isPanning) {
+          // Jitter threshold — 8px before committing to pan
+          if (dx * dx + dy * dy < 64) return;
+          s.isPanning = true;
+          try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* ignore */ }
+        }
+        s.transform.x = s.panStart.tx + dx;
+        s.transform.y = s.panStart.ty + dy;
+        // Clear tooltip during pan
+        if (s.hoveredNode) {
+          s.hoveredNode = null;
+          setCommunityTooltip(null);
+        }
+        scheduleFrame();
+        return;
+      }
+
       // Hover detection
       const t = s.transform;
       const wx = (x - t.x) / t.k;
@@ -1024,6 +1047,10 @@ export function UniverseView({
           return;
         }
       }
+
+      // No node hit — start canvas pan
+      s.isPanning = false; // becomes true after jitter threshold
+      s.panStart = { x: e.clientX, y: e.clientY, tx: t.x, ty: t.y };
     },
     [scheduleFrame],
   );
@@ -1048,6 +1075,10 @@ export function UniverseView({
         draggedNode.fy = null;
         scheduleFrame();
       }
+
+      // Clear pan state
+      s.panStart = null;
+      s.isPanning = false;
     },
     [scheduleFrame],
   );
@@ -1149,7 +1180,8 @@ export function UniverseView({
      Cursor
   ──────────────────────────── */
 
-  const cursor = communityTooltip ? "pointer" : "default";
+  const s = stateRef.current;
+  const cursor = s.isPanning ? "grabbing" : communityTooltip ? "pointer" : "grab";
 
   /* ────────────────────────────
      Render
