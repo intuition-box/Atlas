@@ -19,17 +19,15 @@ import {
  * Controls who can create communities:
  * - Default (nothing set) → open for all onboarded users
  * - ALLOWED_COMMUNITY_CREATORS="id1,id2" → only those users
- * - COMMUNITY_CREATION_ENABLED=false → only ALLOWED_COMMUNITY_CREATORS (if set)
+ * - COMMUNITY_CREATION_DISABLED=true → only ALLOWED_COMMUNITY_CREATORS (if set), otherwise nobody
  */
 function isCreationAllowed(userId: string): boolean {
   const allowlist = (process.env.ALLOWED_COMMUNITY_CREATORS ?? "")
     .split(",").map((id) => id.trim()).filter(Boolean);
 
-  // If there's an allowlist, only those users can create
   if (allowlist.length > 0) return allowlist.includes(userId);
 
-  // No allowlist — check the feature flag (defaults to true)
-  return process.env.COMMUNITY_CREATION_ENABLED !== "false";
+  return process.env.COMMUNITY_CREATION_DISABLED !== "true";
 }
 
 export default async function NewCommunityLayout({
