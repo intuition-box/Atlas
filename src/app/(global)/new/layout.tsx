@@ -16,17 +16,20 @@ import {
 } from "@/components/ui/card";
 
 /**
- * Comma-separated list of user IDs allowed to create communities.
- * e.g. ALLOWED_COMMUNITY_CREATORS="cuid1,cuid2"
- * When unset or empty, the page is blocked for everyone.
+ * Controls who can create communities:
+ * - Default (nothing set) → open for all onboarded users
+ * - ALLOWED_COMMUNITY_CREATORS="id1,id2" → only those users
+ * - COMMUNITY_CREATION_ENABLED=false → only ALLOWED_COMMUNITY_CREATORS (if set)
  */
-function getAllowedUserIds(): Set<string> {
-  const raw = process.env.ALLOWED_COMMUNITY_CREATORS ?? "";
-  const ids = raw
-    .split(",")
-    .map((id) => id.trim())
-    .filter(Boolean);
-  return new Set(ids);
+function isCreationAllowed(userId: string): boolean {
+  const allowlist = (process.env.ALLOWED_COMMUNITY_CREATORS ?? "")
+    .split(",").map((id) => id.trim()).filter(Boolean);
+
+  // If there's an allowlist, only those users can create
+  if (allowlist.length > 0) return allowlist.includes(userId);
+
+  // No allowlist — check the feature flag (defaults to true)
+  return process.env.COMMUNITY_CREATION_ENABLED !== "false";
 }
 
 export default async function NewCommunityLayout({
@@ -35,9 +38,8 @@ export default async function NewCommunityLayout({
   children: React.ReactNode;
 }) {
   const { userId } = await requireOnboardedRedirect("/new");
-  const allowed = getAllowedUserIds();
 
-  if (!allowed.has(userId)) {
+  if (!isCreationAllowed(userId)) {
     return (
       <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
         <PageHeader

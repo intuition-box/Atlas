@@ -18,10 +18,10 @@ import { ProfileAvatar } from "@/components/common/profile-avatar"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Form, FormActions, FormField, FormMessage, fieldControlProps, useForm } from "@/components/ui/form"
+import { Form, FormField, fieldControlProps, useForm } from "@/components/ui/form"
 import { Users } from "lucide-react"
 import { Input } from "@/components/ui/input"
-import { Switch } from "@/components/ui/switch"
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 
 const FormSchema = z.object({
@@ -34,17 +34,15 @@ const FormSchema = z.object({
     // rely on server for full validation; we normalize for UX
     .max(32, "Handle is too long"),
   description: z.string().trim().max(1000, "Description is too long").optional(),
+  isMembershipOpen: z.boolean(),
+  isPublicDirectory: z.boolean(),
+  autoOrbitPlacement: z.boolean(),
 
   // Step 2
   avatarUrl: z.string().trim().url("Enter a valid URL").optional().or(z.literal("")),
-  isMembershipOpen: z.boolean(),
-  isPublicDirectory: z.boolean(),
   // Advanced: JSON as text; parsed on submit.
   membershipConfig: z.string().trim().optional(),
   orbitConfig: z.string().trim().optional(),
-
-  // Step 3 (UI only for now)
-  invitees: z.string().trim().optional(),
 })
 
 type FormValues = z.infer<typeof FormSchema>
@@ -105,12 +103,12 @@ export default function NewCommunityPage() {
       name: "",
       handle: "",
       description: "",
-      avatarUrl: "",
       isMembershipOpen: true,
       isPublicDirectory: true,
+      autoOrbitPlacement: false,
+      avatarUrl: "",
       membershipConfig: "",
       orbitConfig: "",
-      invitees: "",
     },
     mode: "onBlur",
   })
@@ -119,25 +117,24 @@ export default function NewCommunityPage() {
   const watchedName = form.watch("name")
   const watchedAvatarUrl = form.watch("avatarUrl")
 
-  const [step, setStep] = React.useState<1 | 2 | 3>(1)
+  const [step, setStep] = React.useState<1 | 2>(1)
   const [created, setCreated] = React.useState<CreatedCommunity | null>(null)
+  const [isNavigating, setIsNavigating] = React.useState(false)
 
-  const STEPS: Record<1 | 2 | 3, { title: string; description: string }> = {
+  const STEPS: Record<1 | 2, { title: string; description: string }> = {
     1: { title: "Basics", description: "Name, handle, and a short description." },
-    2: { title: "Avatar & access", description: "Add an avatar and choose visibility settings." },
-    3: { title: "Invite", description: "Optionally invite members now (you can do this later)." },
+    2: { title: "Avatar (optional)", description: "Add an avatar or skip — you can do this later in settings." },
   }
 
   const stepTitle = STEPS[step].title
   const stepDescription = STEPS[step].description
 
-  const STEP_FIELDS: Record<1 | 2 | 3, Array<keyof FormValues>> = {
-    1: ["name", "handle", "description"],
-    2: ["avatarUrl", "isMembershipOpen", "isPublicDirectory", "membershipConfig", "orbitConfig"],
-    3: ["invitees"],
+  const STEP_FIELDS: Record<1 | 2, Array<keyof FormValues>> = {
+    1: ["name", "handle", "description", "isMembershipOpen", "isPublicDirectory", "autoOrbitPlacement"],
+    2: ["avatarUrl", "membershipConfig", "orbitConfig"],
   }
 
-  function buildCreatePayload(values: Pick<FormValues, "name" | "handle" | "description">) {
+  function buildCreatePayload(values: Pick<FormValues, "name" | "handle" | "description" | "isMembershipOpen" | "isPublicDirectory" | "autoOrbitPlacement">) {
     const handleCheck = validateHandle(values.handle)
     if (!handleCheck.ok) {
       return err(handleCheck.error)
@@ -147,11 +144,10 @@ export default function NewCommunityPage() {
       name: values.name.trim(),
       handle: handleCheck.value,
       description: opt(values.description) ?? null,
-      // Create without avatar; we can update after upload.
       avatarUrl: null as string | null,
-      // Sensible defaults until Step 2 is completed.
-      isMembershipOpen: true,
-      isPublicDirectory: true,
+      isMembershipOpen: values.isMembershipOpen,
+      isPublicDirectory: values.isPublicDirectory,
+      autoOrbitPlacement: values.autoOrbitPlacement,
       membershipConfig: null as unknown,
       orbitConfig: null as unknown,
     })
@@ -232,76 +228,81 @@ export default function NewCommunityPage() {
   }
 
   async function goNext() {
+    if (isNavigating) return
+    setIsNavigating(true)
     form.clearErrors("root")
 
-    if (step === 1) {
-      const okStep = await form.trigger(STEP_FIELDS[1] as any)
-      if (!okStep) return
+    try {
+      if (step === 1) {
+        const okStep = await form.trigger(STEP_FIELDS[1] as any)
+        if (!okStep) return
 
-      const createdPayload = buildCreatePayload({
-        name: form.getValues("name"),
-        handle: form.getValues("handle"),
-        description: form.getValues("description"),
-      })
+        const createdPayload = buildCreatePayload({
+          name: form.getValues("name"),
+          handle: form.getValues("handle"),
+          description: form.getValues("description"),
+          isMembershipOpen: form.getValues("isMembershipOpen"),
+          isPublicDirectory: form.getValues("isPublicDirectory"),
+          autoOrbitPlacement: form.getValues("autoOrbitPlacement"),
+        })
 
-      if (!createdPayload.ok) {
-        form.setError("handle", { type: "validate", message: createdPayload.error.message })
-        return
-      }
-
-      // Create now so we have an ID for avatar uploads.
-      const result = await apiPost<CreateCommunityResponse>("/api/community/create", createdPayload.value)
-
-      if (result.ok) {
-        setCreated({ id: result.value.community.id, handle: result.value.community.handle })
-        setStep(2)
-        return
-      }
-
-      if (result.error && typeof result.error === "object" && "status" in result.error) {
-        const parsed = parseApiError(result.error)
-        const returnTo = ROUTES.communityNew ?? "/new"
-
-        if (parsed.status === 401) {
-          router.push(withReturnTo(ROUTES.signIn, returnTo))
-          return
-        }
-        if (parsed.status === 428) {
-          router.push(withReturnTo(ROUTES.onboarding, returnTo))
+        if (!createdPayload.ok) {
+          form.setError("handle", { type: "validate", message: createdPayload.error.message })
           return
         }
 
-        if (parsed.fieldErrors) {
-          for (const [key, message] of Object.entries(parsed.fieldErrors)) {
-            if (key === "name" || key === "handle" || key === "description") {
-              form.setError(key as any, { type: "server", message: String(message) })
+        // Create now so we have an ID for avatar uploads.
+        const result = await apiPost<CreateCommunityResponse>("/api/community/create", createdPayload.value)
+
+        if (result.ok) {
+          setCreated({ id: result.value.community.id, handle: result.value.community.handle })
+          setStep(2)
+          return
+        }
+
+        if (result.error && typeof result.error === "object" && "status" in result.error) {
+          const parsed = parseApiError(result.error)
+          const returnTo = ROUTES.communityNew ?? "/new"
+
+          if (parsed.status === 401) {
+            router.push(withReturnTo(ROUTES.signIn, returnTo))
+            return
+          }
+          if (parsed.status === 428) {
+            router.push(withReturnTo(ROUTES.onboarding, returnTo))
+            return
+          }
+
+          if (parsed.fieldErrors) {
+            for (const [key, message] of Object.entries(parsed.fieldErrors)) {
+              if (key === "name" || key === "handle" || key === "description") {
+                form.setError(key as any, { type: "server", message: String(message) })
+              }
             }
           }
+
+          form.setError("root", { type: "server", message: parsed.formError || "Couldn't create community." })
+          return
         }
 
+        const parsed = parseApiError(result.error)
         form.setError("root", { type: "server", message: parsed.formError || "Couldn't create community." })
         return
       }
 
-      const parsed = parseApiError(result.error)
-      form.setError("root", { type: "server", message: parsed.formError || "Couldn't create community." })
-      return
+      if (step === 2) {
+        const okStep = await form.trigger(STEP_FIELDS[2] as any)
+        if (!okStep) return
+
+        // Persist avatar before navigating to the community page.
+        await updateCommunity(form.getValues())
+
+        if (created) router.push(communityPath(created.handle))
+        return
+      }
+    } finally {
+      setIsNavigating(false)
     }
-
-    if (step === 2) {
-      const okStep = await form.trigger(STEP_FIELDS[2] as any)
-      if (!okStep) return
-
-      // Persist settings + avatarUrl (if present) before moving on.
-      await updateCommunity(form.getValues())
-
-      setStep(3)
-      return
-    }
-  }
-
-  function goBack() {
-    setStep((s) => (s === 1 ? 1 : ((s - 1) as 1 | 2 | 3)))
   }
 
   const handlePreview = React.useMemo(() => normalizeHandle(watchedHandle || ""), [watchedHandle])
@@ -387,7 +388,13 @@ export default function NewCommunityPage() {
     form.setError("root", { type: "server", message: parsed.formError || "Couldn't create community." })
   }
 
-  const canSubmit = step === 3 && !form.formState.isSubmitting
+  const canSubmit = step === 2 && !form.formState.isSubmitting
+
+  /** Skip remaining steps and go to the community page. */
+  function skipToFinish() {
+    if (!created) return
+    router.push(communityPath(created.handle))
+  }
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col mt-24 gap-6 pb-40">
@@ -402,28 +409,7 @@ export default function NewCommunityPage() {
             />
           }
           title="New Community"
-          description={`Step ${step} of 3 · ${stepTitle}`}
-          actionsAsFormActions={false}
-          actions={
-            <FormActions>
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={goBack}
-                className={step > 1 ? "" : "hidden"}
-              >
-                Back
-              </Button>
-
-              <Button
-                type={step < 3 ? "button" : "submit"}
-                onClick={step < 3 ? goNext : undefined}
-                disabled={step === 3 ? !canSubmit : false}
-              >
-                {step < 3 ? "Next" : form.formState.isSubmitting ? "Creating..." : "Create community"}
-              </Button>
-            </FormActions>
-          }
+          description={`Step ${step} of 2 · ${stepTitle}`}
         />
 
         {form.formState.errors.root?.message ? (
@@ -484,151 +470,119 @@ export default function NewCommunityPage() {
                   />
                 )}
               />
+              <div className="flex items-center justify-between gap-4 pt-4">
+                <div className="flex items-center gap-3">
+                  <FormField<FormValues, "isPublicDirectory">
+                    name="isPublicDirectory"
+                    render={({ field }) => (
+                      <Select
+                        value={field.value ? "Public" : "Private"}
+                        onValueChange={(v) => field.onChange(v === "Public")}
+                      >
+                        <SelectTrigger size="sm">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            <SelectItem value="Public">Public</SelectItem>
+                            <SelectItem value="Private">Private</SelectItem>
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    )}
+                  />
+                  <FormField<FormValues, "isMembershipOpen">
+                    name="isMembershipOpen"
+                    render={({ field }) => (
+                      <Select
+                        value={field.value ? "Open" : "Closed"}
+                        onValueChange={(v) => field.onChange(v === "Open")}
+                      >
+                        <SelectTrigger size="sm">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            <SelectItem value="Open">Open</SelectItem>
+                            <SelectItem value="Closed">Closed</SelectItem>
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    )}
+                  />
+                </div>
+                <Button type="button" onClick={goNext} disabled={isNavigating}>
+                  {isNavigating ? "Saving…" : "Next"}
+                </Button>
+              </div>
             </CardContent>
           </Card>
         ) : null}
 
         {step === 2 ? (
-          <>
-            <Card>
-              <CardHeader>
-                <CardTitle>Avatar</CardTitle>
-                <CardDescription>Add an image that represents your community.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-start gap-4">
-                  <AvatarDropzone
-                    value={watchedAvatarUrl || null}
-                    alt={watchedName || "Community"}
-                    fallbackIcon={Users}
-                    onChange={(url) => {
-                      form.clearErrors("root")
-                      form.setValue("avatarUrl", url ?? "", { shouldDirty: true, shouldTouch: true })
-                    }}
-                    sign={async (file) => {
-                      if (!created?.id) {
-                        throw new Error("Create the community first before uploading an avatar.")
-                      }
-                      const signed = await apiPost<UploadSignResponse>("/api/upload/sign", {
-                        type: "community.avatar",
-                        communityId: created?.id ?? null,
-                        contentType: file.type,
-                        size: file.size,
-                      })
+          <Card>
+            <CardHeader>
+              <CardTitle>Avatar</CardTitle>
+              <CardDescription>A photo or image that represents the community across the platform.</CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-6">
+              <div className="flex justify-center rounded-xl border border-dashed border-border p-6">
+                <AvatarDropzone
+                  value={watchedAvatarUrl || null}
+                  alt={watchedName || "Community"}
+                  fallbackIcon={Users}
+                  className="flex flex-col items-center text-center"
+                  upload={async (file) => {
+                    if (!created?.id) {
+                      throw new Error("Create the community first before uploading an avatar.")
+                    }
+                    const fd = new FormData()
+                    fd.set("file", file)
+                    fd.set("filename", file.name)
+                    fd.set("contentType", file.type || "application/octet-stream")
+                    fd.set("size", String(file.size))
+                    fd.set("type", "community.avatar")
+                    fd.set("communityId", created.id)
 
-                      if (!signed.ok) {
-                        const err = signed.error
-                        const parsed = parseApiError(err)
-                        throw new Error(parsed.formError || "Couldn’t upload avatar.")
-                      }
+                    const resp = await fetch("/api/upload/sign", { method: "POST", body: fd })
+                    const json = await resp.json().catch(() => null)
 
-                      const upload = signed.value.upload
-                      if (!upload?.uploadUrl || !upload?.publicUrl) {
-                        throw new Error("Upload response was invalid.")
-                      }
+                    if (!resp.ok || !json?.ok) {
+                      const parsed = parseApiError(json?.error ?? json)
+                      throw new Error(parsed.formError || "Couldn’t upload avatar.")
+                    }
 
-                      return { uploadUrl: upload.uploadUrl, publicUrl: upload.publicUrl }
-                    }}
-                    onError={(message) => {
-                      form.setError("root", { type: "server", message })
-                    }}
-                  />
+                    const publicUrl = json.data?.publicUrl ?? json.data?.upload?.publicUrl ?? json.publicUrl
+                    if (!publicUrl) throw new Error("Upload completed but public URL is missing.")
 
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium">Preview</div>
-                    <div className="text-muted-foreground mt-1 text-sm">
-                      {watchedName?.trim() ? watchedName.trim() : "Community name"}
-                      {handlePreview ? <span className="text-muted-foreground"> · c/{handlePreview}</span> : null}
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Privacy & access</CardTitle>
-                <CardDescription>Control what non-members can see and whether applications are allowed.</CardDescription>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-4">
-                <FormField<FormValues, "isPublicDirectory">
-                  name="isPublicDirectory"
-                  label="Public directory"
-                  description="If enabled, anyone can view your member orbit."
-                  render={({ field }) => (
-                    <div className="flex items-center justify-between gap-3 rounded-2xl border border-border/60 p-4">
-                      <div className="flex flex-col gap-1">
-                        <div className="text-sm font-medium">Public directory</div>
-                        <div className="text-xs text-muted-foreground">If off, only approved members can see the member directory.</div>
-                      </div>
-                      <Switch
-                        checked={!!field.value}
-                        onCheckedChange={(v) => field.onChange(Boolean(v))}
-                        data-slot="community-public-directory"
-                      />
-                    </div>
-                  )}
+                    return { publicUrl }
+                  }}
+                  onChange={(url) => {
+                    form.clearErrors("root")
+                    form.setValue("avatarUrl", url ?? "", { shouldDirty: true, shouldTouch: true })
+                  }}
+                  onError={(message) => {
+                    form.setError("root", { type: "server", message })
+                  }}
+                  onDelete={() => {
+                    form.clearErrors("root")
+                    form.setValue("avatarUrl", "", { shouldDirty: true, shouldTouch: true })
+                  }}
+                  hasImage={!!watchedAvatarUrl}
                 />
-
-                <FormField<FormValues, "isMembershipOpen">
-                  name="isMembershipOpen"
-                  label="Accept applications"
-                  description="If disabled, new users can’t apply to join."
-                  render={({ field }) => (
-                    <div className="flex items-center justify-between gap-3 rounded-2xl border border-border/60 p-4">
-                      <div className="flex flex-col gap-1">
-                        <div className="text-sm font-medium">Accepting applications</div>
-                        <div className="text-xs text-muted-foreground">If off, hide apply and treat as closed.</div>
-                      </div>
-                      <Switch
-                        checked={!!field.value}
-                        onCheckedChange={(v) => field.onChange(Boolean(v))}
-                        data-slot="community-membership-open"
-                      />
-                    </div>
-                  )}
-                />
-              </CardContent>
-            </Card>
-          </>
+              </div>
+              <div className="flex items-center justify-end gap-2">
+                <Button type="button" variant="ghost" onClick={skipToFinish}>
+                  Skip
+                </Button>
+                <Button type="button" onClick={goNext} disabled={isNavigating}>
+                  {isNavigating ? "Saving…" : "Finish"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         ) : null}
 
-        {step === 3 ? (
-          <>
-            <Card>
-              <CardHeader>
-                <CardTitle>Invite members</CardTitle>
-                <CardDescription>Optional. Paste emails or leave empty for now.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <FormField<FormValues, "invitees">
-                  name="invitees"
-                  label="Emails"
-                  description="Comma-separated list of email addresses to invite."
-                  render={({ id, field, fieldState }) => (
-                    <Textarea
-                      id={id}
-                      rows={4}
-                      value={String(field.value ?? "")}
-                      onChange={(e) => field.onChange(e.target.value)}
-                      aria-invalid={fieldState.invalid}
-                      placeholder="alex@example.com, sam@example.com"
-                    />
-                  )}
-                />
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>What happens next</CardTitle>
-                <CardDescription>
-                  You can invite people later from your community settings. This step doesn&apos;t send invites yet.
-                </CardDescription>
-              </CardHeader>
-            </Card>
-          </>
-        ) : null}
       </Form>
     </div>
   )
