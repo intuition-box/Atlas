@@ -147,9 +147,9 @@ function CommunityLayoutShell({ children }: { children: React.ReactNode }) {
             <PageHeader
               leading={
                 ctx.leadingOverride ?? (
-                  avatarUrl
-                    ? <ProfileAvatar type="community" src={avatarUrl} name={displayName} className="h-12 w-12" />
-                    : <Skeleton className="size-12 rounded-full" />
+                  isLoading
+                    ? <Skeleton className="size-12 rounded-full" />
+                    : <ProfileAvatar type="community" src={avatarUrl} name={displayName} className="h-12 w-12" />
                 )
               }
               title={displayName}
