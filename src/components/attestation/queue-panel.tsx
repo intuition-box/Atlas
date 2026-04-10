@@ -198,22 +198,15 @@ export function AttestationQueuePanel() {
       return;
     }
 
-    // Ensure wallet is on the Intuition chain
-    if (chainId !== INTUITION_CHAIN.id) {
-      try {
-        await switchChainAsync({ chainId: INTUITION_CHAIN.id });
-      } catch (switchErr) {
-        // eslint-disable-next-line no-console
-        console.error("[queue-panel] Chain switch failed", {
-          currentChainId: chainId,
-          targetChainId: INTUITION_CHAIN.id,
-          error: switchErr,
-        });
-        setError(
+    // Always request chain switch — wagmi's useChainId() can be stale
+    // when multiple wallet extensions are installed
+    try {
+      await switchChainAsync({ chainId: INTUITION_CHAIN.id });
+    } catch {
+      setError(
           `Switch your wallet to ${INTUITION_CHAIN.name} and try again.`,
         );
         return;
-      }
     }
 
     setIsMinting(true);

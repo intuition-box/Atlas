@@ -45,6 +45,8 @@ import {
 import { AttestationQueuePanel } from "@/components/attestation/queue-panel";
 import { AttestationQueueButton } from "@/components/attestation/queue-button";
 import { AttestationDock } from "@/components/attestation/attestation-dock";
+import { NotificationButton } from "@/components/notification/notification-button";
+import { NotificationPanel } from "@/components/notification/notification-panel";
 import { TourHelpButton } from "@/components/tour/tour-help-button";
 
 /* ────────────────────────────
@@ -195,6 +197,9 @@ export function NavigationController({
           {/* Attestation Cart — visible to all, disabled when logged out */}
           {showControls && <AttestationQueueButton disabled={!isAuthed} />}
 
+          {/* Notifications — visible to all, disabled when logged out */}
+          {showControls && <NotificationButton disabled={!isAuthed} />}
+
           {/* Guided Tours */}
           {showControls && <TourHelpButton />}
 
@@ -266,6 +271,9 @@ export function NavigationController({
 
       {/* Attestation Queue Panel (authed only) */}
       {isAuthed && <AttestationQueuePanel />}
+
+      {/* Notification Panel (authed only) */}
+      {isAuthed && <NotificationPanel />}
     </div>
   );
 }

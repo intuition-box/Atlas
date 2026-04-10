@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 
-import { apiPost } from "@/lib/api/client"
+import { apiGet, apiPost } from "@/lib/api/client"
 import { parseApiError } from "@/lib/api/errors"
 import { err, ok } from "@/lib/api/shapes"
 import { normalizeHandle, validateHandle } from "@/lib/handle"
@@ -117,21 +117,54 @@ export default function NewCommunityPage() {
   const watchedName = form.watch("name")
   const watchedAvatarUrl = form.watch("avatarUrl")
 
-  const [step, setStep] = React.useState<1 | 2>(1)
+  const [step, setStep] = React.useState<1 | 2 | 3>(1)
   const [created, setCreated] = React.useState<CreatedCommunity | null>(null)
   const [isNavigating, setIsNavigating] = React.useState(false)
 
-  const STEPS: Record<1 | 2, { title: string; description: string }> = {
+  // Step 3: invite users
+  const [inviteQuery, setInviteQuery] = React.useState("")
+  const [searchResults, setSearchResults] = React.useState<Array<{ id: string; handle: string | null; name: string | null; avatarUrl: string | null }>>([])
+  const [selectedUsers, setSelectedUsers] = React.useState<Array<{ id: string; handle: string | null; name: string | null; avatarUrl: string | null }>>([])
+  const [isSearching, setIsSearching] = React.useState(false)
+  const [isSendingInvites, setIsSendingInvites] = React.useState(false)
+  const searchTimeoutRef = React.useRef<ReturnType<typeof setTimeout>>(null)
+
+  // Debounced user search
+  React.useEffect(() => {
+    if (!inviteQuery.trim() || inviteQuery.trim().length < 2) {
+      setSearchResults([])
+      return
+    }
+
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current)
+
+    searchTimeoutRef.current = setTimeout(async () => {
+      setIsSearching(true)
+      const result = await apiGet<{ users: typeof searchResults }>("/api/user/search", { q: inviteQuery.trim(), take: 8, communityId: created?.id })
+      if (result.ok) {
+        // Filter out already selected users
+        const selectedIds = new Set(selectedUsers.map((u) => u.id))
+        setSearchResults(result.value.users.filter((u) => !selectedIds.has(u.id)))
+      }
+      setIsSearching(false)
+    }, 300)
+
+    return () => { if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current) }
+  }, [inviteQuery, selectedUsers])
+
+  const STEPS: Record<1 | 2 | 3, { title: string; description: string }> = {
     1: { title: "Basics", description: "Name, handle, and a short description." },
     2: { title: "Avatar (optional)", description: "Add an avatar or skip — you can do this later in settings." },
+    3: { title: "Invite (optional)", description: "Invite people to join your community." },
   }
 
   const stepTitle = STEPS[step].title
   const stepDescription = STEPS[step].description
 
-  const STEP_FIELDS: Record<1 | 2, Array<keyof FormValues>> = {
+  const STEP_FIELDS: Record<1 | 2 | 3, Array<keyof FormValues>> = {
     1: ["name", "handle", "description", "isMembershipOpen", "isPublicDirectory", "autoOrbitPlacement"],
     2: ["avatarUrl", "membershipConfig", "orbitConfig"],
+    3: [],
   }
 
   function buildCreatePayload(values: Pick<FormValues, "name" | "handle" | "description" | "isMembershipOpen" | "isPublicDirectory" | "autoOrbitPlacement">) {
@@ -294,8 +327,25 @@ export default function NewCommunityPage() {
         const okStep = await form.trigger(STEP_FIELDS[2] as any)
         if (!okStep) return
 
-        // Persist avatar before navigating to the community page.
+        // Persist avatar before moving to invite step.
         await updateCommunity(form.getValues())
+
+        setStep(3)
+        return
+      }
+
+      if (step === 3) {
+        // Send invitations (if any selected)
+        if (created && selectedUsers.length > 0) {
+          setIsSendingInvites(true)
+          for (const user of selectedUsers) {
+            await apiPost("/api/invitation/send", {
+              communityId: created.id,
+              userId: user.id,
+            })
+          }
+          setIsSendingInvites(false)
+        }
 
         if (created) router.push(communityPath(created.handle))
         return
@@ -388,7 +438,7 @@ export default function NewCommunityPage() {
     form.setError("root", { type: "server", message: parsed.formError || "Couldn't create community." })
   }
 
-  const canSubmit = step === 2 && !form.formState.isSubmitting
+  const canSubmit = step === 3 && !form.formState.isSubmitting
 
   /** Skip remaining steps and go to the community page. */
   function skipToFinish() {
@@ -409,7 +459,7 @@ export default function NewCommunityPage() {
             />
           }
           title="New Community"
-          description={`Step ${step} of 2 · ${stepTitle}`}
+          description={`Step ${step} of 3 · ${stepTitle}`}
         />
 
         {form.formState.errors.root?.message ? (
@@ -576,7 +626,92 @@ export default function NewCommunityPage() {
                   Skip
                 </Button>
                 <Button type="button" onClick={goNext} disabled={isNavigating}>
-                  {isNavigating ? "Saving…" : "Finish"}
+                  {isNavigating ? "Saving…" : "Next"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {step === 3 ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Invite members</CardTitle>
+              <CardDescription>Search for Atlas users to invite to your community.</CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4">
+              {/* Search input */}
+              <div className="relative">
+                <Input
+                  placeholder="Search by name or handle…"
+                  value={inviteQuery}
+                  onChange={(e) => setInviteQuery(e.target.value)}
+                />
+                {isSearching && (
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                    Searching…
+                  </div>
+                )}
+              </div>
+
+              {/* Search results */}
+              {searchResults.length > 0 && (
+                <div className="flex flex-col gap-1 rounded-lg border border-border p-1">
+                  {searchResults.map((user) => (
+                    <button
+                      key={user.id}
+                      type="button"
+                      className="flex items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-muted/50 transition-colors text-left"
+                      onClick={() => {
+                        setSelectedUsers((prev) => [...prev, user])
+                        setSearchResults((prev) => prev.filter((u) => u.id !== user.id))
+                        setInviteQuery("")
+                      }}
+                    >
+                      <ProfileAvatar type="user" src={user.avatarUrl} name={user.name || user.handle || "User"} size="sm" />
+                      <div className="min-w-0">
+                        <span className="font-medium">{user.name || "Unnamed"}</span>
+                        {user.handle && <span className="text-muted-foreground ml-1">@{user.handle}</span>}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Selected users */}
+              {selectedUsers.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {selectedUsers.map((user) => (
+                    <span
+                      key={user.id}
+                      className="inline-flex items-center gap-1.5 rounded-full bg-muted px-3 py-1 text-xs font-medium"
+                    >
+                      <ProfileAvatar type="user" src={user.avatarUrl} name={user.name || "User"} size="sm" />
+                      {user.handle ? `@${user.handle}` : user.name || "User"}
+                      <button
+                        type="button"
+                        className="ml-0.5 text-muted-foreground hover:text-foreground"
+                        onClick={() => setSelectedUsers((prev) => prev.filter((u) => u.id !== user.id))}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {selectedUsers.length === 0 && !inviteQuery && (
+                <p className="text-xs text-muted-foreground text-center py-4">
+                  No users selected. You can invite people later from community settings.
+                </p>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <Button type="button" variant="ghost" onClick={skipToFinish}>
+                  Skip
+                </Button>
+                <Button type="button" onClick={goNext} disabled={isNavigating || isSendingInvites}>
+                  {isSendingInvites ? "Sending invites…" : selectedUsers.length > 0 ? `Invite ${selectedUsers.length} & finish` : "Finish"}
                 </Button>
               </div>
             </CardContent>

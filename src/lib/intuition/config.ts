@@ -22,20 +22,15 @@ import {
    Environment Flags
 ──────────────────────────── */
 
-export const IS_DEV = process.env.NODE_ENV === "development";
-
 export const INTUITION_ENABLED =
   process.env.NEXT_PUBLIC_INTUITION_ENABLED === "true";
 
 /**
- * Chain selection strategy:
- *
- * Priority order:
- * 1. Explicit NEXT_PUBLIC_INTUITION_TESTNET flag
- * 2. Development fallback
+ * Chain selection — controlled entirely by env var.
+ * NEXT_PUBLIC_INTUITION_TESTNET=true → testnet, anything else → mainnet.
  */
 export const USE_TESTNET =
-  process.env.NEXT_PUBLIC_INTUITION_TESTNET === "true" || IS_DEV;
+  process.env.NEXT_PUBLIC_INTUITION_TESTNET === "true";
 
 /* ────────────────────────────
    Chain Resolution

@@ -19,8 +19,8 @@
 import {
   createPublicClient,
   createWalletClient,
-  http,
   custom,
+  http,
   getAddress,
   toHex,
   formatEther,
@@ -76,7 +76,6 @@ import type {
   BatchMintResult,
   BatchWithdrawItem,
   BatchWithdrawResult,
-  EthereumProvider,
 } from "./types";
 
 import { IntuitionError } from "./types";
@@ -86,10 +85,32 @@ import { IntuitionError } from "./types";
    LAYER: provider
 ════════════════════════════════════════════════ */
 
-/** Get the injected Ethereum provider, or null if unavailable. */
-function getProvider(): EthereumProvider | null {
-  if (typeof window === "undefined") return null;
-  return (window as Window & { ethereum?: EthereumProvider }).ethereum ?? null;
+/**
+ * Wagmi connector wallet client — set by the WalletProvider when a wallet connects.
+ * This avoids the multi-wallet conflict where MetaMask, Rabby, Phantom etc.
+ * all fight over `window.ethereum`.
+ */
+let _walletClientOverride: WalletClient | null = null;
+
+/**
+ * Inject the active wallet from the wagmi connector.
+ * Called from WalletProvider's ConnectorSync component.
+ *
+ * Receives the raw provider from `connector.getProvider()` and the
+ * connected address, then builds a proper viem WalletClient with
+ * writeContract support.
+ */
+export function setWalletClient(data: { address: Address; provider: unknown } | null): void {
+  if (!data) {
+    _walletClientOverride = null;
+    return;
+  }
+
+  _walletClientOverride = createWalletClient({
+    account: data.address,
+    chain: INTUITION_CHAIN,
+    transport: custom(data.provider as Parameters<typeof custom>[0]),
+  });
 }
 
 /* ════════════════════════════════════════════════
@@ -101,36 +122,20 @@ const publicClient: PublicClient = createPublicClient({
   transport: http(INTUITION_CHAIN.rpcUrls.default.http[0]),
 });
 
-/**
- * Create a wallet client from the browser's injected provider.
- * Returns null if no wallet is available.
- */
-async function createBrowserWalletClient(): Promise<WalletClient | null> {
-  const ethereum = getProvider();
-  if (!ethereum) return null;
-
-  const accounts = (await ethereum.request({ method: "eth_accounts" })) as Address[];
-  if (accounts.length === 0) return null;
-
-  return createWalletClient({
-    account: accounts[0],
-    chain: INTUITION_CHAIN,
-    transport: custom(ethereum as Parameters<typeof custom>[0]),
-  });
-}
-
 /** Require a connected wallet client — throws if unavailable. */
-async function requireWalletClient(): Promise<WalletClient> {
+function requireWalletClient(): WalletClient {
   if (!INTUITION_ENABLED) {
     throw new IntuitionError("NETWORK_ERROR", "Intuition integration is not enabled");
   }
 
-  const walletClient = await createBrowserWalletClient();
-  if (!walletClient) {
-    throw new IntuitionError("WALLET_NOT_CONNECTED", "Please connect your wallet");
+  if (!_walletClientOverride) {
+    throw new IntuitionError(
+      "WALLET_NOT_CONNECTED",
+      "No wallet detected. Click the wallet button in your browser to connect, then try again.",
+    );
   }
 
-  return walletClient;
+  return _walletClientOverride;
 }
 
 /* ════════════════════════════════════════════════
@@ -194,43 +199,22 @@ async function getTripleCost(): Promise<bigint> {
 ════════════════════════════════════════════════ */
 
 /**
- * Ensure the injected provider is on the Intuition chain.
- * Auto-adds the chain if unknown to the wallet.
+ * Ensure the wallet client is on the Intuition chain.
+ * The chain switch is handled by wagmi/RainbowKit at the UI layer
+ * (queue-panel, attestations page) before calling our functions.
  */
 async function ensureCorrectChain(): Promise<void> {
-  const wallet = await getWalletState();
-  if (wallet.chainId === INTUITION_CHAIN.id) return;
-
-  const ethereum = getProvider();
-  if (!ethereum) {
-    throw new IntuitionError("WALLET_NOT_CONNECTED", "No wallet extension found");
+  // Chain switching is handled by wagmi/RainbowKit at the UI layer
+  // (queue-panel, attestations page) before calling our functions.
+  // This is a safety check — if the wallet client's chain doesn't match,
+  // we throw rather than silently sending transactions to the wrong chain.
+  const client = _walletClientOverride;
+  if (!client) {
+    throw new IntuitionError("WALLET_NOT_CONNECTED", "No wallet connected");
   }
 
-  const hexChainId = `0x${INTUITION_CHAIN.id.toString(16)}`;
-
-  try {
-    await ethereum.request({
-      method: "wallet_switchEthereumChain",
-      params: [{ chainId: hexChainId }],
-    });
-  } catch (error) {
-    // 4902 = chain not added to wallet — add it
-    if ((error as { code?: number }).code === 4902) {
-      await ethereum.request({
-        method: "wallet_addEthereumChain",
-        params: [{
-          chainId: hexChainId,
-          chainName: INTUITION_CHAIN.name,
-          nativeCurrency: INTUITION_CHAIN.nativeCurrency,
-          rpcUrls: [INTUITION_CHAIN.rpcUrls.default.http[0]],
-          blockExplorerUrls: INTUITION_CHAIN.blockExplorers
-            ? [INTUITION_CHAIN.blockExplorers.default.url]
-            : undefined,
-        }],
-      });
-    } else {
-      throw new IntuitionError("WRONG_CHAIN", `Please switch to ${INTUITION_CHAIN.name}`);
-    }
+  if (client.chain?.id !== INTUITION_CHAIN.id) {
+    throw new IntuitionError("WRONG_CHAIN", `Please switch to ${INTUITION_CHAIN.name}`);
   }
 }
 
@@ -819,28 +803,18 @@ export async function withdrawAttestations(
    LAYER: wallet state
 ════════════════════════════════════════════════ */
 
-/** Get current wallet state (connection + chain). */
-export async function getWalletState(): Promise<WalletState> {
-  const ethereum = getProvider();
-  if (!ethereum) {
+/** Get current wallet state from the wagmi connector. */
+export function getWalletState(): WalletState {
+  const client = _walletClientOverride;
+  if (!client?.account) {
     return { isConnected: false, address: null, chainId: null };
   }
 
-  try {
-    const accounts = (await ethereum.request({ method: "eth_accounts" })) as string[];
-    if (accounts.length === 0) {
-      return { isConnected: false, address: null, chainId: null };
-    }
-
-    const chainIdHex = (await ethereum.request({ method: "eth_chainId" })) as string;
-    return {
-      isConnected: true,
-      address: accounts[0] as Address,
-      chainId: parseInt(chainIdHex, 16),
-    };
-  } catch {
-    return { isConnected: false, address: null, chainId: null };
-  }
+  return {
+    isConnected: true,
+    address: client.account.address,
+    chainId: client.chain?.id ?? null,
+  };
 }
 
 /* ════════════════════════════════════════════════

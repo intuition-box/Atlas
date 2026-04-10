@@ -3,6 +3,7 @@ import {
   Ban,
   FileText,
   Info,
+  Mail,
   Orbit,
   Settings,
   Shield,
@@ -15,6 +16,7 @@ import {
   communityActivityPath,
   communityApplicationsPath,
   communityBansPath,
+  communityInvitesPath,
   communityMembersPath,
   communityOrbitPath,
   communityPath,
@@ -36,6 +38,7 @@ export function communityNav(handle: string): NavItem[] {
 function communityAdminNav(handle: string): NavItem[] {
   return [
     { label: "Applications", href: communityApplicationsPath(handle), icon: FileText, activeColor: "text-amber-500", activeBg: "bg-amber-500/10" },
+    { label: "Invites", href: communityInvitesPath(handle), icon: Mail, activeColor: "text-amber-500", activeBg: "bg-amber-500/10" },
     { label: "Bans", href: communityBansPath(handle), icon: Ban, activeColor: "text-amber-500", activeBg: "bg-amber-500/10" },
     { label: "Permissions", href: communityPermissionsPath(handle), icon: Shield, activeColor: "text-amber-500", activeBg: "bg-amber-500/10" },
     { label: "Settings", href: communitySettingsPath(handle), icon: Settings, activeColor: "text-amber-500", activeBg: "bg-amber-500/10" },
@@ -45,6 +48,7 @@ function communityAdminNav(handle: string): NavItem[] {
 /** Nav label → required permission. */
 const ADMIN_NAV_PERMISSIONS: Record<string, PermissionKey> = {
   Applications: "membership.review",
+  Invites: "membership.review",
   Bans: "membership.remove",
   Settings: "community.update",
   Permissions: "community.permissions",

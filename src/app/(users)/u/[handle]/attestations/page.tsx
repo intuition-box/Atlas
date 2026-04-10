@@ -607,13 +607,11 @@ export default function AttestationsPage() {
     }
 
     // Ensure wallet is on the Intuition chain
-    if (chainId !== INTUITION_CHAIN.id) {
-      try {
-        await switchChainAsync({ chainId: INTUITION_CHAIN.id })
-      } catch {
-        setMintError(`Switch your wallet to ${INTUITION_CHAIN.name} and try again.`)
-        return
-      }
+    try {
+      await switchChainAsync({ chainId: INTUITION_CHAIN.id })
+    } catch {
+      setMintError(`Switch your wallet to ${INTUITION_CHAIN.name} and try again.`)
+      return
     }
 
     setMintError(null)
@@ -675,13 +673,11 @@ export default function AttestationsPage() {
     }
 
     // Ensure wallet is on the Intuition chain
-    if (chainId !== INTUITION_CHAIN.id) {
-      try {
-        await switchChainAsync({ chainId: INTUITION_CHAIN.id })
-      } catch {
-        setMintError(`Switch your wallet to ${INTUITION_CHAIN.name} and try again.`)
-        return
-      }
+    try {
+      await switchChainAsync({ chainId: INTUITION_CHAIN.id })
+    } catch {
+      setMintError(`Switch your wallet to ${INTUITION_CHAIN.name} and try again.`)
+      return
     }
 
     setIsMinting(true)

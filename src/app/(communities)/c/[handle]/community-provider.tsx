@@ -8,6 +8,17 @@ import { normalizeHandle, validateHandle } from "@/lib/handle"
 
 import type { ToolbarAction, ViewSwitch } from "@/components/common/page-toolbar"
 
+export type InvitationItem = {
+  id: string
+  status: string
+  message: string | null
+  createdAt: string
+  acceptedAt: string | null
+  declinedAt: string | null
+  invitedUser: { id: string; handle: string | null; name: string | null; avatarUrl: string | null }
+  invitedByUser: { id: string; handle: string | null; name: string | null; avatarUrl: string | null }
+}
+
 // === CANONICAL COMMUNITY DATA TYPE ===
 
 /** The full response shape from `/api/community/get`, used as the single source of truth. */
@@ -79,6 +90,11 @@ export type CommunityContextValue = {
   canViewDirectory: boolean
   viewerMembership: CommunityData["viewerMembership"]
   orbitMembers: CommunityData["orbitMembers"]
+
+  // Invitations (fetched at layout level for admins)
+  invitations: InvitationItem[]
+  setInvitations: React.Dispatch<React.SetStateAction<InvitationItem[]>>
+  invitationsLoaded: boolean
 
   // Toolbar slot — pages inject their own actions/viewSwitch
   toolbarSlot: ToolbarSlotValue | null
@@ -157,6 +173,10 @@ export function CommunityProvider({ handle, children }: CommunityProviderProps) 
   const [headerMode, setHeaderMode] = React.useState<"full" | "toolbar-only">("full")
   const [leadingOverride, setLeadingOverride] = React.useState<React.ReactNode | null>(null)
 
+  // Invitations
+  const [invitations, setInvitations] = React.useState<InvitationItem[]>([])
+  const [invitationsLoaded, setInvitationsLoaded] = React.useState(false)
+
   // Fetch counter for refetch
   const [fetchKey, setFetchKey] = React.useState(0)
 
@@ -210,6 +230,25 @@ export function CommunityProvider({ handle, children }: CommunityProviderProps) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [normalized, fetchKey])
 
+  // Fetch invitations when community is ready and viewer is admin
+  React.useEffect(() => {
+    const communityId = data?.community?.id
+    const isAdmin = data?.isAdmin
+    if (!communityId || !isAdmin) {
+      setInvitationsLoaded(true)
+      return
+    }
+
+    void (async () => {
+      const result = await apiGet<{ invitations: InvitationItem[] }>(
+        "/api/invitation/list",
+        { communityId, take: 100 },
+      )
+      if (result.ok) setInvitations(result.value.invitations)
+      setInvitationsLoaded(true)
+    })()
+  }, [data?.community?.id, data?.isAdmin])
+
   const injectData = React.useCallback((injected: CommunityData) => {
     setData(injected)
     setStatus("ready")
@@ -236,10 +275,14 @@ export function CommunityProvider({ handle, children }: CommunityProviderProps) 
     setHeaderMode,
     leadingOverride,
     setLeadingOverride,
+    invitations,
+    setInvitations,
+    invitationsLoaded,
     injectData,
     refetch,
   }), [
     normalized, status, data, errorMessage,
+    invitations, invitationsLoaded,
     toolbarSlot, headerMode, leadingOverride,
     injectData, refetch,
   ])

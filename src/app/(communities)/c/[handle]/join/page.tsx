@@ -201,8 +201,10 @@ function createStatusBanner(
   }
 }
 
-function canUserJoin(community: CommunityInfo | null, membershipStatus: string | null): boolean {
+function canUserJoin(community: CommunityInfo | null, membershipStatus: string | null, hasInvitation?: boolean): boolean {
   if (!community) return false
+  // Invited users can always join, even closed/private communities
+  if (hasInvitation) return true
   if (!community.isPublicDirectory) return false
   if (!community.isMembershipOpen) return false
   if (!membershipStatus) return true
@@ -266,6 +268,7 @@ function useCommunityData(handle: string) {
   const [questions, setQuestions] = React.useState<JoinQuestion[]>([])
   const [membershipStatus, setMembershipStatus] = React.useState<string | null>(null)
   const [existingApp, setExistingApp] = React.useState<ExistingApplication | null>(null)
+  const [pendingInvitationId, setPendingInvitationId] = React.useState<string | null>(null)
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
 
@@ -313,6 +316,23 @@ function useCommunityData(handle: string) {
         const viewerStatus = communityRes.value.viewerMembership?.status ?? null
         setMembershipStatus(viewerStatus)
 
+        // Check if viewer has a pending invitation to this community
+        if (communityData.id) {
+          const inviteRes = await apiGet<{ notifications: Array<{ id: string; type: string; metadata: Record<string, unknown> | null }> }>(
+            "/api/notification/list",
+            { take: 50 },
+            { signal: controller.signal },
+          )
+          if (!cancelled && inviteRes.ok) {
+            const invite = inviteRes.value.notifications.find(
+              (n) => n.type === "COMMUNITY_INVITE" && (n.metadata as Record<string, unknown>)?.communityId === communityData.id,
+            )
+            if (invite) {
+              setPendingInvitationId((invite.metadata as Record<string, unknown>)?.invitationId as string ?? null)
+            }
+          }
+        }
+
         // If user has an active/past application, fetch it for pre-filling.
         if (viewerStatus === "PENDING" || viewerStatus === "REJECTED" || viewerStatus === "WITHDRAWN") {
           const appRes = await apiGet<ApplicationGetResponse>(
@@ -347,7 +367,7 @@ function useCommunityData(handle: string) {
     }
   }, [handle])
 
-  return { community, questions, membershipStatus, existingApp, loading, error }
+  return { community, questions, membershipStatus, existingApp, pendingInvitationId, loading, error }
 }
 
 // === SUB-COMPONENTS ===
@@ -450,7 +470,7 @@ export default function CommunityJoinPage() {
   const params = useParams<{ handle: string }>()
   const communityHandle = String(params?.handle || "").trim()
 
-  const { community, questions, membershipStatus, existingApp, loading, error } =
+  const { community, questions, membershipStatus, existingApp, pendingInvitationId, loading, error } =
     useCommunityData(communityHandle)
 
   const schema = React.useMemo(() => buildDynamicSchema(questions), [questions])
@@ -463,8 +483,8 @@ export default function CommunityJoinPage() {
   })
 
   const canJoin = React.useMemo(
-    () => canUserJoin(community, membershipStatus),
-    [community, membershipStatus]
+    () => canUserJoin(community, membershipStatus, !!pendingInvitationId),
+    [community, membershipStatus, pendingInvitationId]
   )
 
   const statusBanner = React.useMemo(

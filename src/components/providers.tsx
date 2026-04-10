@@ -10,6 +10,7 @@ import { sounds } from "@/lib/sounds";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { NavigationProvider } from "@/components/navigation/navigation-provider";
 import { AttestationQueueProvider } from "@/components/attestation/queue-provider";
+import { NotificationProvider } from "@/components/notification/notification-provider";
 import { WalletProvider } from "@/components/wallet-provider";
 import { TourProvider } from "@/components/tour/tour-provider";
 import { useGlobalSound } from "@/hooks/use-global-sound";
@@ -224,11 +225,13 @@ export function Providers({ children }: { children: React.ReactNode }) {
             <TooltipProvider delay={300}>
               <NavigationProvider>
                 <AttestationQueueProvider>
-                  <TourProvider>
-                    <Suspense>
-                      <OnboardingGuard>{children}</OnboardingGuard>
-                    </Suspense>
-                  </TourProvider>
+                  <NotificationProvider>
+                    <TourProvider>
+                      <Suspense>
+                        <OnboardingGuard>{children}</OnboardingGuard>
+                      </Suspense>
+                    </TourProvider>
+                  </NotificationProvider>
                 </AttestationQueueProvider>
               </NavigationProvider>
             </TooltipProvider>

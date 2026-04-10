@@ -116,6 +116,11 @@ export function communityBansPath(handle: string): string {
   return `/c/${encodeURIComponent(handle)}/bans`;
 }
 
+/** `/c/:handle/invites` */
+export function communityInvitesPath(handle: string): string {
+  return `/c/${encodeURIComponent(handle)}/invites`;
+}
+
 /** `/c/:handle/settings` */
 export function communitySettingsPath(handle: string): string {
   return `/c/${encodeURIComponent(handle)}/settings`;
