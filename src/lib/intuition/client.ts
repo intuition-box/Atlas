@@ -33,7 +33,7 @@ import {
   createAtomFromString,
   createAtomFromEthereumAccount,
   batchCreateAtomsFromEthereumAccounts,
-  findAtomIds,
+  batchCreateAtomsFromIpfsUris,
   pinThing,
   multiVaultCreateTriples,
   multiVaultGetTripleCost,
@@ -42,7 +42,7 @@ import {
   calculateAtomId,
   calculateTripleId,
   calculateCounterTripleId,
-  redeem,
+  batchRedeem,
   type WriteConfig,
 } from "@0xintuition/sdk";
 
@@ -238,48 +238,31 @@ async function ensureCorrectChain(): Promise<void> {
    LAYER: atoms
 ════════════════════════════════════════════════ */
 
-/**
- * Get or create a string atom (predicates, skills, etc.).
- *
- * 1. Compute termId deterministically via calculateAtomId
- * 2. Check on-chain existence via multiVaultIsTermCreated
- * 3. If missing, create via createAtomFromString (1 wallet signature)
- */
-async function createStringAtom(content: string) {
-  const atomData = toHex(content);
-  const termId = calculateAtomId(atomData);
-
-  const exists = await multiVaultIsTermCreated(readConfig, { args: [termId] });
-  if (exists) {
-    return { state: { termId } };
-  }
-
-  const walletClient = await requireWalletClient();
-  return createAtomFromString(buildWriteConfig(walletClient), content);
-}
-
 /** Cache predicate termIds to avoid redundant lookups. */
 const predicateCache = new Map<AttestationType, `0x${string}`>();
 
 /**
- * Get or create a predicate atom for an attestation type (rich atom).
+ * Resolve a predicate atom's IPFS URI and termId (no on-chain write).
  *
- * Predicates are minted as schema.org Thing atoms with name + description
- * (no image — they're administrative). Falls back to legacy string atom
- * if IPFS pinning fails.
+ * Returns { termId, uri } if the predicate can be resolved via hardcoded ID
+ * or IPFS pin. The caller is responsible for checking on-chain existence and
+ * batch-creating any missing atoms.
  */
-async function getOrCreatePredicate(type: AttestationType): Promise<`0x${string}`> {
+async function resolvePredicateUri(
+  type: AttestationType,
+): Promise<{ termId: `0x${string}`; uri: string | null; needsCreation: boolean }> {
+  // Check cache first
   const cached = predicateCache.get(type);
-  if (cached) return cached;
+  if (cached) return { termId: cached, uri: null, needsCreation: false };
 
   // Check for hardcoded ecosystem atom term_id (0 transactions)
   const hardcoded = getHardcodedTermId(type);
   if (hardcoded) {
     predicateCache.set(type, hardcoded);
-    return hardcoded;
+    return { termId: hardcoded, uri: null, needsCreation: false };
   }
 
-  // Try rich atom first
+  // Pin to IPFS (no on-chain write yet)
   const thingData = getPredicateThingData(type);
   const uri = await pinThing(thingData);
 
@@ -287,64 +270,28 @@ async function getOrCreatePredicate(type: AttestationType): Promise<`0x${string}
     const atomData = toHex(uri);
     const termId = calculateAtomId(atomData);
 
+    // Check on-chain existence
     const exists = await multiVaultIsTermCreated(readConfig, { args: [termId] });
     if (exists) {
       predicateCache.set(type, termId);
-      return termId;
+      return { termId, uri, needsCreation: false };
     }
 
-    // Create on-chain using IPFS URI as atom data
-    const walletClient = await requireWalletClient();
-    const result = await createAtomFromString(buildWriteConfig(walletClient), uri);
-    predicateCache.set(type, result.state.termId);
-    return result.state.termId;
+    return { termId, uri, needsCreation: true };
   }
 
   // Fallback: legacy string atom if pinning fails
-  const result = await createStringAtom(getPredicateForType(type));
-  predicateCache.set(type, result.state.termId);
-  return result.state.termId;
-}
+  const fallbackUri = getPredicateForType(type);
+  const atomData = toHex(fallbackUri);
+  const termId = calculateAtomId(atomData);
 
-/**
- * Resolve existing atom termIds from the Intuition indexer.
- *
- * Queries multiple format variants (raw, lowercase, hex-encoded)
- * to handle indexer format differences. Returns a lowercase-keyed map.
- */
-async function resolveExistingAtoms(
-  dataItems: string[],
-): Promise<Map<string, `0x${string}`>> {
-  const result = new Map<string, `0x${string}`>();
-  if (dataItems.length === 0) return result;
-
-  const variants = new Set<string>();
-  for (const item of dataItems) {
-    variants.add(item);
-    variants.add(item.toLowerCase());
-    variants.add(toHex(item));
+  const exists = await multiVaultIsTermCreated(readConfig, { args: [termId] });
+  if (exists) {
+    predicateCache.set(type, termId);
+    return { termId, uri: fallbackUri, needsCreation: false };
   }
 
-  try {
-    const atoms = await findAtomIds(Array.from(variants));
-    for (const atom of atoms) {
-      result.set(atom.data.toLowerCase(), atom.term_id as `0x${string}`);
-
-      // Decode hex back to string for matching
-      if (atom.data.startsWith("0x")) {
-        try {
-          const decoded = Buffer.from(atom.data.slice(2), "hex").toString("utf8");
-          result.set(decoded.toLowerCase(), atom.term_id as `0x${string}`);
-        } catch {
-          // Not valid utf8 — skip
-        }
-      }
-    }
-  } catch {
-    // Indexer unavailable — will fall back to on-chain creation
-  }
-
-  return result;
+  return { termId, uri: fallbackUri, needsCreation: true };
 }
 
 /* ════════════════════════════════════════════════
@@ -355,20 +302,16 @@ async function resolveExistingAtoms(
 const attributeAtomCache = new Map<string, `0x${string}`>();
 
 /**
- * Get or create a rich Thing atom on Intuition.
+ * Resolve a rich Thing atom's IPFS URI and termId (no on-chain write).
  *
- * Flow: pin JSON-LD to IPFS → check on-chain existence → create if missing.
- * IPFS pinning is idempotent (same content = same CID), so re-pinning is safe.
- *
- * @param attributeId - Attribute key from ATTRIBUTES (used for caching)
- * @param config - Write config (only needed if atom must be created)
+ * Flow: pin JSON-LD to IPFS → check on-chain existence.
+ * The caller is responsible for batch-creating any missing atoms.
  */
-async function getOrCreateThingAtom(
+async function resolveThingAtomUri(
   attributeId: string,
-  config: WriteConfig,
-): Promise<`0x${string}`> {
+): Promise<{ termId: `0x${string}`; uri: string; needsCreation: boolean }> {
   const cached = attributeAtomCache.get(attributeId);
-  if (cached) return cached;
+  if (cached) return { termId: cached, uri: "", needsCreation: false };
 
   const thingData = getAttributeThingData(attributeId as AttributeId);
 
@@ -386,13 +329,10 @@ async function getOrCreateThingAtom(
   const exists = await multiVaultIsTermCreated(readConfig, { args: [termId] });
   if (exists) {
     attributeAtomCache.set(attributeId, termId);
-    return termId;
+    return { termId, uri, needsCreation: false };
   }
 
-  // Create the atom on-chain using the IPFS URI as data
-  const result = await createAtomFromString(config, uri);
-  attributeAtomCache.set(attributeId, result.state.termId);
-  return result.state.termId;
+  return { termId, uri, needsCreation: true };
 }
 
 /* ════════════════════════════════════════════════
@@ -402,13 +342,15 @@ async function getOrCreateThingAtom(
 /**
  * Batch-create attestation triples on Intuition.
  *
- * Minimizes wallet signatures:
+ * Minimizes wallet signatures by batching all operations:
  * 1. Query indexer for existing atoms (0 signatures)
- * 2. Batch-create missing address atoms (0–1 signature)
- * 3. Create missing predicate atoms (0–1 signature each, rare)
- * 4. Batch-create all triples (1 signature)
+ * 2. Pin all predicates + attributes to IPFS (0 signatures)
+ * 3. Batch-create ALL missing atoms — addresses + predicates + attributes (0–1 signature)
+ * 4. Pre-check which triples exist, batch-create only new ones (0–1 signature)
+ * 5. Batch-deposit into existing triples (0–1 signature)
+ * 6. Batch-redeem + batch-deposit for "against" items (0–2 signatures)
  *
- * Best case: 1 wallet signature. Typical: 1–2.
+ * Best case: 1 wallet signature. Typical: 1–2. Worst case: 4.
  */
 export async function batchCreateAttestations(
   fromAddress: Address,
@@ -431,21 +373,60 @@ export async function batchCreateAttestations(
     ).map((a) => getAddress(a));
 
     const uniqueTypes = Array.from(new Set(items.map((i) => i.type)));
+    const uniqueAttributeIds = Array.from(
+      new Set(items.filter((i) => i.attributeId).map((i) => i.attributeId!)),
+    );
 
-    // ── Step 2: Query indexer for existing address atoms (0 signatures) ──
-    // Note: predicates are resolved separately via getOrCreatePredicate (Step 4)
-    // to ensure they're always rich Thing atoms, not legacy string atoms.
-    const known = await resolveExistingAtoms(uniqueAddresses);
+    // ── Step 2: Resolve address atoms via on-chain check (0 signatures) ──
+    // Don't trust the indexer — verify on-chain existence directly.
+    const known = new Map<string, `0x${string}`>();
 
-    // ── Step 3: Create missing address atoms (0–1 signature) ──
+    // Compute termIds deterministically and check on-chain existence in parallel
+    const addressChecks = await Promise.all(
+      uniqueAddresses.map(async (addr) => {
+        const termId = calculateAtomId(toHex(addr));
+        const exists = await multiVaultIsTermCreated(readConfig, { args: [termId] });
+        return { addr, termId, exists };
+      }),
+    );
+
+    for (const { addr, termId, exists } of addressChecks) {
+      if (exists) {
+        known.set(addr.toLowerCase(), termId);
+      }
+    }
+
+    // ── Step 3: Resolve all predicate + attribute URIs via IPFS (0 signatures) ──
+    // Pin everything to IPFS and check on-chain existence, but don't create yet.
+    const predicateTermIds = new Map<AttestationType, `0x${string}`>();
+    const attributeTermIds = new Map<string, `0x${string}`>();
+    const atomUrisToCreate: string[] = [];
+
+    for (const type of uniqueTypes) {
+      const resolved = await resolvePredicateUri(type);
+      predicateTermIds.set(type, resolved.termId);
+      if (resolved.needsCreation && resolved.uri) {
+        atomUrisToCreate.push(resolved.uri);
+      }
+    }
+
+    for (const attrId of uniqueAttributeIds) {
+      const resolved = await resolveThingAtomUri(attrId);
+      attributeTermIds.set(attrId, resolved.termId);
+      if (resolved.needsCreation) {
+        atomUrisToCreate.push(resolved.uri);
+      }
+    }
+
+    // ── Step 4: Batch-create ALL missing atoms (0–1 signature per type) ──
     const missingAddresses = uniqueAddresses.filter(
       (addr) => !known.has(addr.toLowerCase()),
     );
 
     let atomsTxHash: string | null = null;
 
+    // Create missing address atoms (raw address data, no IPFS)
     if (missingAddresses.length > 0) {
-
       try {
         const atomsResult = await batchCreateAtomsFromEthereumAccounts(config, missingAddresses);
         atomsTxHash = atomsResult.transactionHash;
@@ -454,7 +435,6 @@ export async function batchCreateAttestations(
           known.set(addr.toLowerCase(), atomsResult.state[i].termId);
         });
       } catch (error) {
-        // Batch failed — fall back to one-by-one (handles AtomExists gracefully)
         if (isAtomExistsError(error)) {
           for (const addr of missingAddresses) {
             try {
@@ -462,7 +442,6 @@ export async function batchCreateAttestations(
               known.set(addr.toLowerCase(), result.state.termId);
             } catch (innerError) {
               if (isAtomExistsError(innerError)) {
-                // Atom already exists on-chain — compute its termId deterministically
                 const termId = calculateAtomId(toHex(getAddress(addr)));
                 known.set(addr.toLowerCase(), termId);
               } else {
@@ -476,60 +455,47 @@ export async function batchCreateAttestations(
       }
     }
 
-    // ── Step 4: Resolve predicate atoms (always use rich Thing atoms) ──
-    // Always go through getOrCreatePredicate to ensure predicates are Thing atoms
-    // with IPFS-pinned metadata (name, description, url). This avoids reusing
-    // legacy string atoms from the indexer that the portal can't render.
-    const predicateTermIds = new Map<AttestationType, `0x${string}`>();
-
-    for (const type of uniqueTypes) {
-      const termId = await getOrCreatePredicate(type);
-      predicateTermIds.set(type, termId);
-    }
-
-    // ── Step 4b: Resolve attribute atoms for endorsements (rich atoms) ──
-    const attributeTermIds = new Map<string, `0x${string}`>();
-    const uniqueAttributeIds = Array.from(
-      new Set(items.filter((i) => i.attributeId).map((i) => i.attributeId!)),
-    );
-
-    if (uniqueAttributeIds.length > 0) {
-      for (const attrId of uniqueAttributeIds) {
-        try {
-          const termId = await getOrCreateThingAtom(attrId, config);
-          attributeTermIds.set(attrId, termId);
-        } catch (error) {
-          if (isAtomExistsError(error)) {
-            // Atom exists but we couldn't resolve termId earlier — pin to get URI and compute
-            const thingData = getAttributeThingData(attrId as AttributeId);
-            const uri = await pinThing(thingData);
-            if (uri) {
-              const termId = calculateAtomId(toHex(uri));
-              attributeTermIds.set(attrId, termId);
-              attributeAtomCache.set(attrId, termId);
+    // Batch-create all missing URI atoms (predicates + attributes) in ONE tx
+    if (atomUrisToCreate.length > 0) {
+      try {
+        const result = await batchCreateAtomsFromIpfsUris(config, atomUrisToCreate);
+        if (!atomsTxHash) atomsTxHash = result.transactionHash;
+      } catch (error) {
+        if (isAtomExistsError(error)) {
+          // Some atoms already exist — fall back to one-by-one but skip existing
+          for (const uri of atomUrisToCreate) {
+            const termId = calculateAtomId(toHex(uri));
+            const exists = await multiVaultIsTermCreated(readConfig, { args: [termId] });
+            if (!exists) {
+              const result = await createAtomFromString(config, uri);
+              if (!atomsTxHash) atomsTxHash = result.transactionHash;
             }
-          } else {
-            throw error;
           }
+        } else {
+          throw error;
         }
+      }
+
+      // Update caches for successfully created atoms
+      for (const type of uniqueTypes) {
+        const termId = predicateTermIds.get(type)!;
+        predicateCache.set(type, termId);
+      }
+      for (const attrId of uniqueAttributeIds) {
+        const termId = attributeTermIds.get(attrId)!;
+        attributeAtomCache.set(attrId, termId);
       }
     }
 
-    // ── Step 5: Build parallel arrays + pre-flight balance check ──
+    // ── Step 5: Build triple arrays + pre-check existence ──
     const fromTermId = known.get(fromAddress.toLowerCase())!;
     const minTripleCost = await getTripleCost();
     const curveId = await getDefaultCurveId();
 
-    // ── Step 5: Build parallel arrays + pre-flight balance check ──
-    // ALL items go through createTriples to ensure triples exist on-chain.
-    // For "against" items, we use the minimum deposit (unavoidable — createTriples
-    // auto-deposits into the "for" vault), then immediately redeem it and deposit
-    // into the counter vault in Step 6c.
     const subjectIds: `0x${string}`[] = [];
-    const predicateIds: `0x${string}`[] = [];
+    const predicateIdsArr: `0x${string}`[] = [];
     const objectIds: `0x${string}`[] = [];
     const deposits: bigint[] = [];
-
     const againstIndices: number[] = [];
 
     for (let idx = 0; idx < items.length; idx++) {
@@ -542,24 +508,21 @@ export async function batchCreateAttestations(
 
         if (!attrTermId) {
           subjectIds.push(fromTermId);
-          predicateIds.push(predicateTermIds.get(item.type)!);
+          predicateIdsArr.push(predicateTermIds.get(item.type)!);
           objectIds.push(toTermId);
         } else {
           subjectIds.push(toTermId);
-          predicateIds.push(predicateTermIds.get(item.type)!);
+          predicateIdsArr.push(predicateTermIds.get(item.type)!);
           objectIds.push(attrTermId);
         }
       } else {
-        // FOLLOW uses the "I" atom as subject: [I, follow, toUser]
-        // All other network types use the sender: [fromUser, predicate, toUser]
         const subject = item.type === "FOLLOW" ? I_ATOM_TERM_ID : fromTermId;
         subjectIds.push(subject);
-        predicateIds.push(predicateTermIds.get(item.type)!);
+        predicateIdsArr.push(predicateTermIds.get(item.type)!);
         objectIds.push(known.get(item.toAddress.toLowerCase())!);
       }
 
       if (item.stance === "against") {
-        // createTriples uses minimum deposit (will be redeemed in Step 6c)
         deposits.push(minTripleCost);
         againstIndices.push(idx);
       } else {
@@ -570,9 +533,32 @@ export async function batchCreateAttestations(
       }
     }
 
-    // Total = createTriples cost + oppose counter deposits (against items pay twice:
-    // once for triple creation min deposit, once for their actual oppose stake)
-    const createTriplesTotal = deposits.reduce((sum, d) => sum + d, BigInt(0));
+    // Pre-check which triples already exist (0 signatures — read-only)
+    const existingIndices = new Set<number>();
+    const existingTermIds = new Map<number, string>();
+
+    const existenceChecks = await Promise.all(
+      items.map((_, i) => {
+        const termId = calculateTripleId(subjectIds[i]!, predicateIdsArr[i]!, objectIds[i]!);
+        return multiVaultIsTermCreated(readConfig, { args: [termId] })
+          .then((exists) => ({ index: i, termId, exists }))
+          .catch(() => ({ index: i, termId, exists: false }));
+      }),
+    );
+
+    for (const check of existenceChecks) {
+      if (check.exists) {
+        existingIndices.add(check.index);
+        existingTermIds.set(check.index, check.termId);
+      }
+    }
+
+    // Balance check
+    const newIndices = items.map((_, i) => i).filter((i) => !existingIndices.has(i));
+    const createTriplesTotal = newIndices.reduce((sum, i) => sum + deposits[i]!, BigInt(0));
+    const existingDepositTotal = [...existingIndices]
+      .filter((i) => items[i]?.stance !== "against")
+      .reduce((sum, i) => sum + deposits[i]!, BigInt(0));
     let againstDepositTotal = BigInt(0);
     for (const i of againstIndices) {
       const item = items[i]!;
@@ -581,7 +567,7 @@ export async function batchCreateAttestations(
         : minTripleCost;
       againstDepositTotal += deposit;
     }
-    const totalValue = createTriplesTotal + againstDepositTotal;
+    const totalValue = createTriplesTotal + existingDepositTotal + againstDepositTotal;
 
     const balance = await publicClient.getBalance({ address: fromAddress });
 
@@ -592,79 +578,63 @@ export async function batchCreateAttestations(
       );
     }
 
-    // ── Step 6: Batch-create ALL triples (1 signature) ──
-    // Both "for" and "against" items go here. "Against" items use the minimum
-    // deposit which gets redeemed in Step 6c before depositing into the counter vault.
-
+    // ── Step 6: Batch-create only NEW triples (0–1 signature) ──
     let triplesTxHash: `0x${string}` | null = null;
-    const existingIndices = new Set<number>();
 
-    try {
+    if (newIndices.length > 0) {
+      const newSubjects = newIndices.map((i) => subjectIds[i]!);
+      const newPredicates = newIndices.map((i) => predicateIdsArr[i]!);
+      const newObjects = newIndices.map((i) => objectIds[i]!);
+      const newDeposits = newIndices.map((i) => deposits[i]!);
+      const newTotal = newDeposits.reduce((sum, d) => sum + d, BigInt(0));
+
       triplesTxHash = await multiVaultCreateTriples(config, {
-        args: [subjectIds, predicateIds, objectIds, deposits],
-        value: createTriplesTotal,
+        args: [newSubjects, newPredicates, newObjects, newDeposits],
+        value: newTotal,
       });
-      } catch (error) {
-        if (!isTripleExistsError(error)) throw error;
+    }
 
-        // Batch failed because some triples already exist on-chain.
-        // Fall back to one-by-one — viem simulates before prompting,
-        // so existing triples fail silently (no wallet popup).
-
-        for (let i = 0; i < subjectIds.length; i++) {
-          try {
-            const hash = await multiVaultCreateTriples(config, {
-              args: [[subjectIds[i]!], [predicateIds[i]!], [objectIds[i]!], [deposits[i]!]],
-              value: deposits[i]!,
-            });
-            triplesTxHash = hash;
-          } catch (innerError) {
-            if (isTripleExistsError(innerError)) {
-              existingIndices.add(i);
-            } else {
-              throw innerError;
-            }
-          }
-        }
-      }
-
-    // ── Step 6b: Deposit into existing "for" triples (1 signature) ──
-    // Only "for" items that already existed need an extra deposit.
-    // "Against" items that already existed are handled in Step 6c.
-    const existingTermIds = new Map<number, string>();
-
+    // ── Step 6b: Batch-deposit into existing "for" triples (0–1 signature) ──
     if (existingIndices.size > 0) {
-
       const forDepositTermIds: `0x${string}`[] = [];
       const forDepositCurveIds: bigint[] = [];
       const forDepositAssets: bigint[] = [];
       const forDepositMinShares: bigint[] = [];
 
+      // Check for counter positions that need redeeming first (batch)
+      const counterRedeemTermIds: `0x${string}`[] = [];
+      const counterRedeemCurveIds: bigint[] = [];
+      const counterRedeemShares: bigint[] = [];
+      const counterRedeemMinAssets: bigint[] = [];
+
       for (const i of existingIndices) {
-        try {
-          const termId = calculateTripleId(subjectIds[i]!, predicateIds[i]!, objectIds[i]!);
-          existingTermIds.set(i, termId);
+        if (items[i]?.stance === "against") continue;
 
-          // Only deposit for "for" items — "against" handled in Step 6c
-          if (items[i]?.stance !== "against") {
-            // Check if user has a counter (against) position from a previous session.
-            // The protocol forbids holding positions on both sides (HasCounterStake).
-            const counterTermId = calculateCounterTripleId(termId);
-            const counterShares = await multiVaultMaxRedeem(readConfig, {
-              args: [fromAddress, counterTermId as `0x${string}`, curveId],
-            });
-            if (counterShares > BigInt(0)) {
-              await redeem(config, [fromAddress, counterTermId as `0x${string}`, curveId, counterShares, BigInt(0)]);
-            }
+        const termId = existingTermIds.get(i)! as `0x${string}`;
+        const counterTermId = calculateCounterTripleId(termId);
+        const counterShares = await multiVaultMaxRedeem(readConfig, {
+          args: [fromAddress, counterTermId as `0x${string}`, curveId],
+        });
 
-            forDepositTermIds.push(termId as `0x${string}`);
-            forDepositCurveIds.push(curveId);
-            forDepositAssets.push(deposits[i]!);
-            forDepositMinShares.push(BigInt(0));
-          }
-        } catch (err) {
-          // Non-fatal: skip this triple
+        if (counterShares > BigInt(0)) {
+          counterRedeemTermIds.push(counterTermId as `0x${string}`);
+          counterRedeemCurveIds.push(curveId);
+          counterRedeemShares.push(counterShares);
+          counterRedeemMinAssets.push(BigInt(0));
         }
+
+        forDepositTermIds.push(termId);
+        forDepositCurveIds.push(curveId);
+        forDepositAssets.push(deposits[i]!);
+        forDepositMinShares.push(BigInt(0));
+      }
+
+      // Batch-redeem counter positions if any (1 signature instead of N)
+      if (counterRedeemTermIds.length > 0) {
+        await batchRedeem(config, [
+          fromAddress, counterRedeemTermIds, counterRedeemCurveIds,
+          counterRedeemShares, counterRedeemMinAssets,
+        ]);
       }
 
       if (forDepositTermIds.length > 0) {
@@ -677,40 +647,41 @@ export async function batchCreateAttestations(
       }
     }
 
-    // ── Step 6c: Oppose — redeem "for" position + deposit into counter vault ──
-    // For "against" items, createTriples deposited the minimum into the "for" vault.
-    // The protocol forbids holding positions on both sides (HasCounterStake),
-    // so we must redeem the "for" position first, then deposit into the counter vault.
-    //
-    // For "against" items on existing triples (no "for" position from createTriples),
-    // we skip the redeem and go straight to the counter deposit.
+    // ── Step 6c: Oppose — batch-redeem "for" + batch-deposit counter vault ──
     const counterTermIds = new Map<number, string>();
 
     if (againstIndices.length > 0) {
+      // Collect all "for" positions that need redeeming
+      const redeemTermIds: `0x${string}`[] = [];
+      const redeemCurveIds: bigint[] = [];
+      const redeemShares: bigint[] = [];
+      const redeemMinAssets: bigint[] = [];
 
       for (const i of againstIndices) {
-        try {
-          // Compute termId and counterTermId locally (no RPC calls)
-          const termId = calculateTripleId(subjectIds[i]!, predicateIds[i]!, objectIds[i]!);
-          const counterId = calculateCounterTripleId(termId);
-          counterTermIds.set(i, counterId);
+        const termId = calculateTripleId(subjectIds[i]!, predicateIdsArr[i]!, objectIds[i]!);
+        const counterId = calculateCounterTripleId(termId);
+        counterTermIds.set(i, counterId);
 
-          // The protocol forbids holding positions on both sides (HasCounterStake).
-          // Check if the user has any "for" position and redeem it first.
-          // This happens when: (a) createTriples just deposited the min into "for",
-          // or (b) the user previously supported this claim and now opposes it.
-          const shares = await multiVaultMaxRedeem(readConfig, {
-            args: [fromAddress, termId, curveId],
-          });
-          if (shares > BigInt(0)) {
-            await redeem(config, [fromAddress, termId, curveId, shares, BigInt(0)]);
-          }
-        } catch (err) {
-          // Non-fatal: skip this oppose item
+        const shares = await multiVaultMaxRedeem(readConfig, {
+          args: [fromAddress, termId, curveId],
+        });
+        if (shares > BigInt(0)) {
+          redeemTermIds.push(termId);
+          redeemCurveIds.push(curveId);
+          redeemShares.push(shares);
+          redeemMinAssets.push(BigInt(0));
         }
       }
 
-      // Build oppose deposit batch
+      // Batch-redeem all "for" positions (1 signature instead of N)
+      if (redeemTermIds.length > 0) {
+        await batchRedeem(config, [
+          fromAddress, redeemTermIds, redeemCurveIds,
+          redeemShares, redeemMinAssets,
+        ]);
+      }
+
+      // Batch-deposit into counter vaults (1 signature)
       const opposeDepositTermIds: `0x${string}`[] = [];
       const opposeDepositCurveIds: bigint[] = [];
       const opposeDepositAssets: bigint[] = [];
@@ -738,27 +709,16 @@ export async function batchCreateAttestations(
     }
 
     // ── Step 7: Compute termId for every item deterministically ──
-    // Don't rely on event parsing — calculateTripleId is a pure function
-    // that gives us the exact termId from subject/predicate/object.
-    const resultItems = await Promise.all(
-      items.map(async (item, i) => {
-        // "against" items → use counter_term_id
-        if (item.stance === "against" && counterTermIds.has(i)) {
-          const counterId = counterTermIds.get(i)!;
-          return { attestationId: item.attestationId, onchainId: String(counterId) };
-        }
-
-        // Use pre-resolved termId from Step 6b (existing triples)
-        if (existingTermIds.has(i)) {
-          const termId = existingTermIds.get(i)!;
-          return { attestationId: item.attestationId, onchainId: String(termId) };
-        }
-
-        // Compute termId locally (no RPC)
-        const termId = calculateTripleId(subjectIds[i]!, predicateIds[i]!, objectIds[i]!);
-        return { attestationId: item.attestationId, onchainId: String(termId) };
-      }),
-    );
+    const resultItems = items.map((item, i) => {
+      if (item.stance === "against" && counterTermIds.has(i)) {
+        return { attestationId: item.attestationId, onchainId: String(counterTermIds.get(i)!) };
+      }
+      if (existingTermIds.has(i)) {
+        return { attestationId: item.attestationId, onchainId: String(existingTermIds.get(i)!) };
+      }
+      const termId = calculateTripleId(subjectIds[i]!, predicateIdsArr[i]!, objectIds[i]!);
+      return { attestationId: item.attestationId, onchainId: String(termId) };
+    });
 
     if (!triplesTxHash) {
       throw new IntuitionError(
@@ -831,23 +791,16 @@ export async function withdrawAttestations(
     }
 
 
-    // ── Step 2: Redeem each position ──
-    // Redeem one at a time — each gets a separate tx for clarity.
-    // The SDK's redeem() handles the wallet signature prompt.
-    let lastTxHash = "";
+    // ── Step 2: Batch-redeem all positions (1 signature) ──
+    const result = await batchRedeem(writeConfig, [
+      fromAddress,
+      redeemable.map((item) => item.onchainId as `0x${string}`),
+      redeemable.map(() => wCurveId),
+      redeemable.map((item) => item.shares),
+      redeemable.map(() => BigInt(0)),
+    ]);
 
-    for (const item of redeemable) {
-
-      const result = await redeem(writeConfig, [
-        fromAddress,                        // receiver
-        item.onchainId as `0x${string}`,    // termId
-        wCurveId,                           // curveId (from contract config)
-        item.shares,                        // shares (full balance)
-        BigInt(0),                          // minAssets (no slippage protection)
-      ]);
-
-      lastTxHash = result.transactionHash;
-    }
+    const lastTxHash = result.transactionHash;
 
 
     return {
