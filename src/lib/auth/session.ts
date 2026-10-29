@@ -71,6 +71,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     Discord({
       clientId: requiredEnv("AUTH_DISCORD_ID"),
       clientSecret: requiredEnv("AUTH_DISCORD_SECRET"),
+      // Discord now appends `iss` to the callback (RFC 9207); without this,
+      // Auth.js validates it against its "https://authjs.dev" placeholder and fails.
+      issuer: "https://discord.com",
     }),
     ...(process.env.AUTH_X_ID
       ? [
