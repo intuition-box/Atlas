@@ -26,7 +26,8 @@
     "db:reset": "prisma migrate reset"
   },
   "dependencies": {
-    "@0xintuition/sdk": "^2.0.2",
+    "@0xintuition/protocol": "^2.0.3",
+    "@0xintuition/sdk": "^3.0.1",
     "@auth/prisma-adapter": "^2.11.1",
     "@aws-sdk/client-s3": "^3.958.0",
     "@aws-sdk/s3-request-presigner": "^3.958.0",

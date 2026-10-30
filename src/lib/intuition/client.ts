@@ -34,7 +34,6 @@ import {
   createAtomFromEthereumAccount,
   batchCreateAtomsFromEthereumAccounts,
   batchCreateAtomsFromIpfsUris,
-  pinThing,
   multiVaultCreateTriples,
   multiVaultGetTripleCost,
   multiVaultGetGeneralConfig,
@@ -60,7 +59,10 @@ import {
   getAttributeThingData,
   getHardcodedTermId,
   isEndorsementType,
+  type ThingData,
 } from "@/lib/attestations/definitions";
+
+import { apiPost } from "@/lib/api/client";
 
 import {
   INTUITION_CHAIN,
@@ -221,6 +223,15 @@ async function ensureCorrectChain(): Promise<void> {
 /* ════════════════════════════════════════════════
    LAYER: atoms
 ════════════════════════════════════════════════ */
+
+/**
+ * Pin Thing metadata to IPFS via our server proxy (the Intuition pinning
+ * endpoint is API-key gated). Returns the ipfs:// URI, or null on failure.
+ */
+async function pinThing(thing: ThingData): Promise<string | null> {
+  const result = await apiPost<{ uri: string }>("/api/ipfs/pin", thing);
+  return result.ok ? result.value.uri : null;
+}
 
 /** Cache predicate termIds to avoid redundant lookups. */
 const predicateCache = new Map<AttestationType, `0x${string}`>();
